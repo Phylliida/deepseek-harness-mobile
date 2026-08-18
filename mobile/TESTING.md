@@ -51,6 +51,14 @@ Three bugs this caught that you may hit again:
 
 Extracted tarballs use GNU long-name (`L`), long-link (`K`), hard-link (`1`) and symlink (`2`) members — any extractor (including the Java one in `NodeRuntime.untar`) must handle all four; the `runtime.tgz` from `scripts/package-runtime.mjs` contains thousands of each.
 
+## On-device probing (first device contact, 2026-08-18)
+
+With the phone on USB: `cd dev && nix-shell --run "adb ..."` (dev shell has adb; device was a Pixel-class arm64).
+
+- Crash loop reproduced via monkey + `adb logcat -d -b main -b crash`: `NodeRunnerService` died with `SecurityException: ... has android.permission.WAKE_LOCK` — the manifest was missing `WAKE_LOCK`; fixed in the same commit as this note. Lesson: static review can verify API *signatures* but not permission coverage; the manifest's permission list must be cross-checked against every API the Java calls (`PowerManager.newWakeLock` → `WAKE_LOCK`).
+- Termux node pushed to `/data/local/tmp` (adb push can't create symlinks — push a dereferenced copy, `cp -rL`) and run with `LD_LIBRARY_PATH=<dir>/lib`: **v26.4.0 executes, `process.platform === "android"`, node:sqlite round-trips, worker_threads present**.
+- **Symlinks on shared storage fail with EACCES** even from the shell user; raw writes work. The launcher probe is therefore expected to resolve `DSH_HOME` to app-private storage on stock devices, with the picked folder as the workspace — validated the design against reality.
+
 ## What is NOT covered locally
 
 - Gradle/APK compilation and Java compilation: CI only.
