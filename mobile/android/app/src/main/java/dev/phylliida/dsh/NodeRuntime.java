@@ -119,12 +119,15 @@ public final class NodeRuntime {
             //noinspection ResultOfMethodCallIgnored
             homeDir.mkdirs(); tmpDir.mkdirs(); dshHomeDir.mkdirs(); workDir.mkdirs();
 
+            File binJs = new File(deploy, "node_modules/@deepseek-ai/dsh/lib/bin.js");
+            killStaleHosts(binJs.getAbsolutePath());
+
             List<String> cmd = new ArrayList<>();
             cmd.add(node.getAbsolutePath());
             // Required by the vendored cordis loader: profile-plugin names resolve
             // through Node's internal module loader against the profile baseUrl.
             cmd.add("--expose-internals");
-            cmd.add(new File(deploy, "node_modules/@deepseek-ai/dsh/lib/bin.js").getAbsolutePath());
+            cmd.add(binJs.getAbsolutePath());
             // --patch is a launcher flag and must precede the first unknown
             // token; everything after --port passes through to the web app.
             cmd.add("--profile");
@@ -175,6 +178,39 @@ public final class NodeRuntime {
     }
 
     // ---- extraction ----
+
+    /**
+     * SIGKILL node hosts orphaned by earlier app instances before spawning a
+     * fresh one. An orphaned host keeps its announced loopback port LISTENing
+     * but wedged — it accepts connections and never answers, so any UI surface
+     * still holding its URL stalls every RPC past the client's abort deadline
+     * ("signal timed out"). Matches the deployed bin.js path in
+     * /proc/<pid>/cmdline; only same-uid processes are visible and killable, so
+     * a zombie from a previous install (different uid) clears only on reboot.
+     */
+    private static void killStaleHosts(String binJsPath) {
+        File[] procs = new File("/proc").listFiles();
+        if (procs == null) return;
+        int self = android.os.Process.myPid();
+        for (File procEntry : procs) {
+            String name = procEntry.getName();
+            int pid = -1;
+            try { pid = Integer.parseInt(name); }
+            catch (NumberFormatException notAPidDir) { continue; }
+            if (pid == self) continue;
+            String cmdline;
+            try (FileInputStream in = new FileInputStream(new File(procEntry, "cmdline"))) {
+                byte[] buf = new byte[4096];
+                int n = in.read(buf);
+                cmdline = n > 0 ? new String(buf, 0, n, StandardCharsets.UTF_8) : "";
+            } catch (IOException unreadable) {
+                continue; // another uid's process: neither readable nor killable
+            }
+            if (!cmdline.contains(binJsPath)) continue;
+            android.util.Log.w("dsh-node", "killing stale node host pid " + pid);
+            android.os.Process.sendSignal(pid, android.system.OsConstants.SIGKILL);
+        }
+    }
 
     private void ensureExtracted(Context app, File runtimeDir) throws IOException {
         String version = BuildConfig.VERSION_NAME;
