@@ -59,6 +59,11 @@ With the phone on USB: `cd dev && nix-shell --run "adb ..."` (dev shell has adb;
 - Termux node pushed to `/data/local/tmp` (adb push can't create symlinks — push a dereferenced copy, `cp -rL`) and run with `LD_LIBRARY_PATH=<dir>/lib`: **v26.4.0 executes, `process.platform === "android"`, node:sqlite round-trips, worker_threads present**.
 - **Symlinks on shared storage fail with EACCES** even from the shell user; raw writes work. The launcher probe is therefore expected to resolve `DSH_HOME` to app-private storage on stock devices, with the picked folder as the workspace — validated the design against reality.
 
+- Second device contact (same day): runtime extraction died with `link failed for …/libicuio.so.78` mid-archive. Root causes, both reproduced as the app user via `run-as dev.phylliida.dsh`:
+  - **Hard links are EPERM in app-private storage** (SELinux; symlinks are fine). The runtime tarball carries thousands of `hrw` ('1') members because pnpm links store files by hard link, so extraction was guaranteed to abort at the first one. Fix: `tar --hard-dereference` when packing `runtime.tgz`.
+  - **Interrupted extraction + retry = EEXIST on symlink/link entries.** `ensureExtracted` re-runs after any abort, and the old state wasn't guaranteed gone. Fix: delete-before-create on '1'/'2' entries in `NodeRuntime.untar`.
+  - Diagnostic repair: the failure handler only surfaced `IOException`'s own message, hiding the `ErrnoException` errno; it now chains causes into both the launcher log and `adb logcat` (tag `dsh-node`). Read device state with `run-as dev.phylliida.dsh ls files/runtime/…`; the APK on this machine (`dev/DSH.apk`) contains the exact `assets/runtime.tgz` running on-device — inspect entries with `tar -tvf <(zcat assets/runtime.tgz)`.
+
 ## What is NOT covered locally
 
 - Gradle/APK compilation and Java compilation: CI only.

@@ -162,8 +162,15 @@ public final class NodeRuntime {
             if (port == null) set(Stage.FAILED, "node exited with code " + code + " before reporting a port");
             else set(Stage.FAILED, "node exited with code " + code);
         } catch (Exception e) {
-            appendLog("node start failed: " + e);
-            set(Stage.FAILED, String.valueOf(e));
+            // Chain causes into the message: the ErrnoException errno is the
+            // only signal that pinpoints extraction/link failures on device.
+            StringBuilder msg = new StringBuilder("node start failed: ").append(e);
+            for (Throwable c = e.getCause(); c != null; c = c.getCause()) {
+                msg.append(" ← ").append(c);
+            }
+            android.util.Log.e("dsh-node", msg.toString(), e);
+            appendLog(msg.toString());
+            set(Stage.FAILED, msg.toString());
         }
     }
 
@@ -237,10 +244,16 @@ public final class NodeRuntime {
                 try {
                     File parent = out.getParentFile();
                     if (parent != null) parent.mkdirs();
+                    // A prior interrupted extraction may have left this entry
+                    // behind; delete-before-create turns a guaranteed EEXIST
+                    // into a fresh write.
+                    if (out.delete() && BuildConfig.DEBUG) {
+                        android.util.Log.d("dsh-node", "untar replaced leftover " + out);
+                    }
                     if (type == '1') Os.link(new File(dest, linkTarget).getAbsolutePath(), out.getAbsolutePath());
                     else Os.symlink(linkTarget, out.getAbsolutePath());
                 } catch (ErrnoException e) {
-                    throw new IOException("link failed for " + out, e);
+                    throw new IOException("link failed for " + out + ": " + e.getMessage(), e);
                 }
                 continue;
             } else {
