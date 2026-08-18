@@ -20,7 +20,7 @@ Node 本身来自 Termux 软件包：`mobile/scripts/fetch-termux-node.mjs` 从 
 
 ## Android 与打包约束
 
-node-pty 在模块加载时被静态导入，且没有 Android 二进制；`mobile/scripts/package-runtime.mjs` 将部署闭包中的其实现替换为在调用时才抛错的桩，因此 bash/pwsh 工具调用逐次响亮地失败，而服务图保持完整。（初稿曾改为通过 `mobile/patches/mobile.cordis.patch.yml` 禁用基础 `subprocess` 行；这使 `bash-sandbox` 与 `permission-presets` 因缺少 `subprocess`/`shell` 服务而挂起并导致启动失败，因此保留该行的挂载、改为中和模块。该 overlay 保留为空列表——作为未来 Android 专属覆盖的接缝。）node 进程以 `--expose-internals` 启动——vendored cordis loader 需要它才能按 profile baseUrl 解析裸插件名；另一条解析路径依赖 `node-addon-require-builtin` 原生模块，而没有 Android 构建。
+没有 Android 构建的原生模块被已挂载的行静态导入——node-pty（`dsh-subprocess-local`）、koffi（`dsh-sandbox-windows-acl` 的 `ffi.ts`，模块加载时执行结构体声明，仅在 Windows 使用）与 sharp（`dsh-attachment-local`）。`mobile/scripts/package-runtime.mjs` 将部署闭包中的它们替换为加载安全、首次真实调用时响亮抛错的桩（`NEUTRALIZED_NATIVE_MODULES`），因此 bash/pwsh 工具调用、ACL 沙箱与图片附件逐次响亮地失败，而服务图保持完整。（初稿曾改为通过 `mobile/patches/mobile.cordis.patch.yml` 禁用基础 `subprocess` 行；这使 `bash-sandbox` 与 `permission-presets` 因缺少 `subprocess`/`shell` 服务而挂起并导致启动失败，因此保留各行的挂载、改为中和模块。该 overlay 保留为空列表——作为未来 Android 专属覆盖的接缝。）node 进程以 `--expose-internals` 启动——vendored cordis loader 需要它才能按 profile baseUrl 解析裸插件名；另一条解析路径依赖 `node-addon-require-builtin` 原生模块，而没有 Android 构建。
 
 APK 以 `targetSdk 28` 为目标，即 Termux 模型：它保持从应用私有存储 `exec` 可用，并保留旧的共享存储语义。该应用仅限侧载，永不面向 Play。调试签名使用已入库的标准调试 keystore（`mobile/android/app/dsh-debug.keystore`，标准的 `android`/`androiddebugkey` 凭据），使 `adb install -r` 升级可以覆盖先前的构建；该模式和 CI 以 `ref/memki`（参考的 Capacitor+F-Droid 方案）为模板。`.github/workflows/android-build.yml` 构建调试 APK 并发布 `dsh-debug-apk` 构件。
 

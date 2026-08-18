@@ -10,7 +10,7 @@
 - `www/` —— 启动器页面（状态、存储权限、文件夹选择、node 日志尾部），在 node 端口就绪前由 capacitor `https://localhost` origin 提供。
 - `android/` —— 提交入库的 Capacitor Android 工程：`minSdk 26`、`targetSdk 28`（原因见下），debug 签名固定为已提交的 `app/dsh-debug.keystore`（标准 `android`/`androiddebugkey` 口令的公开 debug 密钥，与 `ref/memki` 同款模式），因此各次构建之间可用 `adb install -r` 覆盖升级。
 - `scripts/fetch-termux-node.mjs` —— 下载固定版本的 Termux 构建的 Node.js 及共享库闭包（`runtime/termux.lock.json` 记录 URL 与 sha256；`--refresh` 重新固定）。使用 Termux 是因为 harness 需要 Node `^22.19 || >=24`，而 nodejs-mobile 停留在 Node 18。
-- `scripts/package-runtime.mjs` —— 对 `deploy-root/`（包名 `dsh-mobile-web-pkg`）执行 `pnpm deploy` 得到无符号链接的闭包，随后将 node-pty（无 Android 二进制，却被 `dsh-subprocess-local` 静态导入）替换为在调用时才抛错的桩实现——bash/pwsh 工具调用逐次明确报错，而不是宿主无法启动。闭包与 node rootfs 一起打包为 `android/app/src/main/assets/runtime.tgz`。
+- `scripts/package-runtime.mjs` —— 对 `deploy-root/`（包名 `dsh-mobile-web-pkg`）执行 `pnpm deploy` 得到无符号链接的闭包，随后将没有 Android 构建、却被已挂载行静态导入的原生模块——node-pty（`dsh-subprocess-local`）、koffi（`dsh-sandbox-windows-acl`，仅 Windows 使用）、sharp（`dsh-attachment-local`）——替换为加载安全、调用时抛错的桩实现，宿主因此能启动，受影响的能力逐次明确报错。闭包与 node rootfs 一起打包为 `android/app/src/main/assets/runtime.tgz`（用 `tar --hard-dereference` 打包：应用私有存储中硬链接被 SELinux 拒绝）。
 - `deploy-root/package.json` —— 仅声明依赖的清单，定义设备端 web 宿主闭包。
 - `patches/mobile.cordis.patch.yml` —— 经 `--patch` 应用的叠加层，目前是空列表，作为未来 Android 专属覆盖的接缝（停用行会级联到所有等待其服务的条目，导致启动失败，因此优先中和一个坏模块而不是停用行）。
 
@@ -27,7 +27,7 @@ Node 运行在**前台服务**中，带常驻通知与部分唤醒锁。首次�
 ## 已知设备风险
 
 - **幽灵进程杀手（Android 12+）**：应用退到后台后，其繁忙子进程超出 CPU 限额可能被杀死。规避方法（每台设备一次）：`adb shell settings put global settings_enable_monitor_phantom_procs false`（Android 12/13），或 `adb shell device_config put activity_manager max_phantom_processes 2147483647`。
-- bash/pwsh 工具调用在使用时明确报错：node-pty 已被桩替换（无 Android 二进制），沙箱也没有 Android runner（拒绝放行）。文件工具、LLM 调用、会话、压缩、子代理与网页搜索不受影响。
+- bash/pwsh 工具调用、ACL 沙箱与图片附件（sharp/libvips）在使用时明确报错——其原生模块已被桩替换（无 Android 构建），沙箱也没有 Android runner（拒绝放行）。文件工具、LLM 调用、会话、压缩、子代理与网页搜索不受影响。
 - 回环宿主没有认证层（上游既有立场）：设备上其他应用理论上可访问 `127.0.0.1:<随机端口>`。debug 构建，个人使用。
 - 首次启动需解压约 90 MB 运行时——可能耗时一分钟。
 
