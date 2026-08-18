@@ -89,27 +89,74 @@ function materializeStagedLinks() {
   }
 }
 
+// Neutralize native modules with no Android build whose packages are
+// statically imported by mounted rows: node-pty (pty.node, via
+// dsh-subprocess-local), koffi (FFI, via dsh-sandbox-windows-acl's static
+// import chain from dsh-sandbox-local — every use is win32-only), and sharp
+// (libvips, via dsh-attachment-local). Each stub loads cleanly and throws
+// loudly at first real use, so the host boots and the affected capability
+// fails per call instead of killing the composition.
+const PROXY_BODY = `{
+  get(_target, prop) {
+    if (prop === 'then') return undefined // keep module identity promise-safe
+    throw new Error('NAME: native module is unavailable in the Android build (accessed ' + String(prop) + ')')
+  },
+  apply() {
+    throw new Error('NAME: native module is unavailable in the Android build')
+  },
+}`
+
+/** CommonJS stub (packages with type commonjs): callers use default interop only. */
+const CJS_STUB = name => `'use strict'
+// Replaced by mobile/scripts/package-runtime.mjs: no Android build. A
+// function-shaped Proxy so call and property access fail at use, not import.
+module.exports = new Proxy(function () {}, ${PROXY_BODY.replaceAll('NAME', name)})
+`
+
 /**
- * node-pty loads a native pty.node binary at import time and has no Android
- * build, but the subprocess row imports it statically — so the whole host
- * boot must not depend on removing it. Replace its implementation with a
- * stub: the module loads, spawn() throws at use, and bash/pwsh tool calls
- * fail loudly per call instead of the host failing to boot.
+ * koffi stub (ESM; type: module). dsh-sandbox-windows-acl's ffi.ts declares
+ * Win32 structs at module scope, so pointer/struct must RETURN inert tokens;
+ * every real FFI call (alloc/encode/decode/load/…, all win32-gated) throws.
  */
-function stubNodePty() {
-  const pkgDir = join(STAGING, 'node_modules', 'node-pty', 'lib')
-  if (!existsSync(join(pkgDir, 'index.js'))) fail(`node-pty layout changed: ${join(pkgDir, 'index.js')} missing`)
-  writeFileSync(
-    join(pkgDir, 'index.js'),
-    `'use strict'
-// Replaced by mobile/scripts/package-runtime.mjs: pseudo-terminals cannot be
-// allocated on Android. Load succeeds; every spawn attempt fails loudly.
-function spawn() {
-  throw new Error('node-pty: pseudo-terminals are unavailable in the Android build')
+const KOFFI_STUB = `// Replaced by mobile/scripts/package-runtime.mjs: no Android build.
+// ffi.ts asserts the two Win32 struct sizes against its header probe at
+// module load; the sizes are platform constants (winnt.h, x64), so the stub
+// returns the probed values. Any struct not listed fails its assert loudly.
+const SIZES = { STARTUPINFOW: 104, PROCESS_INFORMATION: 24 }
+const throwUse = name => () => {
+  throw new Error('koffi: native FFI is unavailable in the Android build (' + name + ')')
 }
-module.exports = { spawn }
-`,
-  )
+export default new Proxy(
+  { pointer: () => ({}), typedef: () => ({}), alias: () => ({}), struct: name => ({ size: SIZES[name] ?? -1 }) },
+  {
+    get(target, prop) {
+      if (prop in target) return target[prop]
+      if (prop === 'then') return undefined
+      return throwUse(String(prop))
+    },
+  },
+)
+`
+
+/** ESM stub (packages with an ESM entry such as sharp's dist/sharp.mjs). */
+const ESM_STUB = name => `// Replaced by mobile/scripts/package-runtime.mjs: no Android build. A
+// function-shaped Proxy so call and property access fail at use, not import.
+export default new Proxy(function () {}, ${PROXY_BODY.replaceAll('NAME', name)})
+`
+
+const NEUTRALIZED_NATIVE_MODULES = {
+  'node-pty/lib/index.js': CJS_STUB('node-pty'),
+  'koffi/src/koffi/index.js': KOFFI_STUB,
+  'sharp/dist/index.cjs': CJS_STUB('sharp'),
+  'sharp/dist/index.mjs': ESM_STUB('sharp'),
+}
+
+function neutralizeNativeModules() {
+  for (const [rel, content] of Object.entries(NEUTRALIZED_NATIVE_MODULES)) {
+    const target = join(STAGING, 'node_modules', rel)
+    if (!existsSync(target)) fail(`expected native module file missing (layout changed?): ${target}`)
+    writeFileSync(target, content)
+  }
 }
 
 function main() {
@@ -126,7 +173,7 @@ function main() {
   ])
   restoreLegacyHoists()
   materializeStagedLinks()
-  stubNodePty()
+  neutralizeNativeModules()
 
   const binEntry = join(STAGING, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   if (!existsSync(binEntry)) fail(`${binEntry} missing — run \`pnpm run build\` at the repo root first`)

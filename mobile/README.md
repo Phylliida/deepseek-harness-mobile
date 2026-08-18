@@ -10,7 +10,7 @@ A Capacitor 6 shell that runs the **full harness host on-device**: the launcher 
 - `www/` — launcher page (status, storage permission, folder pick, node log tail) served from the capacitor `https://localhost` origin until the node port is known.
 - `android/` — committed Capacitor Android project: `minSdk 26`, `targetSdk 28` (see below), debug signing pinned to the committed `app/dsh-debug.keystore` (standard `android`/`androiddebugkey` creds, public debug key, same pattern as `ref/memki`) so `adb install -r` upgrades work across builds.
 - `scripts/fetch-termux-node.mjs` — downloads a pinned Termux-built Node.js + shared-library closure (`runtime/termux.lock.json` holds URLs + sha256; `--refresh` re-pins). Termux is used because the harness needs Node `^22.19 || >=24` and nodejs-mobile is stuck on Node 18.
-- `scripts/package-runtime.mjs` — `pnpm deploy` of `deploy-root/` (name `dsh-mobile-web-pkg`) into a symlink-free closure, then neutralizes node-pty (no Android binary, statically imported by `dsh-subprocess-local`) with a stub whose `spawn()` throws at use — so bash/pwsh tool calls fail loudly per call instead of the host failing to boot. The closure plus node rootfs are packed into `android/app/src/main/assets/runtime.tgz`.
+- `scripts/package-runtime.mjs` — `pnpm deploy` of `deploy-root/` (name `dsh-mobile-web-pkg`) into a symlink-free closure, then neutralizes the native modules with no Android build that mounted rows statically import — node-pty (`dsh-subprocess-local`), koffi (`dsh-sandbox-windows-acl`, Windows-only uses), sharp (`dsh-attachment-local`) — with stubs that load cleanly and throw at use, so the host boots and the affected capability fails loudly per call. The closure plus node rootfs are packed into `android/app/src/main/assets/runtime.tgz` (created with `tar --hard-dereference`: hard links are SELinux-denied in app-private storage).
 - `deploy-root/package.json` — dependency-only manifest defining the on-device web-host closure.
 - `patches/mobile.cordis.patch.yml` — `--patch` overlay, currently an empty list; the seam for future Android-only overrides (disabling a row cascades into every entry waiting on its service and fails the boot, so prefer neutralizing bad modules over disabling rows).
 
@@ -27,7 +27,7 @@ Node runs in a **foreground service** with a persistent notification and a parti
 ## Known device risks
 
 - **Phantom process killer (Android 12+)**: a backgrounded app whose busy child exceeds CPU limits can be killed. Workaround (once per device): `adb shell settings put global settings_enable_monitor_phantom_procs false` (Android 12/13) or `adb shell device_config put activity_manager max_phantom_processes 2147483647`.
-- Bash/pwsh tool calls fail loudly at use: node-pty is stubbed (no Android binary), and the sandbox has no Android runner (deny-closed). File tools, LLM calls, sessions, compaction, subagents, and web search are unaffected.
+- Bash/pwsh tool calls, the ACL sandbox, and image attachments (sharp/libvips) fail loudly at use — their native modules are stubbed (no Android builds), and the sandbox has no Android runner (deny-closed). File tools, LLM calls, sessions, compaction, subagents, and web search are unaffected.
 - The loopback host has no auth layer (unchanged upstream stance): other apps on the device could theoretically reach `127.0.0.1:<random port>`. Debug build, personal use.
 - First launch extracts ~90 MB of runtime — can take a minute.
 
