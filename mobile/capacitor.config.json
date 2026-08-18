@@ -1,0 +1,8 @@
+{
+  "appId": "dev.phylliida.dsh",
+  "appName": "DSH",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}

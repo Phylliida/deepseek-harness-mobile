@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-18-android-self-contained-web-host.md
+2026-08-18-android-self-contained-web-host.md: 261d1012390a4c27c81d2dfc0a7ab9cedbe926b6
+2026-08-18-android-self-contained-web-host.zh.md: 518d25f03e0ae418bc13abd0708708dd461ba580

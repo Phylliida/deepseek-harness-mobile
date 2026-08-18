@@ -38,3 +38,19 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# Android app (mobile/): Capacitor npm project and generated build state. The
+# committed dsh-debug.keystore is a public DEBUG key, same pattern as
+# ref/memki; real keystores stay ignored.
+mobile/node_modules/
+mobile/deploy-root/node_modules/
+mobile/runtime/debs/
+mobile/runtime/rootfs/
+mobile/runtime/deploy/
+mobile/android/app/src/main/assets/public/
+mobile/android/app/src/main/assets/runtime.tgz
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+*.keystore
+!mobile/android/app/dsh-debug.keystore

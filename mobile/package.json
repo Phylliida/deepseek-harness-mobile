@@ -1,0 +1,19 @@
+{
+  "name": "dsh-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-contained Android packaging of the DeepSeek Harness web app: Capacitor shell + on-device Termux-built Node runtime hosting dsh web.",
+  "license": "MIT",
+  "scripts": {
+    "fetch-node": "node scripts/fetch-termux-node.mjs",
+    "package-runtime": "node scripts/package-runtime.mjs",
+    "build": "npm run fetch-node && npm run package-runtime && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/core": "^6.2.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.2.1"
+  }
+}
