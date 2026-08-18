@@ -39,6 +39,11 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 
+# Local-only reference checkouts (e.g. ref/memki, a separate repo used as the
+# Capacitor/F-Droid template). Committed once as a URL-less gitlink, which
+# breaks actions/checkout auth cleanup outright.
+ref/
+
 # Android app (mobile/): Capacitor npm project and generated build state. The
 # committed dsh-debug.keystore is a public DEBUG key, same pattern as
 # ref/memki; real keystores stay ignored.
