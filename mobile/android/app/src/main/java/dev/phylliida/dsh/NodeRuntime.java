@@ -52,6 +52,8 @@ public final class NodeRuntime {
     private final ArrayDeque<String> log = new ArrayDeque<>();
     private final List<Listener> listeners = new ArrayList<>();
     private Process process = null;
+    /** Workspace path to seed as a Host Workspace once the port is announced; nulled after the attempt. */
+    private String workspaceToSeed = null;
 
     private NodeRuntime() {}
 
@@ -80,6 +82,9 @@ public final class NodeRuntime {
         if (m.find()) {
             port = Integer.valueOf(m.group(1));
             set(Stage.RUNNING, null);
+            String toSeed = workspaceToSeed;
+            workspaceToSeed = null;
+            if (toSeed != null) seedWorkspace(port, toSeed);
         } else {
             for (Listener l : new ArrayList<>(listeners)) l.onChanged();
         }
@@ -105,6 +110,7 @@ public final class NodeRuntime {
 
     private void runNode(Context app, String dshHome, String workspace) {
         try {
+            workspaceToSeed = workspace;
             File runtimeDir = new File(app.getFilesDir(), "runtime");
             ensureExtracted(app, runtimeDir);
             File rootfsUsr = new File(runtimeDir, "rootfs/data/data/com.termux/files/usr");
@@ -178,6 +184,44 @@ public final class NodeRuntime {
     }
 
     // ---- extraction ----
+
+    /**
+     * Register the launcher-picked folder as a Host Workspace right after the
+     * readiness line, so the session flow never needs the web directory picker:
+     * on Android its breadcrumb trail crosses `/` and `/storage`, both EACCES
+     * to the app, leaving the picked folder unreachable from the dialog. Done
+     * Java-side because the host's cross-site write fence (application/json
+     * required, no CORS preflight answers) blocks a fetch from the launcher
+     * page's Capacitor origin. Best-effort: failure only logs, since the host
+     * itself is already healthy at this point.
+     */
+    private void seedWorkspace(final int readyPort, final String workspace) {
+        Thread t = new Thread(() -> {
+            try {
+                byte[] body = new org.json.JSONObject()
+                        .put("type", "client-request")
+                        .put("rpcId", java.util.UUID.randomUUID().toString())
+                        .put("method", "workspace.create")
+                        .put("payload", new org.json.JSONObject().put("path", workspace))
+                        .toString().getBytes(StandardCharsets.UTF_8);
+                java.net.HttpURLConnection conn = (java.net.HttpURLConnection)
+                        new java.net.URL("http://127.0.0.1:" + readyPort + "/api/workspace.create").openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("content-type", "application/json");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(10000);
+                try (java.io.OutputStream out = conn.getOutputStream()) { out.write(body); }
+                int code = conn.getResponseCode();
+                if (code != 200) android.util.Log.w("dsh-node", "workspace seed got HTTP " + code);
+                conn.disconnect();
+            } catch (Exception e) {
+                android.util.Log.w("dsh-node", "workspace seed failed: " + e);
+            }
+        }, "dsh-workspace-seed");
+        t.setDaemon(true);
+        t.start();
+    }
 
     /**
      * SIGKILL node hosts orphaned by earlier app instances before spawning a

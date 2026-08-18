@@ -51,6 +51,10 @@ $('start').onclick = () => {
   status('Extracting runtime and starting node… (first launch can take a minute)')
 }
 
+// The seed POST happens Java-side in NodeRuntime: the host's cross-site write
+// fence requires application/json and never answers CORS preflights, so a
+// fetch from this Capacitor-origin page would never reach the server.
+
 let timer = null
 function poll() {
   if (timer) return
