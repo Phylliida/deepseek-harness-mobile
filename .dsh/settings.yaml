@@ -1,0 +1,21 @@
+ui-onboarding:
+  welcomeNoticeVersion: 2026-08-13.1
+llm-pi-ai:
+  providers:
+    syntheticnew:
+      apiKeyEnv: SYNTHETICNEW_API_KEY
+      api: anthropic-messages
+      baseURL: https://api.synthetic.new/anthropic
+      models:
+        - id: hf:moonshotai/Kimi-K3
+          name: K3
+          contextWindow: 500000
+          maxTokens: 200000
+          channelLeakMarkers: ['<|open|>', '<|close|>', '<|sep|>']
+agent-default-model:
+  provider: syntheticnew
+  model: hf:moonshotai/Kimi-K3
+agent-presets:
+  default: standard
+ui-theme:
+  preference: dark

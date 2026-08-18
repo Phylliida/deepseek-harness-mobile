@@ -1,0 +1,62 @@
+{
+  "unit": {
+    "name": "workspace",
+    "version": 2
+  },
+  "global": {
+    "initialized": true,
+    "workspaceIds": [
+      "6fdf421a-b34a-45b0-9d45-4ee027ceb8e6",
+      "ce44b619-8703-4917-86e7-c9c1c8960d03",
+      "ede11f4b-9f0e-4326-bdca-52988de1bfea",
+      "aa6183a1-6bc0-4030-b65a-82ce1c17dcdf"
+    ],
+    "archivedSessionIds": []
+  },
+  "tables": {
+    "workspaces": {
+      "aa6183a1-6bc0-4030-b65a-82ce1c17dcdf": {
+        "path": "/home/bepis/testing",
+        "title": "testing",
+        "sessionIds": [
+          "session-96325542-fb15-4fbe-9651-5847cdd48404",
+          "session-8b590173-911b-49b4-840f-e9eb1f379627",
+          "session-e549a5d1-f7ae-438c-8d21-bd446529e9c3",
+          "session-de9bbd23-0f87-4631-b11c-3051504f64cd",
+          "session-8406afbf-94e5-48c5-acec-4beeba3dbf75"
+        ],
+        "createdAt": "2026-08-14T21:07:07.421Z",
+        "updatedAt": "2026-08-14T22:04:19.770Z"
+      },
+      "ede11f4b-9f0e-4326-bdca-52988de1bfea": {
+        "path": "/home/bepis/.kimi-code",
+        "title": ".kimi-code",
+        "sessionIds": [
+          "session-2efdc993-3532-452a-af0d-ba1f7ea9a4cc",
+          "session-b29d7ce5-c7dd-41c1-95f0-2fb8a69c88cc"
+        ],
+        "createdAt": "2026-08-14T21:44:35.792Z",
+        "updatedAt": "2026-08-14T22:33:18.651Z"
+      },
+      "ce44b619-8703-4917-86e7-c9c1c8960d03": {
+        "path": "/home/bepis/prog/deepseek-harness",
+        "title": "deepseek-harness",
+        "sessionIds": [
+          "session-222b7c05-6945-4a81-bced-15d9a762f884",
+          "session-aa5d6612-2ae0-4fb7-a313-b7cc69d94699"
+        ],
+        "createdAt": "2026-08-14T22:33:37.344Z",
+        "updatedAt": "2026-08-15T22:35:44.028Z"
+      },
+      "6fdf421a-b34a-45b0-9d45-4ee027ceb8e6": {
+        "path": "/home/bepis/prog/interp",
+        "title": "interp",
+        "sessionIds": [
+          "session-5d083b12-e902-4383-b4f0-b7e1d98908e5"
+        ],
+        "createdAt": "2026-08-15T22:35:54.594Z",
+        "updatedAt": "2026-08-15T22:35:54.975Z"
+      }
+    }
+  }
+}

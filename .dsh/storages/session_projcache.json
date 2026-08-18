@@ -1,0 +1,1272 @@
+{
+  "unit": {
+    "name": "session_projcache",
+    "version": 3
+  },
+  "global": null,
+  "tables": {
+    "sessions": {
+      "session-8406afbf-94e5-48c5-acec-4beeba3dbf75": {
+        "identity": {
+          "createdAt": 1786741627515,
+          "cwd": "/home/bepis/testing"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "turns": 1,
+              "steps": 1,
+              "llmMs": 0,
+              "toolMs": 0,
+              "ttftMs": 0,
+              "ttftSteps": 0,
+              "decodeMs": 0,
+              "decodeTokens": 0,
+              "lastTurn": 1,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 16,
+            "val": "Hello!"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 16,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "last": {
+                "turn": 1,
+                "step": 1,
+                "buckets": {
+                  "uncachedInputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 16,
+            "val": {
+              "surfaceTokens": 133,
+              "contextWindow": 262144,
+              "pressureTokens": 0,
+              "sampledSurfaceTokens": 133
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 16,
+            "val": {
+              "systemTokens": 1506,
+              "toolsTokens": 6376,
+              "messageTokens": 133
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 16,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 16,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786741724456
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 16,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 16,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-de9bbd23-0f87-4631-b11c-3051504f64cd": {
+        "identity": {
+          "createdAt": 1786741729956,
+          "cwd": "/home/bepis/testing"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "turns": 1,
+              "steps": 1,
+              "llmMs": 0,
+              "toolMs": 0,
+              "ttftMs": 0,
+              "ttftSteps": 0,
+              "decodeMs": 0,
+              "decodeTokens": 0,
+              "lastTurn": 1,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 16,
+            "val": "Hello!"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 16,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "last": {
+                "turn": 1,
+                "step": 1,
+                "buckets": {
+                  "uncachedInputTokens": 0,
+                  "outputTokens": 0,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 0
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 16,
+            "val": {
+              "surfaceTokens": 133,
+              "contextWindow": 262144,
+              "pressureTokens": 0,
+              "sampledSurfaceTokens": 133
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 16,
+            "val": {
+              "systemTokens": 1506,
+              "toolsTokens": 6376,
+              "messageTokens": 133
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 16,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 16,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786741752775
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 16,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 16,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 16,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-e549a5d1-f7ae-438c-8d21-bd446529e9c3": {
+        "identity": {
+          "createdAt": 1786741771760,
+          "cwd": "/home/bepis/testing"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 778,
+            "val": {
+              "turns": 3,
+              "steps": 9,
+              "llmMs": 50746,
+              "toolMs": 492,
+              "ttftMs": 21704,
+              "ttftSteps": 9,
+              "decodeMs": 29042,
+              "decodeTokens": 970,
+              "lastTurn": 3,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 778,
+            "val": "Friendly greeting exchange"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 778,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 778,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 13726,
+                "outputTokens": 970,
+                "cacheReadTokens": 16815,
+                "cacheWriteTokens": 13726
+              },
+              "last": {
+                "turn": 3,
+                "step": 1,
+                "buckets": {
+                  "uncachedInputTokens": 1491,
+                  "outputTokens": 49,
+                  "cacheReadTokens": 2587,
+                  "cacheWriteTokens": 1491
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 778,
+            "val": {
+              "surfaceTokens": 2708,
+              "contextWindow": 262144,
+              "pressureTokens": 5569,
+              "sampledSurfaceTokens": 2592
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 778,
+            "val": {
+              "systemTokens": 1506,
+              "toolsTokens": 6376,
+              "messageTokens": 2708
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 778,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 778,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 778,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 778,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786741949308
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 778,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 778,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 778,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-8b590173-911b-49b4-840f-e9eb1f379627": {
+        "identity": {
+          "createdAt": 1786743840248,
+          "cwd": "/home/bepis/testing"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 62,
+            "val": {
+              "turns": 1,
+              "steps": 1,
+              "llmMs": 3619,
+              "toolMs": 0,
+              "ttftMs": 2533,
+              "ttftSteps": 1,
+              "decodeMs": 1086,
+              "decodeTokens": 49,
+              "lastTurn": 1,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 62,
+            "val": "Asking Who the Assistant Is"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 62,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 62,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 2883,
+                "outputTokens": 49,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 2883
+              },
+              "last": {
+                "turn": 1,
+                "step": 1,
+                "buckets": {
+                  "uncachedInputTokens": 2883,
+                  "outputTokens": 49,
+                  "cacheReadTokens": 0,
+                  "cacheWriteTokens": 2883
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 62,
+            "val": {
+              "surfaceTokens": 261,
+              "contextWindow": 262144,
+              "pressureTokens": 5766,
+              "sampledSurfaceTokens": 143
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 62,
+            "val": {
+              "systemTokens": 1506,
+              "toolsTokens": 6376,
+              "messageTokens": 261
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 62,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 62,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 62,
+            "val": {
+              "preset": "danger-full-access",
+              "sandbox": "danger-full-access",
+              "approval": "never"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 62,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786745012274
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 62,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 62,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 62,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-b29d7ce5-c7dd-41c1-95f0-2fb8a69c88cc": {
+        "identity": {
+          "createdAt": 1786743875870,
+          "cwd": "/home/bepis/.kimi-code"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 1725,
+            "val": {
+              "turns": 2,
+              "steps": 14,
+              "llmMs": 144343,
+              "toolMs": 27718,
+              "ttftMs": 48309,
+              "ttftSteps": 13,
+              "decodeMs": 96034,
+              "decodeTokens": 2759,
+              "lastTurn": 2,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 1725,
+            "val": "Add Synthetic New To Kimi Code"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 1725,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 1725,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 36487,
+                "outputTokens": 2759,
+                "cacheReadTokens": 184272,
+                "cacheWriteTokens": 36487
+              },
+              "last": {
+                "turn": 2,
+                "step": 3,
+                "buckets": {
+                  "uncachedInputTokens": 1363,
+                  "outputTokens": 225,
+                  "cacheReadTokens": 24569,
+                  "cacheWriteTokens": 1363
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 1725,
+            "val": {
+              "surfaceTokens": 47826,
+              "contextWindow": 262144,
+              "pressureTokens": 27295,
+              "sampledSurfaceTokens": 47333
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 1725,
+            "val": {
+              "systemTokens": 1507,
+              "toolsTokens": 6376,
+              "messageTokens": 47826
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 1725,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 1725,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 1725,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 1725,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786744106242
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 1725,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 1725,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 1725,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-96325542-fb15-4fbe-9651-5847cdd48404": {
+        "identity": {
+          "createdAt": 1786745059762,
+          "cwd": "/home/bepis/testing"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 28,
+            "val": {
+              "turns": 1,
+              "steps": 1,
+              "llmMs": 2091,
+              "toolMs": 0,
+              "ttftMs": 1766,
+              "ttftSteps": 1,
+              "decodeMs": 325,
+              "decodeTokens": 18,
+              "lastTurn": 1,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 28,
+            "val": "hello!"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 28,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 28,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 938,
+                "outputTokens": 18,
+                "cacheReadTokens": 1940,
+                "cacheWriteTokens": 938
+              },
+              "last": {
+                "turn": 1,
+                "step": 1,
+                "buckets": {
+                  "uncachedInputTokens": 938,
+                  "outputTokens": 18,
+                  "cacheReadTokens": 1940,
+                  "cacheWriteTokens": 938
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 28,
+            "val": {
+              "surfaceTokens": 175,
+              "contextWindow": 500000,
+              "pressureTokens": 3816,
+              "sampledSurfaceTokens": 133
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 28,
+            "val": {
+              "systemTokens": 1506,
+              "toolsTokens": 6376,
+              "messageTokens": 175
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 28,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 28,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 28,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 28,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786745261795
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 28,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 28,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 28,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-2efdc993-3532-452a-af0d-ba1f7ea9a4cc": {
+        "identity": {
+          "createdAt": 1786746798637,
+          "cwd": "/home/bepis/.kimi-code"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 2,
+            "val": {
+              "turns": 0,
+              "steps": 0,
+              "llmMs": 0,
+              "toolMs": 0,
+              "ttftMs": 0,
+              "ttftSteps": 0,
+              "decodeMs": 0,
+              "decodeTokens": 0,
+              "lastTurn": null,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 2,
+            "val": null
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 2,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 2,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 0,
+                "outputTokens": 0,
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0
+              },
+              "last": null
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 2,
+            "val": {
+              "surfaceTokens": 0
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 2,
+            "val": {
+              "systemTokens": 0,
+              "toolsTokens": 0,
+              "messageTokens": 0
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 2,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 2,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 2,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 2,
+            "val": {
+              "blank": true,
+              "lastPromptAt": null
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 2,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 2,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 2,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-aa5d6612-2ae0-4fb7-a313-b7cc69d94699": {
+        "identity": {
+          "createdAt": 1786746817424,
+          "cwd": "/home/bepis/prog/deepseek-harness"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 399,
+            "val": {
+              "turns": 1,
+              "steps": 6,
+              "llmMs": 40206,
+              "toolMs": 361,
+              "ttftMs": 22031,
+              "ttftSteps": 6,
+              "decodeMs": 18175,
+              "decodeTokens": 613,
+              "lastTurn": 1,
+              "openStep": null,
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 399,
+            "val": "where are the chats stored"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 399,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 399,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 19020,
+                "outputTokens": 613,
+                "cacheReadTokens": 46555,
+                "cacheWriteTokens": 19020
+              },
+              "last": {
+                "turn": 1,
+                "step": 6,
+                "buckets": {
+                  "uncachedInputTokens": 1596,
+                  "outputTokens": 175,
+                  "cacheReadTokens": 12932,
+                  "cacheWriteTokens": 1596
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 399,
+            "val": {
+              "surfaceTokens": 27543,
+              "contextWindow": 500000,
+              "pressureTokens": 16124,
+              "sampledSurfaceTokens": 27119
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 399,
+            "val": {
+              "systemTokens": 1510,
+              "toolsTokens": 6376,
+              "messageTokens": 27543
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 399,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 399,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 399,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 399,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786746840711
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 399,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 399,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 399,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-222b7c05-6945-4a81-bced-15d9a762f884": {
+        "identity": {
+          "createdAt": 1786833343843,
+          "cwd": "/home/bepis/prog/deepseek-harness"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 1597,
+            "val": {
+              "turns": 2,
+              "steps": 5,
+              "llmMs": 70136,
+              "toolMs": 2650,
+              "ttftMs": 15775,
+              "ttftSteps": 5,
+              "decodeMs": 54361,
+              "decodeTokens": 1503,
+              "lastTurn": 2,
+              "openStep": {
+                "turn": 2,
+                "step": 4,
+                "startTime": 1786835937424,
+                "firstTokenTime": 1786835940879
+              },
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 1597,
+            "val": "Note parity (aa)* over alphabet"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 1597,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 1597,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 15429,
+                "outputTokens": 1503,
+                "cacheReadTokens": 26510,
+                "cacheWriteTokens": 15429
+              },
+              "last": {
+                "turn": 2,
+                "step": 3,
+                "buckets": {
+                  "uncachedInputTokens": 1390,
+                  "outputTokens": 42,
+                  "cacheReadTokens": 10345,
+                  "cacheWriteTokens": 1390
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 1597,
+            "val": {
+              "surfaceTokens": 24374,
+              "contextWindow": 500000,
+              "pressureTokens": 13125,
+              "sampledSurfaceTokens": 21395
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 1597,
+            "val": {
+              "systemTokens": 1510,
+              "toolsTokens": 6376,
+              "messageTokens": 24374
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 1597,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0,
+              "pendingTurnStart": 1786835889313
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 1597,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 1597,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 1597,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786835889323
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 1597,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 1597,
+            "val": null
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 1597,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      },
+      "session-5d083b12-e902-4383-b4f0-b7e1d98908e5": {
+        "identity": {
+          "createdAt": 1786833354850,
+          "cwd": "/home/bepis/prog/interp"
+        },
+        "rows": {
+          "sessionStats": {
+            "ver": 1,
+            "seq": 17903,
+            "val": {
+              "turns": 9,
+              "steps": 47,
+              "llmMs": 1101450,
+              "toolMs": 144141,
+              "ttftMs": 223253,
+              "ttftSteps": 47,
+              "decodeMs": 878197,
+              "decodeTokens": 24134,
+              "lastTurn": 9,
+              "openStep": {
+                "turn": 9,
+                "step": 10,
+                "startTime": 1786835932107,
+                "firstTokenTime": 1786835938520
+              },
+              "pendingCalls": {}
+            }
+          },
+          "title": {
+            "ver": 1,
+            "seq": 17903,
+            "val": "Explain repository algorithm simply"
+          },
+          "goal": {
+            "ver": 4,
+            "seq": 17903,
+            "val": null
+          },
+          "tokenUsage": {
+            "ver": 1,
+            "seq": 17903,
+            "val": {
+              "totals": {
+                "uncachedInputTokens": 70847,
+                "outputTokens": 24134,
+                "cacheReadTokens": 879337,
+                "cacheWriteTokens": 70847
+              },
+              "last": {
+                "turn": 9,
+                "step": 9,
+                "buckets": {
+                  "uncachedInputTokens": 778,
+                  "outputTokens": 42,
+                  "cacheReadTokens": 32328,
+                  "cacheWriteTokens": 778
+                }
+              }
+            }
+          },
+          "contextPressure": {
+            "ver": 4,
+            "seq": 17903,
+            "val": {
+              "surfaceTokens": 69828,
+              "contextWindow": 500000,
+              "pressureTokens": 33884,
+              "sampledSurfaceTokens": 69480
+            }
+          },
+          "contextBreakdown": {
+            "ver": 2,
+            "seq": 17903,
+            "val": {
+              "systemTokens": 1507,
+              "toolsTokens": 6376,
+              "messageTokens": 69828
+            }
+          },
+          "subagentTiming": {
+            "ver": 2,
+            "seq": 17903,
+            "val": {
+              "descriptorSeen": false,
+              "settledMs": 0,
+              "pendingTurnStart": 1786835765673
+            }
+          },
+          "subagent": {
+            "ver": 2,
+            "seq": 17903,
+            "val": {}
+          },
+          "permissions": {
+            "ver": 1,
+            "seq": 17903,
+            "val": {
+              "preset": "workspace-write",
+              "sandbox": "workspace-write",
+              "approval": "ask"
+            }
+          },
+          "sessionListMetadata": {
+            "ver": 1,
+            "seq": 17903,
+            "val": {
+              "blank": false,
+              "lastPromptAt": 1786835765694
+            }
+          },
+          "imageLimits": {
+            "ver": 1,
+            "seq": 17903,
+            "val": null
+          },
+          "todos": {
+            "ver": 2,
+            "seq": 17903,
+            "val": [
+              {
+                "content": "Inspect generated-language corpora format (results/ txt files)",
+                "status": "completed"
+              },
+              {
+                "content": "Build self-contained regex->min-DFA compiler (no automata-lib)",
+                "status": "completed"
+              },
+              {
+                "content": "Port attack_scc with round/label-dimension instrumentation",
+                "status": "completed"
+              },
+              {
+                "content": "Measure round counts across C-RASP corpus; check for bound",
+                "status": "in_progress"
+              },
+              {
+                "content": "If bound looks tight, attempt termination argument; update proof doc",
+                "status": "pending"
+              }
+            ]
+          },
+          "plan": {
+            "ver": 1,
+            "seq": 17903,
+            "val": {
+              "active": false,
+              "wanted": null
+            }
+          }
+        }
+      }
+    }
+  }
+}
