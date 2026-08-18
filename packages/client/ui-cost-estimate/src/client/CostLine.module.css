@@ -1,0 +1,20 @@
+/* Session cost line: tertiary text pinned ahead of the stats row, aligned to
+   the shared message column axis (--dsh-chat-content-width). */
+
+.root {
+  /* Block, not flex: text-overflow only elides a block's inline content, so
+     an overlong line ends in … instead of a mid-glyph clip. */
+  display: block;
+  text-align: center;
+  max-width: var(--dsh-chat-content-width);
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 4px calc(var(--dsh-composer-side-clearance) + 16px) 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

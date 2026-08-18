@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-08-15-channel-leak-markers-retryable-invisible-reply.md
+2026-08-15-channel-leak-markers-retryable-invisible-reply.md: 1794eb732c843add0219cd0405227bf28c29c358
+2026-08-15-channel-leak-markers-retryable-invisible-reply.zh.md: 3473f022cdf12161731d941ba1f83a88f0407bc8
