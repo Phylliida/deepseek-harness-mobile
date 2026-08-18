@@ -137,7 +137,10 @@ function main() {
 
   rmSync(OUT_TGZ, { force: true })
   mkdirSync(dirname(OUT_TGZ), { recursive: true })
-  run('pack runtime.tgz', 'tar', ['-czf', OUT_TGZ, '-C', join(MOBILE, 'runtime'), 'rootfs', 'deploy'])
+  // --hard-dereference turns tar's hard-link ('1') members into regular files:
+  // hard link creation is EPERM in Android app-private storage (SELinux), so
+  // the on-device extractor can only materialize them as copies.
+  run('pack runtime.tgz', 'tar', ['-czf', OUT_TGZ, '--hard-dereference', '-C', join(MOBILE, 'runtime'), 'rootfs', 'deploy'])
   console.log('package-runtime: wrote ' + OUT_TGZ)
 }
 
