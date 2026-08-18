@@ -14,7 +14,17 @@ A fork of the DeepSeek Harness (plugin-based agent harness on vendored Cordis, p
 
 **Verified working on-device**: node exec (SELinux `untrusted_app_27` granted), extraction, `node:sqlite`, worker_threads, host boot, UI load, at least one successful settings write (onboarding entry in `files/dsh/settings.yaml`, 18:25).
 
-## The current bug (active investigation)
+## The bug — RESOLVED (2026-08-18, second session)
+
+"Apply hangs, then 'signal timed out'" was **not** an RPC/settings/credentials bug. The ranked candidates below are all disproven: `settings.mutate` and `credentials.set` answer in <0.3s both on Linux and on the real on-device host (verified by curl through `adb forward`, including the exact kimi-coding apply sequence against ns `llm-pi-ai`).
+
+Actual root cause: the failing Chrome tab ("DeepSeek Harness") was pointed at a **stale port (44805)** still LISTENing on pid 17815 — a wedged dsh web host from the **previous install** (uid u0_a304, orphaned to init after reinstall; accepts connections, never answers). The browser's 30s `AbortSignal.timeout` (`packages/host/apiproxy/src/fetch/client.ts:315`) then produced "signal timed out". Same zombie owned 40789, which earlier looked like "the host wedged" — misattribution. Diagnostic traps: truncated `/proc/<pid>/cmdline` reads made 17815 look like a `node -e` probe; `/proc/net/tcp` alone misses tcp6 v4-mapped listeners.
+
+Fix applied: `NodeRuntime.killStaleHosts` sweeps same-uid `/proc` cmdline matches before spawning (handles same-install orphans; cross-install zombies like 17815 still need a phone reboot — no root). Details in mobile/TESTING.md "Fourth device contact".
+
+**User actions**: close the stale Chrome tab (127.0.0.1:44805), reboot the phone to clear pid 17815, re-test Apply in the app.
+
+<details><summary>Original (disproven) investigation notes</summary>
 
 In the web UI's Settings → Models, saving a kimi-coding API key ("Apply" in `ProviderEditor`) **hangs, then shows "signal timed out"** — Chrome's `AbortSignal.timeout()` DOMException message, i.e. the host never answered the POST before the caller deadline.
 
@@ -32,6 +42,8 @@ Established facts (all verified this session):
 2. **Settings writer lock**: `packages/util/atomic-write` + `packages/settings/settings-file` — lock acquired across an await that never completes (lock-file handling, flock semantics).
 3. **Credentials provider hang**: `packages/credentials/credentials-local` (writes `$DSH_HOME/.credentials.yaml`) blocking on fs.watch/chokidar quirks.
 4. **Host actually exits (fail-loud `installFailLoud` on unhandledRejection → process.exit(1))** and the UI's fetch wedges on the dying socket. Distinguish hang-vs-exit in the repro (watch process lifetime).
+
+</details>
 
 ## How to reproduce (Phase 1: Linux, do this FIRST)
 
@@ -75,7 +87,7 @@ Finding the live port: `/proc/net/tcp` (tcp4, field 2 hex `0100007F:PPPP`, state
 ## Other loose ends (post-bug backlog)
 
 - **DNS preload not wired**: Termux's c-ares likely can't find a resolver config on-device (run-as probes showed ECONNREFUSED/ENOTFOUND, though those are partially artifacts — real-app DNS is unverified). A preload exists on-device at `files/runtime/deploy/android-preload.cjs` (calls `dns.setServers([8.8.8.8, ...])`) but the Java spawn does NOT pass `--require`. If real-app LLM calls fail DNS later, wire `--require <deploy>/android-preload.cjs` into `NodeRuntime` and add the file in `package-runtime.mjs`.
-- **Stale-node risk**: a node from a previous install (different uid) was still running after reinstall — consider having the service kill its own recorded child pid on restart.
+- **Stale-node risk**: a node from a previous install (different uid) was still running after reinstall — **this turned out to be the root cause of the "signal timed out" bug** (see above). `NodeRuntime.killStaleHosts` now sweeps same-uid orphans on spawn; cross-install zombies still need a reboot.
 - mobile/TESTING.md accumulates all environment quirks (NixOS PATH, corepack pnpm, run-as caveats, hard-link EPERM, etc.) — keep it current when you learn something new.
 
 ## Ground rules
