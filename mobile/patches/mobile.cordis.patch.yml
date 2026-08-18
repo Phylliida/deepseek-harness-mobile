@@ -1,0 +1,8 @@
+# Mobile (Android) overlay for the web profile, applied after the profile's
+# own layers via `--patch`. Currently empty: node-pty, the only Android-fatal
+# module, is neutralized by a load-time stub written into the deployed closure
+# (mobile/scripts/package-runtime.mjs), which keeps the service graph intact.
+# Keep this file as the seam for future Android-only overrides — a disabled
+# row cascades into entries waiting on its service and fails the boot.
+
+[]

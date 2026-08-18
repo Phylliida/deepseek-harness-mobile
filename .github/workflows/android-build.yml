@@ -1,0 +1,106 @@
+# Build the debug Android APK of the self-contained harness app (Capacitor
+# web shell + on-device Termux-built Node hosting `dsh --profile web`).
+# Modeled on ref/memki's android-build.yml: the committed
+# android/app/dsh-debug.keystore signs every debug build, so CI artifacts
+# install over an existing copy with `adb install -r`.
+#
+# Two-stage build: the repo build + pnpm deploy closure + Termux node fetch
+# produce mobile/android/app/src/main/assets/runtime.tgz (see
+# mobile/scripts/), then a standard Capacitor/Gradle assembleDebug packages
+# the launcher WebView (mobile/www) around it.
+#
+# Trigger: manual workflow_dispatch plus a path-filtered push to master.
+
+name: Build Android APK (debug, for sideloading)
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [master]
+    paths:
+      - 'packages/**'
+      - 'apps/**'
+      - 'vendor/**'
+      - 'mobile/**'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - 'tsconfig*.json'
+      - 'tsdown.config.ts'
+      - '.github/workflows/android-build.yml'
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install workspace (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build harness (lib + client bundles + web dist)
+        run: pnpm run build
+
+      - name: Fetch Termux node runtime
+        run: node mobile/scripts/fetch-termux-node.mjs
+
+      - name: Package runtime.tgz payload
+        run: node mobile/scripts/package-runtime.mjs
+
+      - name: Install Capacitor app deps
+        run: npm ci
+        working-directory: mobile
+
+      # JDK 17 is the Capacitor 6 / AGP baseline used in ref/memki.
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # android/ is committed — `cap sync` copies www → app assets and
+      # relinks plugin native code.
+      - name: Sync Capacitor
+        run: npx cap sync android
+        working-directory: mobile
+
+      - name: Build debug APK
+        run: |
+          cd mobile/android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find mobile/android/app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if [ -z "$APK" ]; then
+            echo "no APK produced"
+            exit 1
+          fi
+          echo "path=$APK" >> "$GITHUB_OUTPUT"
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-debug-apk
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 14
+          if-no-files-found: error

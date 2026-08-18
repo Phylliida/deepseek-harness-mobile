@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; background: #111418; color: #dde3ea; margin: 0; padding: 24px; }
+  h1 { font-size: 1.3rem; }
+  #status { margin: 12px 0; white-space: pre-wrap; }
+  #error { color: #ff8080; white-space: pre-wrap; }
+  button { background: #2f6fed; color: #fff; border: 0; border-radius: 8px; padding: 10px 16px; font-size: 1rem; margin: 6px 8px 6px 0; }
+  #log { background: #0a0c0f; border-radius: 8px; padding: 10px; font: 11px/1.4 monospace; max-height: 40vh; overflow: auto; white-space: pre-wrap; word-break: break-all; color: #9fb0c3; }
+  .dim { color: #8893a1; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>DSH launcher</h1>
+<div id="status">Starting…</div>
+<div id="error"></div>
+<button id="grant" hidden>Grant storage access</button>
+<button id="pick" hidden>Pick data folder</button>
+<button id="start" hidden>Start node</button>
+<div class="dim">Workspace folder: <span id="folder">—</span></div>
+<div class="dim">Harness home: <span id="home">—</span></div>
+<h2 class="dim">node log</h2>
+<pre id="log"></pre>
+<script>
+'use strict'
+const $ = id => document.getElementById(id)
+const status = t => { $('status').textContent = t }
+const fail = t => { $('error').textContent = t }
+
+const plugin = () => window.Capacitor.Plugins.DshMobile
+
+async function run(method) {
+  try {
+    const ret = await plugin()[method]()
+    if (ret && ret.path) $('folder').textContent = ret.path
+  } catch (e) {
+    fail(String((e && e.message) || e))
+  }
+  tick()
+}
+
+$('grant').onclick = () => run('requestStoragePermission')
+$('pick').onclick = () => run('pickDataFolder')
+$('start').onclick = () => {
+  run('startNode')
+  status('Extracting runtime and starting node… (first launch can take a minute)')
+}
+
+let timer = null
+function poll() {
+  if (timer) return
+  timer = setInterval(tick, 700)
+}
+
+async function tick() {
+  try {
+    const s = await plugin().getState()
+    if (s.folder) $('folder').textContent = s.folder
+    if (s.dshHomeMode) $('home').textContent = s.dshHomeMode === 'picked' ? 'inside the picked folder' : 'app-private storage (symlinks unsupported in the picked folder)'
+    if (s.logTail) $('log').textContent = s.logTail
+    if (s.port) { location.replace('http://127.0.0.1:' + s.port); return }
+    $('grant').hidden = s.permission === 'granted'
+    $('pick').hidden = s.permission !== 'granted' || !!s.folder
+    $('start').hidden = !(s.permission === 'granted' && s.folder && (s.stage === 'idle' || s.stage === 'failed'))
+    if (s.permission !== 'granted') status('DSH needs shared-storage access so the agent can work with your files.')
+    else if (!s.folder) status('Pick the folder the agent works in (its workspace).')
+    else if (s.stage === 'failed') { status('Node failed — see log.'); fail(s.error || '') }
+    else if (s.stage === 'idle') status('Ready. Start the on-device node runtime.')
+    else status('Node is starting…')
+  } catch (e) {
+    fail(String((e && e.message) || e))
+  }
+}
+
+poll()
+</script>
+</body>
+</html>

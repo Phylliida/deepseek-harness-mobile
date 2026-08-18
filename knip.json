@@ -5,17 +5,20 @@
   ],
   "ignoreBinaries": [
     "bwrap",
+    "cap",
     "icacls",
     "musl-gcc",
     "python3",
     "sandbox-exec",
     "tar",
     "taskkill",
-    "where.exe"
+    "where.exe",
+    "which"
   ],
   "ignoreWorkspaces": [
     "vendor/*",
-    "python/sdk-runtime"
+    "python/sdk-runtime",
+    "mobile/deploy-root"
   ],
   "ignoreDependencies": [
     "@yarnpkg/cli-dist",
