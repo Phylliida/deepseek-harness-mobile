@@ -164,6 +164,30 @@ function neutralizeNativeModules() {
   }
 }
 
+/**
+ * Point @vscode/ripgrep at the Termux rg staged in the runtime rootfs. The
+ * package resolves `@vscode/ripgrep-<platform>-<arch>` at module evaluation
+ * and has no android build, so every glob/grep call would fail at launch;
+ * dsh-tool-fs-search only consumes the `rgPath` export. The relative URL
+ * keeps working wherever the runtime root is extracted. Same
+ * delete-before-write rule as neutralizeNativeModules.
+ */
+const RG_REDIRECT = `// Rewritten by mobile/scripts/package-runtime.mjs: @vscode/ripgrep has no
+// android platform package; the Termux-built rg in the runtime rootfs is the binary.
+import { fileURLToPath } from 'node:url'
+export const rgPath = fileURLToPath(new URL('../../../../../rootfs/data/data/com.termux/files/usr/bin/rg', import.meta.url))
+`
+
+function redirectRipgrep() {
+  const target = join(STAGING, 'node_modules', '@vscode', 'ripgrep', 'lib', 'index.js')
+  if (!existsSync(target)) fail(`@vscode/ripgrep entry missing (layout changed?): ${target}`)
+  rmSync(target)
+  writeFileSync(target, RG_REDIRECT)
+  // The host platform's optional binary package deploys along; it is a
+  // foreign-architecture dead weight in the APK.
+  rmSync(join(STAGING, 'node_modules', '@vscode', 'ripgrep-linux-x64'), { recursive: true, force: true })
+}
+
 function main() {
   if (!existsSync(ROOTFS)) fail(`${ROOTFS} missing — run fetch-termux-node.mjs first`)
 
@@ -179,6 +203,7 @@ function main() {
   restoreLegacyHoists()
   materializeStagedLinks()
   neutralizeNativeModules()
+  redirectRipgrep()
 
   const binEntry = join(STAGING, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   if (!existsSync(binEntry)) fail(`${binEntry} missing — run \`pnpm run build\` at the repo root first`)
