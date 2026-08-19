@@ -8,8 +8,8 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { readdirSync } from 'node:fs'
-import { open, mkdir, readFile, readdir, realpath, link, rm, stat, truncate } from 'node:fs/promises'
+import { readdirSync, constants } from 'node:fs'
+import { open, mkdir, readFile, readdir, realpath, link, copyFile, rm, stat, truncate } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { scheduler } from 'node:timers/promises'
@@ -48,6 +48,33 @@ function assertZstdHeaderFrame(plaintext: Buffer): void {
   if (plaintext.length === 0 || plaintext.indexOf(0x0A) !== plaintext.length - 1) {
     throw new Error('corrupt Zstandard session log: first frame is not exactly one header line')
   }
+}
+
+/**
+ * Publish a synced temp file at `finalPath` without clobbering an existing
+ * entry: a hard link on POSIX (atomic, EEXIST on collision), an exclusive
+ * copy on Android, where SELinux denies link() in app-private storage and
+ * sdcardfs has no hard links at all. copyFile(COPYFILE_EXCL) carries the same
+ * EEXIST no-clobber guarantee; its copy is fsynced before returning so the
+ * caller's directory sync still publishes durable content. The accepted
+ * trade-off is a crash window in which finalPath exists with partial content
+ * — no no-replace rename primitive is available there.
+ * @param tmp - fully written and fsynced temp sibling.
+ * @param finalPath - publication target that must not be clobbered.
+ */
+async function publishNoReplacePosix(tmp: string, finalPath: string): Promise<void> {
+  /* v8 ignore next 8 -- Android-only branch: coverage hosts (linux/darwin/win32) always take the link arm */
+  if (process.platform === 'android') {
+    await copyFile(tmp, finalPath, constants.COPYFILE_EXCL)
+    const handle = await open(finalPath, 'r')
+    try {
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    return
+  }
+  await link(tmp, finalPath)
 }
 
 /** Loader schema for the JSONL artifact's physical encoding. */
@@ -544,9 +571,12 @@ export class JsonlSessionPersistence extends SessionPersistence implements Persi
     // Publish via link()+unlink(), NOT rename(): link fails with EEXIST if the
     // final path already exists, so two processes materializing the same id
     // concurrently cannot clobber each other. rename() would silently overwrite.
+    // Android is the exception: SELinux denies hard links in app-private
+    // storage (and sdcardfs never has them), so publication uses an exclusive
+    // copy, which carries the same EEXIST no-clobber guarantee.
     let linked = false
     try {
-      await link(tmp, finalPath)
+      await publishNoReplacePosix(tmp, finalPath)
       linked = true
     } finally {
       // Remove an unpublished temp on failure. After publication, defer cleanup
