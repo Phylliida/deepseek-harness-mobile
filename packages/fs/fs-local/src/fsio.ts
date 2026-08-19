@@ -92,7 +92,7 @@ export interface FsIoInternals {
   replaceFile?: (replaced: string, replacement: string) => Promise<void>
   /** Override the hard-link no-replace publication boundary. */
   linkFile?: (existingPath: string, newPath: string) => Promise<void>
-  /** Override the Android exclusive-copy no-replace publication boundary (SELinux denies link() in app-private storage; sdcardfs has no hard links). */
+  /** Override the Android exclusive-copy no-replace publication boundary (Android storage denies hard links). */
   copyFileExclusive?: (source: string, destination: string) => Promise<void>
   /** Override target inspection after guarded publication fails. */
   inspectPublicationTarget?: (path: string) => Promise<BigIntStats>

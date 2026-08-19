@@ -155,6 +155,11 @@ function neutralizeNativeModules() {
   for (const [rel, content] of Object.entries(NEUTRALIZED_NATIVE_MODULES)) {
     const target = join(STAGING, 'node_modules', rel)
     if (!existsSync(target)) fail(`expected native module file missing (layout changed?): ${target}`)
+    // pnpm deploy hard-links store files into the staging closure; an in-place
+    // write would truncate the shared inode and corrupt the workspace
+    // node_modules (and the store) with the stub. Delete first so the stub
+    // lands on a fresh inode.
+    rmSync(target)
     writeFileSync(target, content)
   }
 }
