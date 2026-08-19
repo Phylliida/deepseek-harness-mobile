@@ -1,97 +1,51 @@
-# HANDOFF — deepseek-harness-mobile debugging state (2026-08-18)
+# HANDOFF — deepseek-harness-mobile state (2026-08-18, second session)
 
-You are picking up an in-progress debugging session. Read this before doing anything else.
+Supersedes the previous HANDOFF.md (committed as eba7429). Read this before anything else.
 
 ## What this repo is
 
-A fork of the DeepSeek Harness (plugin-based agent harness on vendored Cordis, pnpm monorepo), newly packaged as a **self-contained Android app** in `mobile/` (committed, on master). Architecture:
+Fork of DeepSeek Harness (plugin-based agent harness on vendored Cordis, pnpm monorepo) packaged as a **self-contained Android app** in `mobile/`: Capacitor 6 shell (appId `dev.phylliida.dsh`, targetSdk 28, debug-signed with committed keystore) + Java `NodeRunnerService` extracting `assets/runtime.tgz` (Termux Node 26 + pnpm-deployed web-host closure) into `files/runtime/` and spawning `node --expose-internals <deploy>/node_modules/@deepseek-ai/dsh/lib/bin.js --profile web --patch <deploy>/mobile.cordis.patch.yml --port 0`. The launcher page (`mobile/www/index.html`) polls `DshMobile.getState()` and navigates to the announced loopback port.
 
-- **Capacitor 6 shell** (`mobile/android`, appId `dev.phylliida.dsh`, targetSdk **28** — Termux model: exec from app-private storage + legacy storage semantics; sideload-only, debug-signed with committed `mobile/android/app/dsh-debug.keystore`).
-- **On-device host**: a Java `NodeRunnerService` (foreground service) extracts `assets/runtime.tgz` (Termux-built **Node 26** + a pnpm-deployed web-host closure) into `files/runtime/`, spawns `node --expose-internals <deploy>/node_modules/@deepseek-ai/dsh/lib/bin.js --profile web --patch <deploy>/mobile.cordis.patch.yml --port 0`, watches stdout for `dsh web: http://127.0.0.1:<port>`, then the launcher WebView navigates to that URL. All RPC/WS is same-origin loopback.
-- **Folder model**: user picks a shared-storage folder as the agent **workspace** (node cwd). `DSH_HOME` is probed for symlink support; on this device (Pixel-class, Android 15) symlinks on /sdcard fail → `DSH_HOME` = app-private `files/dsh`. Settings/credentials/sessions live in `files/dsh`, NOT in the picked folder (folder being empty is expected).
-- **Native modules neutralized at packaging** (`mobile/scripts/package-runtime.mjs`, `NEUTRALIZED_NATIVE_MODULES`): node-pty, koffi, sharp get load-safe stubs that throw at use. bash/pwsh, ACL sandbox, and image attachments fail loudly per call by design.
-- CI: `.github/workflows/android-build.yml` builds the debug APK (`dsh-debug-apk` artifact). `dev/` has the nix shell (adb/gh) and `install-android.sh` for sideloading.
+Folder model: user picks a shared-storage folder = agent workspace (node cwd). `DSH_HOME` = app-private `files/dsh` (symlink probe keeps it off sdcardfs — the profile module fallback `boot/app-boot/src/profile.ts` creates symlinks under `$DSH_HOME/profiles/node_modules`). Settings/credentials/sessions live in `files/dsh`, not the picked folder.
 
-**Verified working on-device**: node exec (SELinux `untrusted_app_27` granted), extraction, `node:sqlite`, worker_threads, host boot, UI load, at least one successful settings write (onboarding entry in `files/dsh/settings.yaml`, 18:25).
+CI: `.github/workflows/android-build.yml` builds the debug APK — **trigger is `push` to `master` (this repo's branch is `main`) + `workflow_dispatch`; dispatch manually with `gh workflow run android-build.yml` if pushing main doesn't start it.**
 
-## The bug — RESOLVED (2026-08-18, second session)
+## Bugs root-caused and fixed this session (all committed on main)
 
-"Apply hangs, then 'signal timed out'" was **not** an RPC/settings/credentials bug. The ranked candidates below are all disproven: `settings.mutate` and `credentials.set` answer in <0.3s both on Linux and on the real on-device host (verified by curl through `adb forward`, including the exact kimi-coding apply sequence against ns `llm-pi-ai`).
+1. **"signal timed out" on Settings → Models Apply** (0deb4c4): NOT an RPC bug — the browser's 30s `AbortSignal.timeout` (packages/host/apiproxy/src/fetch/client.ts:315) fired because the Chrome tab was pointed at a stale port held by a **wedged zombie host from the previous install** (different uid, unkillable without root). The RPC path itself answers in <0.3s on Linux and on-device. Fix: `NodeRuntime.killStaleHosts` sweeps same-uid `/proc` cmdline matches before spawn. Cross-install zombies still need a phone reboot.
+2. **Workspace picker couldn't reach the picked folder** (5818555): the browse dialog opens at app-private HOME and its breadcrumbs cross `/` and `/storage`, both EACCES to the app. Fix: `NodeRuntime.seedWorkspace` POSTs `workspace.create` for the picked folder from Java at readiness (must be Java-side — the host's cross-site write fence requires application/json and never answers CORS preflights, so a fetch from the launcher page's Capacitor origin is never sent).
+3. **Picking a workspace bounced back silently** (1217a4f): `session.create` failed `agent-preset-invalid` — the closure was missing runtime peers only session boot imports (`dsh-workflow`, `dsh-compaction`, `dsh-session-telemetry`, `dsh-invariants`), now explicit in `mobile/deploy-root/package.json`. Audit recipe: walk staged `node_modules/*/package.json` peerDependencies vs the installed set. The smoke test after composition growth is boot + `session.create`, not just boot.
+4. **First turn failed `EACCES: … link …`** (df8db4a + 625324c): Android has no usable hard links (SELinux denies `link()` app-private; sdcardfs has none). The three `link()` no-clobber publish sites (session-persistence-jsonl, attachment-local, fs-local `createIfAbsent`) dispatch on `process.platform === 'android'` to `copyFile(COPYFILE_EXCL)`. A full link/symlink sweep found no other fs users; `storage-json` uses rename (safe), schemastery's `link` is a schema API. Agent Note: `.agents/notes/implemented/bug-fix/2026-08-18-android-exclusive-copy-publish.md`.
 
-Actual root cause: the failing Chrome tab ("DeepSeek Harness") was pointed at a **stale port (44805)** still LISTENing on pid 17815 — a wedged dsh web host from the **previous install** (uid u0_a304, orphaned to init after reinstall; accepts connections, never answers). The browser's 30s `AbortSignal.timeout` (`packages/host/apiproxy/src/fetch/client.ts:315`) then produced "signal timed out". Same zombie owned 40789, which earlier looked like "the host wedged" — misattribution. Diagnostic traps: truncated `/proc/<pid>/cmdline` reads made 17815 look like a `node -e` probe; `/proc/net/tcp` alone misses tcp6 v4-mapped listeners.
+Also fixed: `package-runtime.mjs` stubbing poisoned workspace `node_modules` (pnpm deploy hard-links store files into staging; in-place writes truncated the shared inode). Now delete-before-write.
 
-Fix applied: `NodeRuntime.killStaleHosts` sweeps same-uid `/proc` cmdline matches before spawning (handles same-install orphans; cross-install zombies like 17815 still need a phone reboot — no root). Details in mobile/TESTING.md "Fourth device contact".
+## Current device / deploy state
 
-**User actions**: close the stale Chrome tab (127.0.0.1:44805), reboot the phone to clear pid 17815, re-test Apply in the app.
+- Phone: Pixel-class, Android 15, serial `39191FDJH00HME`, app uid currently u0_a301 (was reinstalled; uid changes per install). adb via `cd dev && nix-shell --run "adb -s 39191FDJH00HME …"`.
+- Device runs APK versionName 1.0. Commits through 625324c bump to **1.1**; `NodeRuntime.ensureExtracted` keys its marker on versionName, so the 1.1 install re-extracts the fixed runtime. **Any future runtime.tgz change MUST bump versionName** (comment in build.gradle).
+- The live host already has `/storage/emulated/0/DSH` registered as Workspace "DSH" (seeded via curl; durable in `files/dsh`). A stray "Beed" workspace points into app-private home (created by the picker trap) — delete from the sidebar.
+- Verified working on-device: extraction, boot, UI, settings/credentials writes (kimi-coding key saved), workspace create/list, direct writes to `/storage/emulated/0/DSH` from the real node process. NOT yet verified: a full chat turn end-to-end (needs the 1.1 redeploy for the hard-link fix; LLM DNS may be the next failure — see below).
 
-<details><summary>Original (disproven) investigation notes</summary>
+## Operational knowledge (cost time; don't relearn)
 
-In the web UI's Settings → Models, saving a kimi-coding API key ("Apply" in `ProviderEditor`) **hangs, then shows "signal timed out"** — Chrome's `AbortSignal.timeout()` DOMException message, i.e. the host never answered the POST before the caller deadline.
+- **run-as children lack inet gid 3003** → network probes via run-as are artifacts (UDP EPERM / TCP ETIMEDOUT). The real app node HAS it. run-as also lacks the app's /sdcard mount namespace → raw-path denies via run-as are artifacts.
+- **Finding the live port**: `cat /proc/net/tcp /proc/net/tcp6 | awk '$4=="0A"'` (tcp6 has v4-mapped rows!), then map inode→pid via `run-as dev.phylliida.dsh ls -l /proc/<node-pid>/fd | grep socket`. The app node owns exactly one LISTEN socket. Don't trust a port without the PID check — zombies hold stale ports. Chrome devtools (`adb forward tcp:9222 localabstract:chrome_devtools_remote`, GET /json) reveals which port a stale browser tab is on.
+- **`/proc/<pid>/cmdline` truncation lies**: a `head -c 300` read made a wedged full dsh host look like a `node -e` probe. Dump the whole cmdline.
+- **Manual runtime swaps need the marker**: `files/runtime/.extracted-<versionName>` — swap without recreating the marker and the app wipes your swap and re-extracts the APK's tgz.
+- **RPC probe recipe**: `POST /api/<method>` with `{"type":"client-request","rpcId":<uuid>,"method":<m>,"payload":{...}}`, content-type application/json. Methods used: settings.describe/mutate, credentials.set, workspace.create/list, session.create, host.listDirectory, host.createDirectory. Browser unary calls carry a 30s AbortSignal.timeout — "signal timed out" = host never answered.
+- Linux smoke of the exact phone closure: boot `mobile/runtime/deploy/.../bin.js` with `env -i` (node at `/run/current-system/sw/bin`); full recipe in mobile/TESTING.md. Never `pkill -f` with a pattern that matches your own shell command line.
 
-Established facts (all verified this session):
+## Known loose ends (next work, ranked)
 
-1. The apply path is **pure host RPC, no provider network involved**: `api.settings.mutate` then `api.credentials.set` (`packages/client/ui-settings-models/src/client/ProviderEditor.tsx`, `applyOnce` ~lines 237-300). DNS/internet is irrelevant to THIS bug.
-2. Transport: `fetch(POST ${location.origin}/api/<channel>/<endpoint>)` with `{type:'client-request', rpcId, method, payload}` (`packages/client/connection/src/client/rpc.ts`). The exact channel/endpoint string for `settings.mutate` was **not yet pinned down** — find it via `packages/host/apiproxy/src/fetch/handler.ts`, `packages/host/apiproxy/src/api/rpc-map.ts`, and the client api object in `packages/client/connection/src/client/`.
-3. Timeline on device: settings.mutate succeeded at 18:25 (onboarding entry landed). `credentials.set` never completed (no `files/dsh/.credentials.yaml`). No `files/dsh/sessions/` dir.
-4. Later, the on-device host looked wedged: curl through `adb forward tcp:40789 tcp:40789` timed out even on `GET /`, and the process was CPU-idle (utime/stime flat — await, not spin). CAVEAT: that port may belong to a leftover manual replay node (see leftovers); treat as "host likely wedged or dead", not proof.
-5. On Linux, the same deployed closure boots and serves the UI; **RPC POSTs were never tested on Linux** — that's the first thing to do (Phase 1 below).
-
-## Ranked candidate root causes
-
-1. **An interaction/approval prompt with no answer path in the mobile UI** — the mutation awaits user interaction the mobile surface never provides, stalling past the AbortSignal deadline. Check how settings/credentials writes interact with `packages/interaction/*`.
-2. **Settings writer lock**: `packages/util/atomic-write` + `packages/settings/settings-file` — lock acquired across an await that never completes (lock-file handling, flock semantics).
-3. **Credentials provider hang**: `packages/credentials/credentials-local` (writes `$DSH_HOME/.credentials.yaml`) blocking on fs.watch/chokidar quirks.
-4. **Host actually exits (fail-loud `installFailLoud` on unhandledRejection → process.exit(1))** and the UI's fetch wedges on the dying socket. Distinguish hang-vs-exit in the repro (watch process lifetime).
-
-</details>
-
-## How to reproduce (Phase 1: Linux, do this FIRST)
-
-The deployed closure is already staged at `mobile/runtime/deploy/` (matches the phone build). pnpm via `corepack pnpm` only. Node on this NixOS box is `/run/current-system/sw/bin/node`. Bash tool calls are fresh shells (re-`cd`/re-export each time).
-
-```sh
-rm -rf /tmp/dsh-mobile-smoke && mkdir -p /tmp/dsh-mobile-smoke/home /tmp/dsh-mobile-smoke/dsh /tmp/dsh-mobile-smoke/work
-cd /tmp/dsh-mobile-smoke/work
-env -i HOME=/tmp/dsh-mobile-smoke/home TMPDIR=/tmp DSH_HOME=/tmp/dsh-mobile-smoke/dsh \
-  DSH_TELEMETRY_DISABLED=1 PATH=/run/current-system/sw/bin:/usr/bin:/bin nohup \
-  node --expose-internals \
-  /home/bepis/prog/deepseek-harness-mobile/mobile/runtime/deploy/node_modules/@deepseek-ai/dsh/lib/bin.js \
-  --profile web --patch /home/bepis/prog/deepseek-harness-mobile/mobile/runtime/deploy/mobile.cordis.patch.yml \
-  --port 0 > boot.log 2>&1 &
-# poll: grep "dsh web:" boot.log  →  dsh web: http://127.0.0.1:<port>
-# cleanup: pkill -f "expose-internals /home/bepis"
-```
-
-Then `curl` the real `settings.mutate` and `credentials.set` RPCs (mirror the browser client's URL/body from `packages/client/connection/src/client/rpc.ts`; the UI sends an `AbortSignal.timeout(N)` — find N and where it's created). Watch: does it hang? does the host process exit? Check for lock files under `$DSH_HOME` mid-hang.
-
-If it reproduces on Linux → debug there (attach `node --inspect`, add temp logging, whatever's fastest). If it does NOT reproduce → Phase 2.
-
-## Phase 2: on-device reproduction
-
-Phone is USB-connected, adb via nix: `cd dev && nix-shell --run "adb -s 39191FDJH00HME ..."`. Serial: `39191FDJH00HME`.
-
-**run-as caveats (cost a lot of time; internalize them)**:
-
-- `run-as dev.phylliida.dsh` children do **NOT** have inet gid 3003 → UDP EPERM / TCP ETIMEDOUT. Network probes via run-as are artifacts. The real app node HAS gid 3003 (verified in /proc/<pid>/status Groups).
-- run-as also lacks the app's mount namespace for /sdcard → raw-path denies via run-as are artifacts. The real app has `LEGACY_STORAGE: allow` + `WRITE_EXTERNAL_STORAGE: granted`; real-app /sdcard behavior is still unverified.
-- Therefore the on-device replay reproduces everything EXCEPT networking — fine for this bug (apply is network-free).
-
-Replay recipe: pipe a script into `adb shell "run-as dev.phylliida.dsh sh -s"`, redirect output to `files/manual-run.log`, with env: `HOME=files/home TMPDIR=files/tmp DSH_HOME=files/dsh LD_LIBRARY_PATH=<files/runtime/rootfs/.../usr/lib> PATH=/system/bin:/system/xbin SHELL=/system/bin/sh LANG=en_US.UTF-8 DSH_TELEMETRY_DISABLED=1`, cwd `/storage/emulated/0/DSH`, args identical to the app's spawn (see Architecture). Keep the script boring — toybox `sh` chokes silently on things like `export -n`.
-
-Finding the live port: `/proc/net/tcp` (tcp4, field 2 hex `0100007F:PPPP`, state 0A=LISTEN). **My earlier scan missed tcp6 rows — app binds tcp4 127.0.0.1 so that's fine, but verify the PID before trusting a port**: leftover zombie nodes from my probing may be listening (see below).
-
-`adb forward tcp:<port> tcp:<port>` then curl from the host box to drive the replay host's API directly.
-
-**Leftovers to clean on the device**: pid 17815 = my leftover net-probe node; a manual replay node may still hold 127.0.0.1:40789. Rebooting the phone or `force-stop` + manual kill cleanup avoids misattribution.
-
-## Other loose ends (post-bug backlog)
-
-- **DNS preload not wired**: Termux's c-ares likely can't find a resolver config on-device (run-as probes showed ECONNREFUSED/ENOTFOUND, though those are partially artifacts — real-app DNS is unverified). A preload exists on-device at `files/runtime/deploy/android-preload.cjs` (calls `dns.setServers([8.8.8.8, ...])`) but the Java spawn does NOT pass `--require`. If real-app LLM calls fail DNS later, wire `--require <deploy>/android-preload.cjs` into `NodeRuntime` and add the file in `package-runtime.mjs`.
-- **Stale-node risk**: a node from a previous install (different uid) was still running after reinstall — **this turned out to be the root cause of the "signal timed out" bug** (see above). `NodeRuntime.killStaleHosts` now sweeps same-uid orphans on spawn; cross-install zombies still need a reboot.
-- mobile/TESTING.md accumulates all environment quirks (NixOS PATH, corepack pnpm, run-as caveats, hard-link EPERM, etc.) — keep it current when you learn something new.
+1. **Full-turn verification after 1.1 redeploy.** If the turn fails DNS (ENOTFOUND/ECONNREFUSED from c-ares): wire `--require <deploy>/android-preload.cjs` into the NodeRuntime spawn AND add the file in package-runtime.mjs (preload exists in the design; not yet packaged/passed). run-as DNS probes are artifacts — only the real app process tells the truth.
+2. **UI swallows session.create errors** (pick bounced with no message while the host returned a precise `agent-preset-invalid`). Gap in ui-workspace's adopt flow; worth an upstream issue/PR.
+3. **Local workspace node_modules repair**: sharp (`dist/sharp.mjs`) and node-pty (`lib/index.js`) in `.pnpm` still carry Android stubs from the pre-fix packaging script; restore from npm tarballs (`curl registry.npmjs.org/<pkg>/-/<pkg>-<ver>.tgz`) when local attachment tests matter again.
+4. `dev/DSH.apk` (95MB) and `dev/.direnv/` are untracked on purpose — consider .gitignore entries.
+5. Only `primary:` volumes can be picked (decodeTreePath); SD cards need an SAF/DocumentFile bridge that node can't use for raw paths. memki (`ref/memki`) is the SAF reference; its write pattern (tmp+rename) is already matched by dsh-atomic-write/fsio.
 
 ## Ground rules
 
-- Don't commit anything without the user's say-so. If you instrument code, mark it clearly as temporary.
-- After root-causing, prefer the minimal fix; decide whether it belongs in repo source (`packages/`, `apps/`) or the mobile packaging layer (`mobile/`).
-- Repo gates: `corepack pnpm --config.verify-deps-before-run=false run <gate>` (knip/constraints/translation-pairing matter if you touch docs).
+- Don't commit without the user's say-so (they sometimes commit themselves; check `git log` before assuming a diff is uncommitted). Never `git push` for them.
+- Repo gates: `corepack pnpm --config.verify-deps-before-run=false run <gate>`. attachment-local tests fail locally until the sharp stub is repaired (pre-existing, environmental).
+- Non-trivial changes need an Agent Note triplet (en/zh/i18n.yaml via `verify-translation-pairing --write`); format gate: `verify-agent-note-format`. Notes in `.agents/notes/`, rules in `.agents/notes/README.md`.
+- Keep mobile/TESTING.md current when you learn something new.

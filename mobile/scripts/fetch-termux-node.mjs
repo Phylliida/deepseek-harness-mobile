@@ -1,11 +1,18 @@
 #!/usr/bin/env node
-// Download a pinned Termux-built Node.js (+ shared-library closure) for
-// aarch64 Android and stage it under mobile/runtime/rootfs.
+// Download pinned Termux-built packages (+ shared-library closure) for
+// aarch64 Android and stage them under mobile/runtime/rootfs.
 //
 // Termux is used because the harness needs Node >= 22.19 (node:sqlite,
 // engines floor) and nodejs-mobile/Capacitor-NodeJS are stuck on Node 18.
 // Termux binaries are plain Android/ELF executables; with targetSdk 28 the
 // app may exec them from its private data directory (the Termux model).
+//
+// Beyond nodejs, the roots bundle the on-device tool binaries: bash (the
+// dsh shell executor runs `bash -c`; Android itself ships only toybox sh),
+// python (reached through bash; script entry points such as pip3 keep their
+// Termux-prefix shebangs and do not run — use `python3 -m ...`), and ripgrep
+// (@vscode/ripgrep has no android platform package, so package-runtime.mjs
+// redirects its rgPath export at this staged rg).
 //
 // Reproducibility: resolved package URLs + sha256 are pinned in
 // runtime/termux.lock.json. Later runs verify against the lock; pass
@@ -13,7 +20,7 @@
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, openSync, readSync, closeSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -25,7 +32,7 @@ const ROOTFS = join(RUNTIME, 'rootfs')
 
 const REPO_BASE = 'https://packages-cf.termux.dev/apt/termux-main'
 const ARCH = 'aarch64'
-const ROOT_PACKAGE = 'nodejs'
+const ROOT_PACKAGES = ['nodejs', 'bash', 'python', 'ripgrep']
 // System libraries the Android dynamic linker supplies; not shipped by Termux.
 const SYSTEM_LIBS = new Set([
   'ld-android.so', 'libc.so', 'libm.so', 'libdl.so', 'liblog.so',
@@ -82,7 +89,7 @@ async function resolvePackages() {
   const index = await fetchBuffer(`${REPO_BASE}/dists/stable/main/binary-${ARCH}/Packages`)
   const pkgs = parsePackages(index.toString('utf8'))
   const closure = new Map() // name → {name, version, filename, sha256}
-  const queue = [ROOT_PACKAGE]
+  const queue = [...ROOT_PACKAGES]
   while (queue.length) {
     const name = queue.shift()
     if (closure.has(name)) continue
@@ -117,9 +124,22 @@ function extractDeb(debPath) {
 /** Every DT_NEEDED of every ELF file under dir must resolve inside rootfs or be a system lib. */
 function assertNeededClosure() {
   const usr = join(ROOTFS, 'data/data/com.termux/files/usr')
-  const entries = runChecked('find', [usr, '(', '-type', 'f', '-o', '-type', 'l', ')', '(', '-name', 'node', '-o', '-name', '*.so*', ')']).toString().trim().split('\n')
+  const entries = runChecked('find', [usr, '(', '-type', 'f', '-o', '-type', 'l', ')']).toString().trim().split('\n')
   const present = new Set(entries.map(f => f.split('/').pop()))
-  const elfs = runChecked('find', [usr, '-type', 'f', '(', '-name', 'node', '-o', '-name', '*.so*', ')']).toString().trim().split('\n')
+  // Probe every shared library plus every staged bin executable; bin holds
+  // scripts too (broken Termux-prefix shebangs), so filter by ELF magic
+  // instead of trusting the readelf exit status.
+  const candidates = runChecked('find', [usr, '-type', 'f', '(', '-name', '*.so*', '-o', '-path', '*/bin/*', ')']).toString().trim().split('\n')
+  const elfs = candidates.filter((f) => {
+    const fd = openSync(f, 'r')
+    try {
+      const magic = Buffer.alloc(4)
+      readSync(fd, magic, 0, 4, 0)
+      return magic.toString('latin1') === '\x7fELF'
+    } finally {
+      closeSync(fd)
+    }
+  })
   const libs = new Set()
   for (const f of elfs) {
     const dyn = runChecked('readelf', ['-d', f]).toString()
@@ -130,15 +150,19 @@ function assertNeededClosure() {
   console.log(`DT_NEEDED closure OK (${libs.size} libs, ${elfs.length} ELF files probed)`)
 }
 
-/** Keep only the node executable and shared libs; docs/man/icu data files are dead weight in an APK. */
+/** Keep only the tool executables and shared libs; docs/man/locale data files are dead weight in an APK. */
 function pruneRootfs() {
   const usr = join(ROOTFS, 'data/data/com.termux/files/usr')
   const keep = new Set(['bin', 'lib'])
   for (const entry of readdirSync(usr, { withFileTypes: true })) {
     if (!keep.has(entry.name)) rmSync(join(usr, entry.name), { recursive: true, force: true })
   }
+  // Binaries only: node plus the tool set. python's script entry points
+  // (pip3, pydoc3, …) carry Termux-prefix shebangs that never resolve in the
+  // app's private prefix, so keeping them would just ship dead weight.
+  const keepBin = entry => entry === 'node' || entry === 'bash' || entry === 'sh' || entry === 'rg' || entry.startsWith('python3')
   for (const entry of readdirSync(join(usr, 'bin'))) {
-    if (entry !== 'node') rmSync(join(usr, 'bin', entry), { recursive: true, force: true })
+    if (!keepBin(entry)) rmSync(join(usr, 'bin', entry), { recursive: true, force: true })
   }
 }
 
@@ -156,7 +180,7 @@ async function main() {
     console.log(`using ${packages.length} locked packages`)
   } else {
     packages = await resolvePackages()
-    const lock = { repoBase: REPO_BASE, arch: ARCH, rootPackage: ROOT_PACKAGE, resolvedAt: new Date().toISOString(), packages }
+    const lock = { repoBase: REPO_BASE, arch: ARCH, rootPackages: ROOT_PACKAGES, resolvedAt: new Date().toISOString(), packages }
     writeFileSync(LOCK_FILE, JSON.stringify(lock, null, 2) + '\n')
     console.log(`resolved ${packages.length} packages → ${LOCK_FILE}`)
   }

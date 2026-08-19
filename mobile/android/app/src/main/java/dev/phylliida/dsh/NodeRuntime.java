@@ -150,9 +150,16 @@ public final class NodeRuntime {
             env.put("TMPDIR", tmpDir.getAbsolutePath());
             env.put("DSH_HOME", dshHomeDir.getAbsolutePath());
             env.put("LD_LIBRARY_PATH", new File(rootfsUsr, "lib").getAbsolutePath());
-            env.put("PATH", "/system/bin:/system/xbin");
+            // Bundled Termux tools (bash, python3, rg) first: Android itself
+            // ships only toybox sh, and the harness's bash executor runs
+            // `bash -c` resolved through this inherited PATH.
+            env.put("PATH", new File(rootfsUsr, "bin").getAbsolutePath() + ":/system/bin:/system/xbin");
             env.put("SHELL", "/system/bin/sh");
             env.put("LANG", "en_US.UTF-8");
+            // Android has no sandbox runner (sandbox-local fails closed on an
+            // unknown platform), so run unconfined: the base composition reads
+            // this into sandbox-policy's default mode and approval "never".
+            env.put("DSH_PERMISSION_MODE", "danger-full-access");
             // Belt-and-braces next to the mobile patch layer; telemetry is off by default already.
             env.put("DSH_TELEMETRY_DISABLED", "1");
             pb.directory(workDir);
