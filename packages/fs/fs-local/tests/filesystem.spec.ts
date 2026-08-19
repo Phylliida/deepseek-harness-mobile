@@ -407,6 +407,27 @@ describe('writeText', () => {
     await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  // Android storage denies hard links; the pinned platform exercises the
+  // exclusive-copy publication arm on any host. chmod on the copied file is
+  // POSIX-semantics, so the arm is not pinned on a win32 host.
+  it.skipIf(process.platform === 'win32')('createIfAbsent publishes through an exclusive copy on android', async () => {
+    fs.internals.platform = 'android'
+    const target = await fs.resolve('new.txt')
+    const outcome = await fs.writeText(target, 'fresh', { kind: 'createIfAbsent' })
+    expect(outcome.operation).toBe('create')
+    expect(await readFile(join(dir, 'new.txt'), 'utf8')).toBe('fresh')
+    expect((await stat(join(dir, 'new.txt'))).mode & 0o777).toBe(0o600)
+  })
+
+  it.skipIf(process.platform === 'win32')('createIfAbsent on android rejects an existing file as FS_NOT_OBSERVED', async () => {
+    fs.internals.platform = 'android'
+    await writeFile(join(dir, 'a.txt'), 'old')
+    const target = await fs.resolve('a.txt')
+    await expect(fs.writeText(target, 'new', { kind: 'createIfAbsent' }))
+      .rejects.toMatchObject({ code: 'FS_NOT_OBSERVED' })
+    expect(await readFile(join(dir, 'a.txt'), 'utf8')).toBe('old')
+  })
+
   it('replaceIfVersion replaces when the version matches', async () => {
     await writeFile(join(dir, 'a.txt'), 'old')
     const target = await fs.resolve('a.txt')

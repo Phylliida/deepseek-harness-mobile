@@ -2,7 +2,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { chmod, link, mkdir, open, readFile, unlink } from 'node:fs/promises'
+import { chmod, copyFile, link, mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { dirname, join, parse, resolve } from 'node:path'
 import {
   AttachmentError,
@@ -35,6 +35,33 @@ function displayName(value: string | undefined): string | undefined {
 
 function objectPath(root: string, sha256: string): string {
   return join(root, 'objects', sha256.slice(0, 2), sha256)
+}
+
+/**
+ * Publish a synced staging file at `target` without clobbering an existing
+ * object: a hard link on POSIX, an exclusive copy on Android, where SELinux
+ * denies link() in app-private storage and sdcardfs has no hard links at all.
+ * Both fail EEXIST on collision, feeding the same dedup-verify path; the
+ * Android copy is fsynced so the bucket syncs after publication still make
+ * durable content visible. The accepted trade-off is a crash window in which
+ * `target` exists with partial bytes — later stores of the same hash then
+ * fail integrity verification loudly instead of deduping onto a torn object.
+ * @param temporary - fully written and fsynced staging file.
+ * @param target - content-addressed object path that must not be clobbered.
+ */
+async function publishNoReplace(temporary: string, target: string): Promise<void> {
+  /* v8 ignore next 8 -- Android-only branch: coverage hosts (linux/darwin/win32) always take the link arm */
+  if (process.platform === 'android') {
+    await copyFile(temporary, target, constants.COPYFILE_EXCL)
+    const published = await open(target, 'r')
+    try {
+      await published.sync()
+    } finally {
+      await published.close()
+    }
+    return
+  }
+  await link(temporary, target)
 }
 
 function ensureReference(ref: ImageAttachmentRef): string {
@@ -155,7 +182,7 @@ export async function saveImageFile(root: string, input: SaveImageAttachment, li
     await handle.close()
     handle = undefined
     try {
-      await link(temporary, target)
+      await publishNoReplace(temporary, target)
     } catch (error) {
       /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
       if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error

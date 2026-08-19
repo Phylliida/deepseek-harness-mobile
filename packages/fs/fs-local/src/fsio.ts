@@ -6,8 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { chmod, link, lstat, mkdir, open, readFile, realpath, readdir, rename, rm, stat } from 'node:fs/promises'
+import { createReadStream, constants } from 'node:fs'
+import { chmod, copyFile, link, lstat, mkdir, open, readFile, realpath, readdir, rename, rm, stat } from 'node:fs/promises'
 import type { BigIntStats, Dirent, Stats } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
@@ -92,6 +92,8 @@ export interface FsIoInternals {
   replaceFile?: (replaced: string, replacement: string) => Promise<void>
   /** Override the hard-link no-replace publication boundary. */
   linkFile?: (existingPath: string, newPath: string) => Promise<void>
+  /** Override the Android exclusive-copy no-replace publication boundary (SELinux denies link() in app-private storage; sdcardfs has no hard links). */
+  copyFileExclusive?: (source: string, destination: string) => Promise<void>
   /** Override target inspection after guarded publication fails. */
   inspectPublicationTarget?: (path: string) => Promise<BigIntStats>
   /** Override staging-directory removal for commit-point failure coverage. */
@@ -516,6 +518,25 @@ async function throwGuardedCreateFailure(
 }
 
 /**
+ * Default Android no-replace publication: exclusive copy, then content fsync
+ * and the temp's 0o600 mode, matching what the hard-link arm publishes (the
+ * linked temp inode carries both). COPYFILE_EXCL fails EEXIST on collision,
+ * feeding the same guarded-create failure mapping.
+ * @param source - fully written and synced staging file.
+ * @param destination - publication target that must not be clobbered.
+ */
+async function copyFileExclusiveAndroid(source: string, destination: string): Promise<void> {
+  await copyFile(source, destination, constants.COPYFILE_EXCL)
+  const handle = await open(destination, 'r')
+  try {
+    await handle.chmod(0o600)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
  * Atomically replace a file through a private, synced staging file in the same directory.
  * POSIX protects the staging directory and file with `0o700` and `0o600`. A new Windows file
  * inherits the destination directory's DACL; a replacement copies the existing target's DACL
@@ -551,6 +572,7 @@ export async function writeFileAtomic(
   const copyFileDacl = internals.copyFileDacl ?? copyFileDaclWin32
   const replaceFile = internals.replaceFile ?? replaceFileWin32
   const linkFile = internals.linkFile ?? link
+  const copyFileExclusive = internals.copyFileExclusive ?? copyFileExclusiveAndroid
   const inspectPublicationTarget = internals.inspectPublicationTarget
     ?? (path => lstat(path, { bigint: true }))
   const removeStagingDir = internals.removeStagingDir
@@ -577,7 +599,11 @@ export async function writeFileAtomic(
     throwIfAborted(signal, 'write')
     if (createIfAbsent !== undefined) {
       try {
-        await linkFile(tempPath, absolutePath)
+        // Android storage denies hard links (SELinux in app-private storage,
+        // sdcardfs outright): publish with an exclusive copy, which carries
+        // the same EEXIST no-clobber signal into the guarded failure mapping.
+        if (platform === 'android') await copyFileExclusive(tempPath, absolutePath)
+        else await linkFile(tempPath, absolutePath)
       } catch (error: unknown) {
         await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget)
       }
