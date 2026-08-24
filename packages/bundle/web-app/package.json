@@ -54,6 +54,7 @@
     "@deepseek-ai/dsh-client-runtime": "workspace:^",
     "@deepseek-ai/dsh-client-ui-agent-preset": "workspace:^",
     "@deepseek-ai/dsh-client-ui-commands": "workspace:^",
+    "@deepseek-ai/dsh-client-ui-coding-timer": "workspace:^",
     "@deepseek-ai/dsh-client-ui-conversation": "workspace:^",
     "@deepseek-ai/dsh-client-ui-cost-estimate": "workspace:^",
     "@deepseek-ai/dsh-client-ui-cordis": "workspace:^",
