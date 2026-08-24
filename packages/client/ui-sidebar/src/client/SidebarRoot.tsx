@@ -169,6 +169,12 @@ export function SidebarRoot({
         </button>
       </Tooltip>
 
+      {/* Additive control rows (e.g. ui-coding-timer) sit between New
+          Session and the browsing region in both column states. */}
+      <div className={css.timerArea}>
+        {renderSlot('sidebar.timer', { wide })}
+      </div>
+
       {/* The browsing region fills the column between the controls and the
           foot in both states; its rail icon column rides the same slot. */}
       <div className={css.regionArea}>

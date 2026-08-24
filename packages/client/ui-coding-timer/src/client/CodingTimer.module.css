@@ -1,0 +1,239 @@
+/* Coding timer row (sidebar.timer seat) and its totals calendar. The wide
+   toggle mirrors the shell's New Session bar geometry (38px, 12px radius);
+   the rail toggle mirrors the rail's 36px icon controls. Running state is
+   the success ink: the dot and the elapsed readout carry it, the bar keeps
+   the quiet elevated chrome. */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 38px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 22px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.toggle:hover {
+  background: var(--dsw-alias-button-floating-hover);
+}
+
+.toggleLabel {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.elapsed {
+  flex: none;
+  color: var(--dsw-alias-state-success-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.infoButton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.infoButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.railToggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.railToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.railToggle.running {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.railDot {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-state-success-primary);
+}
+
+/* Totals calendar (modal body). */
+.calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 380px;
+}
+
+.summary {
+  display: flex;
+  gap: 12px;
+}
+
+.summaryItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+}
+
+.summaryLabel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.summaryValue {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.monthHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.monthTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.monthNav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.monthNav:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gridRow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr) 72px;
+  gap: 2px;
+  align-items: stretch;
+}
+
+.weekday {
+  padding: 4px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.weekTotalHead {
+  text-align: right;
+  padding-right: 4px;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-height: 40px;
+  padding: 3px 0;
+  box-sizing: border-box;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.dayOutside {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.dayToday {
+  outline: 1px solid var(--dsw-alias-brand-primary);
+  outline-offset: -1px;
+}
+
+.dayHasTime {
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.dayNumber {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.dayTotal {
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--dsw-alias-state-success-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.weekTotal {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

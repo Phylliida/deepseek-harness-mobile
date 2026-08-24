@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type {
   SidebarFooterActionOwnerProps, SidebarRootComponentProps, SidebarSectionOwnerProps,
-  SidebarSettingsOwnerProps,
+  SidebarSettingsOwnerProps, SidebarTimerOwnerProps,
 } from '../src/client/contract/slots.ts'
 import { SidebarRoot } from '../src/client/SidebarRoot.tsx'
 import { en } from '../src/client/locales.ts'
@@ -27,6 +27,7 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
   let regionOwner: SidebarSectionOwnerProps | undefined
   let settingsOwner: SidebarSettingsOwnerProps | undefined
   let footerActionOwner: SidebarFooterActionOwnerProps | undefined
+  let timerOwner: SidebarTimerOwnerProps | undefined
   let current = { collapsed, width }
   const root = () => (
     <SidebarRoot
@@ -35,7 +36,7 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
       startSession={startSession} toggleSidebar={toggleSidebar} t={t}
       renderSlot={((
         key: string,
-        owner: SidebarFooterActionOwnerProps | SidebarSectionOwnerProps | SidebarSettingsOwnerProps,
+        owner: SidebarFooterActionOwnerProps | SidebarSectionOwnerProps | SidebarSettingsOwnerProps | SidebarTimerOwnerProps,
       ) => {
         if (key === 'sidebar.settings') {
           settingsOwner = owner
@@ -44,6 +45,10 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
         if (key === 'sidebar.footer.action') {
           footerActionOwner = owner
           return <div data-testid="footer-action-seat" data-wide={owner.wide} />
+        }
+        if (key === 'sidebar.timer') {
+          timerOwner = owner
+          return <div data-testid="timer-seat" data-wide={owner.wide} />
         }
         regionOwner = owner as SidebarSectionOwnerProps
         return <div data-testid="region" data-wide={owner.wide} />
@@ -65,6 +70,10 @@ function mountShell({ collapsed = false, width = 300 }: { collapsed?: boolean; w
     footerActionOwner: () => {
       if (footerActionOwner === undefined) throw new Error('footer action owner not rendered')
       return footerActionOwner
+    },
+    timerOwner: () => {
+      if (timerOwner === undefined) throw new Error('timer seat owner not rendered')
+      return timerOwner
     },
     rerender(next: Partial<typeof current>) {
       current = { ...current, ...next }
@@ -91,6 +100,8 @@ describe('SidebarRoot shell', () => {
     // The settings seat rides the same wide flag (ui-settings renders the row).
     expect(b.settingsOwner().wide).toBe(true)
     expect(b.footerActionOwner().wide).toBe(true)
+    // The control-row seat between New Session and the browser rides it too.
+    expect(b.timerOwner().wide).toBe(true)
     // Expanded: the request is a no-op (no accidental collapse).
     b.regionOwner().expandSidebar()
     expect(b.toggleSidebar).not.toHaveBeenCalled()
@@ -106,6 +117,7 @@ describe('SidebarRoot shell', () => {
     b.rerender({})
     expect(b.regionOwner().wide).toBe(false)
     expect(b.footerActionOwner().wide).toBe(false)
+    expect(b.timerOwner().wide).toBe(false)
     expect(screen.getByTestId('region')).toBeTruthy()
     b.regionOwner().expandSidebar()
     expect(b.toggleSidebar).toHaveBeenCalledOnce()

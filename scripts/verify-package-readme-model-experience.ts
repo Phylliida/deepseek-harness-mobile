@@ -62,6 +62,7 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/test-support/client-runtime': { kind: 'none', reason: 'Browser-side test infrastructure (jsdom bench); registers nothing model-facing.' },
   'packages/client/ui-slots': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-cost-estimate': { kind: 'none', reason: 'Browser-side display of the durable tokenUsage projection at a rate table; registers nothing model-facing.' },
+  'packages/client/ui-coding-timer': { kind: 'none', reason: 'Browser-side wellbeing timer with client-local persisted state; registers nothing model-facing.' },
   'packages/client/ui-attachment': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/ui-primitives': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },
   'packages/client/web-react': { kind: 'none', reason: 'Browser-side UI plugin layer; registers nothing model-facing.' },

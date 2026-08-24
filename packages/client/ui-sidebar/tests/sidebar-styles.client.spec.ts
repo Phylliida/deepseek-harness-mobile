@@ -40,11 +40,12 @@ describe('SidebarRoot.module.css', () => {
     expect(declarations('.collapsed .regionArea')?.get('margin-right')).toBe('0')
   })
 
-  it('moves the four upper controls while the settings seat only fades', () => {
+  it('moves the upper controls (control-row seat included) while the settings seat only fades', () => {
     const animation = 'rail-in 150ms var(--ds-ease-in-out) backwards'
     for (const selector of [
       '.railIn .iconButton',
       '.railIn .newSession',
+      '.railIn .timerArea',
       '.railIn .regionArea',
     ]) {
       expect(declarations(selector)?.get('animation')).toBe(animation)
