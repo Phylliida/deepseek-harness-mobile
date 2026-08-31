@@ -13,6 +13,23 @@ import { RpcId } from '../api/rpc.ts'
 import type { Wire } from '../api/rpc.schema.ts'
 import { rpcReceiptSchema, serverRequestSchema, serverResponseSchema } from '../api/rpc.schema.ts'
 import { hostFrameSchema, muxFrameSchema } from '../api/events.schema.ts'
+
+/**
+ * Generate an RFC 4122 version 4 UUID without requiring a secure context.
+ * `crypto.randomUUID()` exists only on HTTPS/loopback origins, which would
+ * break every RPC on a plain-HTTP LAN deployment; `crypto.getRandomValues()`
+ * is exposed on insecure origins (and Node ≥ 15), keeping this base
+ * platform-neutral.
+ * @returns a random UUID v4 string.
+ */
+export function randomUuid(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  view.setUint8(6, (view.getUint8(6) & 0x0f) | 0x40)
+  view.setUint8(8, (view.getUint8(8) & 0x3f) | 0x80)
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 import {
   hostCreateDirectoryValueSchema, hostDescribeValueSchema,
   hostListDirectoryValueSchema, hostOpenPathValueSchema, hostPickDirectoryValueSchema,
@@ -296,8 +313,7 @@ export abstract class AbstractApiClient implements IApiClient {
   }
 
   protected mintRpcId(): RpcId {
-    // crypto.randomUUID is a Web API (browser + Node ≥19): keeps this base platform-neutral.
-    return RpcId(crypto.randomUUID())
+    return RpcId(randomUuid())
   }
 
   /**
