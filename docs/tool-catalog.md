@@ -36,6 +36,7 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-subagent-report` | `report` | `ctx.subagents`, `ctx.systemPrompt`, `a live continuable in-process child Agent` | `tool/call`, `tool/result`, `a user-role message in the direct parent session` | - | Registered per continuable in-process child rather than globally, so this schema is visible only inside such a child and survives its global `toolFilter`. The same contribution installs the child-scoped `tool:report` prompt section, which this catalog does not render. The parent-facing `send_message` tool is installed independently. |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
+| `@deepseek-ai/dsh-tool-memory` | `memory` | `ctx.tools`, `ctx.memory`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | One `memory` tool carries the whole OptMem dialogue over `ctx.memory`: the model sends one command string (wake / note / nap / recall / zoom / forget / import) and the provider result text — including its `Run:` next-command instructions — is returned verbatim. The package also contributes the `tool:memory` system-prompt section (the wake-first / note-durable / subagent-skip discipline), which this catalog does not render. Schemas stay stable across providers because storage sits behind the seam. |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
@@ -1678,6 +1679,33 @@ Read a background job. Stream jobs return only output since the previous read; f
 Source: [`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/index.ts)
 
 The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`.
+
+<a id="deepseek-aidsh-tool-memory"></a>
+
+## `@deepseek-ai/dsh-tool-memory`
+
+### `memory`
+
+Your permanent memory, on disk, surviving every session, compaction, model, and vendor change. Send ONE command string: wake (first call of every session, before any other work), note "one durable line", nap [lo-hi "summary"] (answers due compressions), recall REGEX (search every memory), zoom lo-hi (open a summary-tree node), forget lo-hi (drop a wrong summary for rebuild), projects (list project memories under the working directory), use NAME / use global (switch between a project memory and the global one). Do exactly what the result prints; any line after "Run:" is your next command string, verbatim.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "One command in the memory grammar, e.g. \"wake\", \"wake 2 296\", \"note \\\"The user prefers tea\\\"\", \"nap 0-1 \\\"User drinks tea; repo uses pnpm\\\"\", \"recall tea|coffee\", \"zoom 0-31\", \"forget 0-31\". Quote arguments containing spaces with double quotes; \\\" and \\\\ escape inside them."
+    }
+  },
+  "required": [
+    "command"
+  ]
+}
+```
+
+Source: [`packages/memory/tool-memory/src/index.ts`](../packages/memory/tool-memory/src/index.ts)
+
+One `memory` tool carries the whole OptMem dialogue over `ctx.memory`: the model sends one command string (wake / note / nap / recall / zoom / forget / import) and the provider result text — including its `Run:` next-command instructions — is returned verbatim. The package also contributes the `tool:memory` system-prompt section (the wake-first / note-durable / subagent-skip discipline), which this catalog does not render. Schemas stay stable across providers because storage sits behind the seam.
 
 <a id="deepseek-aidsh-tool-todo"></a>
 

@@ -18,7 +18,7 @@ import { CostLine, type CostLineInjected } from '../src/client/CostLine.tsx'
 
 const SLOT = 'conversation.composer.dock'
 
-async function bench() {
+async function bench(options: { quotaFails?: boolean } = {}) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
@@ -31,7 +31,19 @@ async function bench() {
     isLoopback: true,
   } as never)
   // The scope's transport and the forwarded-event port the plugin injects.
-  new TestRemote(ctx)
+  const remote = new TestRemote(ctx)
+  // The mounted namespace the quota source polls. Production installs
+  // namespaces as properties of the Remote service; the double is a plain
+  // object, so the stub goes on both the dotted service key (the inject edge)
+  // and the double itself (the property read). Null keeps the quota segment
+  // hidden, matching a Host without the quota plugin.
+  const kimiQuota = {
+    current: () => Promise.resolve(options.quotaFails === true
+      ? { ok: false as const, error: { code: 'internal', message: 'unavailable', details: {} } }
+      : { ok: true as const, value: null }),
+  }
+  ctx.provide('remote.kimiQuota', kimiQuota)
+  Object.assign(remote, { kimiQuota })
   await ctx.plugin(SettingsScopeBinder).await()
   return { ctx, slots: ctx.get('slots') as SlotRegistry, locale }
 }
@@ -46,7 +58,7 @@ function declareDock(slots: SlotRegistry): () => void {
 
 describe('ui-cost-estimate apply', () => {
   it('declares the slots/locale/settings-transport edges', () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'settingsScope'])
+    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'remote.kimiQuota', 'settingsScope'])
   })
 
   it('registers localized copy and the dock line ahead of the stats row', async () => {
@@ -85,7 +97,24 @@ describe('ui-cost-estimate apply', () => {
       rates: { input: 3, cacheRead: 0.3, cacheWrite: 3, output: 15 },
       weeklyBudgetUsd: 120,
     })
+    // The namespace stub answers null: the quota store starts hidden.
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(face.hooks.quota.getSnapshot()).toBeNull()
     await fiber.dispose()
     expect(b.slots.entries(SLOT)).toHaveLength(0)
+  })
+
+  it('keeps the quota segment hidden when the Remote call fails', async () => {
+    const b = await bench({ quotaFails: true })
+    declareDock(b.slots)
+    const fiber = b.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const entry = b.slots.entries(SLOT).find(e => e.component === CostLine)!
+    const face = (entry.inject as unknown as () => CostLineInjected)()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(face.hooks.quota.getSnapshot()).toBeNull()
+    await fiber.dispose()
   })
 })

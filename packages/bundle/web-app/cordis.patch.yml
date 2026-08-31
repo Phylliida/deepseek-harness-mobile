@@ -94,6 +94,11 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Kimi Code subscription quota for the composer cost line; stateless
+    # per-call fetch, null (hidden segment) without a configured credential.
+    - id: kimi-quota
+      name: '@deepseek-ai/dsh-host-kimi-quota'
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway

@@ -14,7 +14,7 @@ The acceptance bar is stronger than "the socket connects": each reference must s
 
 Ship three default-off Cordis overlay examples under `examples/mcp-memory`: Memorix, MCP Reference Memory, and Engram. Every file inserts exactly one `@deepseek-ai/dsh-mcp-client` row. None is referenced by the shipped composition, and the CLI declares the generic bridge only so an explicitly selected overlay can resolve it.
 
-These third-party configurations are provided as interoperability examples only. Their inclusion does not imply endorsement, recommendation, partnership, or ongoing support by DeepSeek. There is no memory preset registry, vendor-specific DSH plugin, universal memory service, installation UI, migration layer, health checker, or reconnect controller. Another memory MCP server uses the same documented stdio or Streamable HTTP row.
+These third-party configurations are provided as interoperability examples only. Their inclusion does not imply endorsement, recommendation, partnership, or ongoing support by DeepSeek. There is no memory preset registry, vendor-specific DSH plugin, universal memory service, installation UI, migration layer, health checker, or reconnect controller. Another memory MCP server uses the same documented stdio or Streamable HTTP row. The first-party native memory seam added later is a separate, mechanism-owned decision — see [Memory capability seam (OptMem design)](2026-08-24-memory-capability-seam.md).
 
 ## Responsibility boundary
 
