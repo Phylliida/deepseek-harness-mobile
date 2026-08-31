@@ -14,7 +14,7 @@ Status: implemented
 
 在 `examples/mcp-memory` 下交付三份默认关闭的 Cordis overlay 示例：Memorix、MCP Reference Memory 和 Engram。每个文件只插入一个 `@deepseek-ai/dsh-mcp-client` 配置项。交付组合不会引用这些文件；CLI（命令行界面）仅声明通用桥接器，使用户显式选择 overlay 时可以解析它。
 
-这些第三方配置仅作为互操作参考；收录不代表 DeepSeek 的认可、推荐、合作关系或持续支持承诺。系统没有记忆预设注册表、提供方专属 DSH 插件、通用记忆服务、安装 UI、迁移层、健康检查器或重连控制器。其他记忆 MCP 服务器可以使用同一份文档中的 stdio 或 Streamable HTTP 配置项。
+这些第三方配置仅作为互操作参考；收录不代表 DeepSeek 的认可、推荐、合作关系或持续支持承诺。系统没有记忆预设注册表、提供方专属 DSH 插件、通用记忆服务、安装 UI、迁移层、健康检查器或重连控制器。其他记忆 MCP 服务器可以使用同一份文档中的 stdio 或 Streamable HTTP 配置项。后来新增的第一方原生记忆 seam 是另一项机制自有的独立决定——见 [Memory capability seam（OptMem 设计）](2026-08-24-memory-capability-seam.md)。
 
 ## 职责边界
 

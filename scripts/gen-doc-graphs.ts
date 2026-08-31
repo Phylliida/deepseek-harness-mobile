@@ -147,6 +147,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Companion subpaths register owner-local checks; the service owns selection, uniqueness, child fibers, and package-attributed failures.',
   },
   {
+    key: 'memory',
+    pkg: 'memory',
+    title: 'Permanent agent-curated memory seam',
+    mode: 'seam',
+    implementations: ['memory-log'],
+    consumers: ['tool-memory'],
+    note: 'Providers own storage of the append-only memory log and summary tree; the tool Consumer renders the wake/note/nap/recall/zoom/forget dialogue. Compression is agent-in-the-loop.',
+  },
+  {
     key: 'typert',
     pkg: 'typert-registry',
     title: 'Runtime type registry',

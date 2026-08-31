@@ -813,6 +813,26 @@ export interface Config {
 
 来源：[`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
 
+<a id="deepseek-aidsh-host-kimi-quota"></a>
+
+## `@deepseek-ai/dsh-host-kimi-quota`
+
+需要：`credentials`
+
+```ts config-catalog
+/** Deployment knobs for the quota fetcher. */
+export interface Config {
+  /** Managed platform base URL (default `https://api.kimi.com/coding`); `/v1/usages` is appended. */
+  baseUrl?: string
+  /** Credential reference (environment-variable name) holding the Kimi Code API key. */
+  apiKeyEnv?: string
+  /** `/usages` request timeout in milliseconds (default 8000). */
+  timeoutMs?: number
+}
+```
+
+来源：[`packages/host/kimi-quota/src/index.ts:25`](../packages/host/kimi-quota/src/index.ts)
+
 <a id="deepseek-aidsh-host-webserver"></a>
 
 ## `@deepseek-ai/dsh-host-webserver`
@@ -1314,6 +1334,48 @@ export interface ReconnectConfig {
 ```
 
 来源：[`packages/mcp/mcp-client/src/index.ts:98`](../packages/mcp/mcp-client/src/index.ts)
+
+<a id="deepseek-aidsh-memory-log"></a>
+
+## `@deepseek-ai/dsh-memory-log`
+
+```ts config-catalog
+/**
+ * Deployment configuration for the log memory provider. The sizes are
+ * reading and transport budgets, never storage: changing one never
+ * recomputes or touches a recorded memory.
+ */
+export interface Config {
+  /**
+   * Store directory of the global memory. Defaults to `memory/` under the
+   * resolved harness home (`$DSH_HOME`, else `~/.dsh`). A leading `~` is
+   * expanded.
+   */
+  directory?: string
+  /**
+   * Root whose immediate child directories count as projects for
+   * `projects`/`use`. Defaults to the process working directory. A leading
+   * `~` is expanded; an explicitly configured root that does not exist fails
+   * at load.
+   */
+  projectsRoot?: string
+  /**
+   * Store directory created inside a selected project. One directory name,
+   * no separators. Defaults to `.memory`.
+   */
+  projectsDir?: string
+  /** How many lines one wake renders (96 ≈ 8k tokens of dense text). Defaults to 96. */
+  wakeLines?: number
+  /** Longest one memory or summary line, in UTF-8 bytes. Defaults to 280. */
+  entryChars?: number
+  /** Largest one output part, in UTF-8 bytes (harness truncation headroom). Defaults to 20000. */
+  partChars?: number
+  /** Largest one output part, in lines. Defaults to 500. */
+  partLines?: number
+}
+```
+
+来源：[`packages/memory/memory-log/src/index.ts:35`](../packages/memory/memory-log/src/index.ts)
 
 <a id="deepseek-aidsh-message-feedback"></a>
 
@@ -3126,6 +3188,7 @@ export interface Config {
 - `@deepseek-ai/dsh-tool-ask-user` — 需要 `tools` · `userInteraction`（[`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts)）
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
+- `@deepseek-ai/dsh-tool-memory` — 需要 `tools` · `memory` · `systemPrompt`（[`packages/memory/tool-memory/src/index.ts`](../packages/memory/tool-memory/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）
@@ -3141,6 +3204,7 @@ export interface Config {
 - `@deepseek-ai/dsh-fs` — 抽象 `FileSystem`（[`packages/fs/fs/src/index.ts`](../packages/fs/fs/src/index.ts)）
 - `@deepseek-ai/dsh-host-directory-picker` — 抽象 `DirectoryPicker`（[`packages/host/directory-picker/src/index.ts`](../packages/host/directory-picker/src/index.ts)）
 - `@deepseek-ai/dsh-jobs` — 抽象 `JobRegistry`（[`packages/jobs/jobs/src/index.ts`](../packages/jobs/jobs/src/index.ts)）
+- `@deepseek-ai/dsh-memory` — 抽象 `MemoryService`（[`packages/memory/memory/src/index.ts`](../packages/memory/memory/src/index.ts)）
 - `@deepseek-ai/dsh-sandbox` — 抽象 `SandboxProvider`（[`packages/sandbox/sandbox/src/index.ts`](../packages/sandbox/sandbox/src/index.ts)）
 - `@deepseek-ai/dsh-session-persistence` — 抽象 `SessionPersistence`（[`packages/session/session-persistence/src/index.ts`](../packages/session/session-persistence/src/index.ts)）
 - `@deepseek-ai/dsh-session-query` — 抽象 `SessionQueryEngine`（[`packages/session-query/session-query/src/index.ts`](../packages/session-query/session-query/src/index.ts)）
