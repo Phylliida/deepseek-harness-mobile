@@ -10,6 +10,8 @@
 
 策略逐调用传入；提供方只存储机制与缓存的 runner 结论。每次包装都会报告强制执行完整度，以及后端专用的拒绝签名和 runner 失败规则。Landlock 只有在退出码为 125，且仅排除完全匹配的部分强制执行通知后仍存在一行 `landlock-run:` 致命诊断时，才判定 runner 失败；携带该通知的子进程即使以 1、2 或 125 退出，也仍按子进程结果处理。Bubblewrap 和 Seatbelt 仍仅依据签名，因为两者的公开约定均未保留 launcher 失败状态。消费方会直接 spawn 返回的 argv，因此 runner 缺失或不可执行属于带外 spawn 失败，而成功启动的子进程以 126 或 127 退出时仍按普通结果处理。`runnerCommand` 会跳过探测，并要求为自定义 runner 自身的致命方言提供一个或多个非空、单行、不区分大小写的 `runnerFailureSignatures` 条目。由于其机制未知，它会同时携带两种 Linux 拒绝方言。`probeTimeoutMs` 限定功能探测的时长。[沙箱 Agent Note](../../../.agents/notes/implemented/feature/2026-07-06-sandbox.md) 负责说明选择与失败语义。
 
+`devicePassthrough` 把宿主机设备节点以可读写方式暴露给每条受限命令——这是 Linux 档的 GPU 透传（bwrap 的 `--dev-bind` 对、Landlock 的 `--rw` 授权；配置了 `runnerCommand` 时也会收到同样的 bwrap 参数对），Seatbelt 与 windows-acl 档会忽略该列表。此授权与模式无关：`read-only` 仍然约束普通文件树，而列出的节点保持可写。每个条目必须是 `/dev/` 之下、在插件加载时存在的绝对路径——违反时挂载会立即失败；节点若在之后消失，包装会通过 runner 自身的致命方言失败。`/dev` 本身会被拒绝：绑定整棵设备树会暴露 `/dev/shm`、`/dev/pts` 以及所有无关节点。
+
 Seatbelt profile 默认允许，但带 `(deny file-write*)` 和写入 allow-list，因此恰好约束相应模式承诺的文件操作：`read-only` 只授予 `/dev/null` 字面路径；`workspace-write` 另加工作区根目录、`/tmp` 和逐用户 darwin 临时目录（`os.tmpdir()`，即平台供 mkstemp 家族工具使用的真实临时区域）。每个根目录都经过规范化，因为 Seatbelt 匹配解析后的路径（`/tmp` 就是 `/private/tmp`）。Apple 将 `sandbox-exec` CLI（命令行界面）标为 deprecated，但所有 macOS 系统仍会提供它；若情况发生变化，功能探测会使执行被拒绝。
 
 Windows 档为每个工作区保留一个确定性写入 SID 和常驻 ACE，但为每个活跃的会话/工作区对分配一个随机私有临时目录，以及不同的 SID 和可撤销 ACE。因此，共享工作区的会话会共享预期的写权限，却不会继承彼此的临时目录权限。新的提供方总会选择新的临时路径和 SID，因此崩溃残留既无法阻止恢复的会话，也无法向其授权；runner 会为无 agent（智能体）的调用提供同样的逐调用隔离。如果工作区等于或包含平台临时根目录，调用会在任何 ACL 改动发生前失败，因为否则其可继承的工作区 ACE 会延伸到每个私有临时子目录。
@@ -19,6 +21,8 @@ Windows 档为每个工作区保留一个确定性写入 SID 和常驻 ACE，但
 ```yaml
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
+  config:
+    devicePassthrough: [/dev/dri, /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-modeset, /dev/nvidia-uvm, /dev/nvidia-uvm-tools]
 ```
 
 消费方：[`@deepseek-ai/dsh-bash-sandbox`](../../shell/bash-sandbox/)；可运行的默认组合见 [acp-agent 示例](../../../examples/acp-agent/)。
@@ -38,3 +42,4 @@ Windows 档为每个工作区保留一个确定性写入 SID 和常驻 ACE，但
 - **Seatbelt 依赖已弃用的 `sandbox-exec`**：macOS 仍会提供它，但若 Apple 移除该私有策略引擎，该提供方无法替换或探测。
 - **runner 选择在提供方生命周期内缓存**：安装、移除或修复 runner 后，必须重载插件才能改变选择。
 - **`runnerCommand` 是操作方断言**：配置的自定义 runner 会跳过功能探测，并假定它诚实实现与 bwrap 兼容的 profile；如果它本身是 Bash 脚本，其解释器启动发生在该脚本施加约束之前。
+- **设备透传不受文件操作模式约束**：`devicePassthrough` 列出的节点在 `read-only` 下仍可写，且只有 Linux 档实现该列表；Seatbelt 与 windows-acl 的包装永远不会携带它。

@@ -5126,7 +5126,7 @@ importers:
   packages/host/kimi-quota:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: workspace:^
+        specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
       zod:
         specifier: ^4.4.3
@@ -5757,7 +5757,7 @@ importers:
   packages/memory/memory-log:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: workspace:^
+        specifier: link:../../../vendor/schemastery
         version: link:../../../vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':

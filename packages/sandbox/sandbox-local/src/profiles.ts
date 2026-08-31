@@ -11,24 +11,31 @@ import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 /**
  * Build the bwrap profile arguments for one file-effect policy.
  * @param policy - file-effect policy to express as bwrap mounts.
+ * @param devices - host device nodes (`devicePassthrough` config) bound
+ *   read-write as `--dev-bind` pairs; validated at plugin load, so a node
+ *   that vanishes later fails the wrap through bwrap's own fatal dialect.
  * @returns profile arguments before the trailing separator and command argv.
  */
-export function bwrapProfileArgs(policy: SandboxPolicy): string[] {
+export function bwrapProfileArgs(policy: SandboxPolicy, devices: readonly string[] = []): string[] {
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent']
   if (policy.mode === 'workspace-write') {
     args.push('--tmpfs', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
   }
+  for (const device of devices) args.push('--dev-bind', device, device)
   return args
 }
 
 /**
  * Build the Landlock launcher grants for one file-effect policy.
  * @param policy - file-effect policy to express as Landlock allow-list grants.
+ * @param devices - host device nodes (`devicePassthrough` config) granted
+ *   read-write alongside `/dev/null`; validated at plugin load, so a node
+ *   that vanishes later fails the wrap through the launcher's fatal dialect.
  * @returns launcher grant arguments before the trailing separator and command argv.
  */
-export function landlockProfileArgs(policy: SandboxPolicy): string[] {
-  const readWrite = ['/dev/null']
+export function landlockProfileArgs(policy: SandboxPolicy, devices: readonly string[] = []): string[] {
+  const readWrite = ['/dev/null', ...devices]
   if (policy.mode === 'workspace-write') {
     readWrite.push('/tmp', policy.workspaceRoot)
   }

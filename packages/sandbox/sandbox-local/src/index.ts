@@ -23,7 +23,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   LAUNCHER_BIN,
@@ -62,6 +62,22 @@ export interface Config {
   runnerFailureSignatures?: string[]
   /** Positive timeout for each functional probe; zero would mean unbounded to Node. */
   probeTimeoutMs?: number
+  /**
+   * Host device nodes exposed read-write inside every confined command — the
+   * GPU passthrough for the Linux rungs (bwrap `--dev-bind` pairs, Landlock
+   * `--rw` grants; a configured `runnerCommand` receives the same bwrap
+   * pairs). The Seatbelt and windows-acl rungs ignore the list. The grant is
+   * mode-independent: `read-only` still governs the ordinary file tree while
+   * the listed nodes stay open. Every entry must be an absolute path beneath
+   * `/dev/` that exists at plugin load — a violation fails the mount loud,
+   * and a node that vanishes later fails the wrap through the runner's own
+   * fatal dialect. `/dev` itself is rejected: binding the whole device tree
+   * would expose `/dev/shm`, `/dev/pts`, and every unrelated node. A host
+   * with one NVIDIA card: `/dev/dri`, `/dev/nvidia0`, `/dev/nvidiactl`,
+   * `/dev/nvidia-modeset`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`; AMD
+   * ROCm adds `/dev/kfd`.
+   */
+  devicePassthrough?: string[]
 }
 
 /** Probe whether `bwrap` can create the profile; the provider caches the bounded result. */
@@ -253,6 +269,7 @@ export class LocalSandboxProvider extends SandboxProvider {
     runnerCommand: z.array(z.string()).default([]),
     runnerFailureSignatures: z.array(z.string()).default([]),
     probeTimeoutMs: z.natural().default(5_000),
+    devicePassthrough: z.array(z.string()).default([]),
   })
 
   /** Test hook (mirrors the bash executors' `internals`). */
@@ -261,6 +278,8 @@ export class LocalSandboxProvider extends SandboxProvider {
   private readonly runnerCommand: string[] | undefined
   private readonly configuredRunnerFailureSignatures: string[]
   private readonly probeTimeoutMs: number
+  /** Validated `devicePassthrough` entries, appended to the Linux rungs' profiles. */
+  private readonly devicePassthrough: string[]
   /** Cached chain verdict; undefined until the first confined wrap needs it. */
   private selectedRunner: SelectedRunner | 'unavailable' | undefined
   /**
@@ -293,6 +312,21 @@ export class LocalSandboxProvider extends SandboxProvider {
     this.configuredRunnerFailureSignatures = runnerFailureSignatures
     this.probeTimeoutMs = config.probeTimeoutMs as number
     assertPositiveFinite('probeTimeoutMs', this.probeTimeoutMs)
+    this.devicePassthrough = config.devicePassthrough as string[]
+    for (const device of this.devicePassthrough) {
+      // Device nodes live under /dev; normalization catches `..` escapes the
+      // prefix check alone would admit (`/dev/../etc/hostname`). Existence is
+      // resolvable at load, so a typo fails the mount rather than the first
+      // confined command; a node lost to hot-unplug fails the wrap later
+      // through the runner's fatal dialect.
+      const normalized = normalize(device)
+      if (!isAbsolute(device) || normalized === '/dev' || !normalized.startsWith('/dev/')) {
+        throw new Error(`sandbox-local: devicePassthrough entries must be absolute paths beneath /dev/ — got "${device}"`)
+      }
+      if (!existsSync(device)) {
+        throw new Error(`sandbox-local: devicePassthrough entry "${device}" does not exist on this host`)
+      }
+    }
     // The temp grants are revoked with the provider: a clean server
     // shutdown leaves no temp ACEs behind (workspace ACEs stand by design —
     // the reuse cache; an unclean shutdown leaves them for the next
@@ -316,7 +350,7 @@ export class LocalSandboxProvider extends SandboxProvider {
   confine(argv: readonly string[], policy: SandboxPolicy): ConfinedArgv {
     if (this.runnerCommand !== undefined) {
       return {
-        argv: [...this.runnerCommand, ...bwrapProfileArgs(policy), '--', ...argv],
+        argv: [...this.runnerCommand, ...bwrapProfileArgs(policy, this.devicePassthrough), '--', ...argv],
         enforcement: 'full',
         denialSignatures: DENIAL_SIGNATURES.runnerCommand,
         runnerFailureRules: [{ fatalSignatures: this.configuredRunnerFailureSignatures }],
@@ -335,8 +369,8 @@ export class LocalSandboxProvider extends SandboxProvider {
   /** The selected rung's runner invocation (program + profile arguments) for one policy. */
   private runnerArgv(runner: SelectedRunner['runner'], policy: SandboxPolicy): string[] {
     switch (runner) {
-      case 'bwrap': return ['bwrap', ...bwrapProfileArgs(policy)]
-      case 'landlock': return [this.landlockLauncher(), ...landlockProfileArgs(policy)]
+      case 'bwrap': return ['bwrap', ...bwrapProfileArgs(policy, this.devicePassthrough)]
+      case 'landlock': return [this.landlockLauncher(), ...landlockProfileArgs(policy, this.devicePassthrough)]
       case 'seatbelt': return [this.seatbeltExec(), ...seatbeltProfileArgs(policy)]
       case 'windows-acl': return this.windowsAclRunnerArgv(policy)
       default: return assertNever(runner)
