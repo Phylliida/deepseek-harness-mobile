@@ -31,6 +31,8 @@ const ptyStreamExpected = join(ptyScenarioDir, 'stream-json.expected.jsonl')
 const ptyConfigPath = fileURLToPath(new URL('../pty.cordis.snapshot.yml', import.meta.url))
 const goalScenarioDir = join(snapshotsDir, 'goal-tools')
 const goalConfigPath = fileURLToPath(new URL('../goal.cordis.snapshot.yml', import.meta.url))
+const memoryScenarioDir = join(snapshotsDir, 'memory-tools')
+const memoryConfigPath = fileURLToPath(new URL('../memory.cordis.snapshot.yml', import.meta.url))
 const retryScenarioDir = join(snapshotsDir, 'provider-retry')
 const retryConfigPath = fileURLToPath(new URL('../retry.cordis.snapshot.yml', import.meta.url))
 const compactionScenarioDir = join(snapshotsDir, 'compaction-recovery')
@@ -175,6 +177,31 @@ function normalizeGoalTimestamps(value: unknown): unknown {
 function normalizeGoalStream(rawStdout: string, cwd: string): string {
   return parseJsonl(normalizeHeadlessStream(rawStdout, cwd))
     .map(record => JSON.stringify(normalizeGoalTimestamps(record)))
+    .join('\n') + '\n'
+}
+
+/** Scrub the local-date stamps inside memory entries (#i YYYY-MM-DD) after the shared scrubbers. */
+function normalizeMemoryStream(rawStdout: string, cwd: string): string {
+  return parseJsonl(normalizeHeadlessStream(rawStdout, cwd))
+    .map((record) => {
+      if (record.type === 'session_event') {
+        const event = record.event as JsonObject | undefined
+        if (event?.type === 'tool/result') {
+          const data = event.data as JsonObject | undefined
+          const message = data?.message as JsonObject | undefined
+          const envelope = (message?.content as { content?: { text?: string }[] }[] | undefined)?.[0]
+          const blocks = envelope?.content
+          if (Array.isArray(blocks)) {
+            for (const block of blocks) {
+              if (typeof block.text === 'string') {
+                block.text = block.text.replace(/(#\d+(?:-\d+)? )\d{4}-\d{2}-\d{2}/g, '$1YYYY-MM-DD')
+              }
+            }
+          }
+        }
+      }
+      return JSON.stringify(record)
+    })
     .join('\n') + '\n'
 }
 
@@ -697,6 +724,72 @@ describe('headless stream-json snapshots', () => {
 
     expect(result.stderr).toBe('')
     const normalized = normalizeGoalStream(result.stdout, runCwd)
+    if (refreshing) await writeFile(streamExpected, normalized)
+    expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
+  }, LOADER_SMOKE_TEST_TIMEOUT_MS)
+
+  it('replays the persisted memory dialogue through the one-shot app', async () => {
+    const prompt = await scenarioPrompt(memoryScenarioDir, 'memory-tools')
+    const streamExpected = join(memoryScenarioDir, 'stream-json.expected.jsonl')
+    let runCwd = ''
+    const result = await runLoaderSmoke({
+      label: 'memory tools headless stream-json snapshot',
+      tempDirPrefix: 'headless-snapshot-memory-tools-',
+      binScript,
+      libBinScript: binScript,
+      configPath: memoryConfigPath,
+      binArgs: [memoryConfigPath, prompt],
+      tsconfigPath,
+      env: {
+        DSH_SNAPSHOT: 'replay',
+        DSH_SNAPSHOT_FILE: join(memoryScenarioDir, 'session.jsonl'),
+        DSH_SNAPSHOT_OVERRIDE: join(memoryScenarioDir, 'replay.override.json'),
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
+      },
+      prepare: (cwd) => { runCwd = cwd },
+      inspect: async (cwd) => {
+        const logs = await persistedLogs(cwd)
+        expect(logs).toHaveLength(1)
+        const records = parseJsonl(logs[0]?.content ?? '')
+        const calls = records.filter(record => record.type === 'tool/call')
+          .map(record => (record.data as JsonObject | undefined)?.name)
+        expect(calls).toEqual(['memory', 'memory', 'memory', 'memory', 'memory', 'memory'])
+        const receipt = (callId: string): string => {
+          const record = records.find((entry) => {
+            if (entry.type !== 'tool/result') return false
+            const data = entry.data as JsonObject | undefined
+            const message = data?.message as JsonObject | undefined
+            const source = message?.source as JsonObject | undefined
+            return source?.callId === callId
+          })
+          const data = record?.data as JsonObject | undefined
+          const message = data?.message as JsonObject | undefined
+          const envelope = (message?.content as { isError?: boolean; content?: { text?: string }[] }[] | undefined)?.[0]
+          expect(envelope?.isError).toBe(false)
+          return (envelope?.content?.[0]?.text ?? '').replace(/(#\d+(?:-\d+)? )\d{4}-\d{2}-\d{2}/g, '$1YYYY-MM-DD')
+        }
+        expect(receipt('call_memory_wake_1')).toBe(
+          'No memories yet. Record the first with: note "<one line>"\nYou are awake.')
+        expect(receipt('call_memory_note_1')).toBe('Saved as #0.')
+        expect(receipt('call_memory_note_2')).toBe(
+          'Saved as #1.\n\n'
+          + 'Compress memories #0-1 into one line of at most 280 bytes.\n'
+          + 'Keep what has lasting effect, drop what does not. Invent nothing.\n\n'
+          + '  #0 YYYY-MM-DD The user prefers tea over coffee.\n'
+          + '  #1 YYYY-MM-DD The project builds with pnpm workspaces.\n\n'
+          + 'Run: nap 0-1 "<your line>"')
+        expect(receipt('call_memory_nap')).toBe('0-1 saved.\nNothing left to compress.')
+        expect(receipt('call_memory_wake_2')).toBe(
+          '#0 YYYY-MM-DD The user prefers tea over coffee.\n'
+          + '#1 YYYY-MM-DD The project builds with pnpm workspaces.\n'
+          + 'You are awake.')
+        expect(receipt('call_memory_recall')).toBe(
+          '#0 YYYY-MM-DD The user prefers tea over coffee.\n1 match.')
+      },
+    })
+
+    expect(result.stderr).toBe('')
+    const normalized = normalizeMemoryStream(result.stdout, runCwd)
     if (refreshing) await writeFile(streamExpected, normalized)
     expect(normalized).toBe(await readFile(streamExpected, 'utf8'))
   }, LOADER_SMOKE_TEST_TIMEOUT_MS)

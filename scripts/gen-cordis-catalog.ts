@@ -74,6 +74,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   invariants: 'invariants.md',
   llm: 'llm-streaming.md',
   lsp: 'lsp.md',
+  memory: 'memory.md',
   messageFeedback: 'feedback.md',
   permissionPresets: 'permission-presets.md',
   planMode: 'plan.md',

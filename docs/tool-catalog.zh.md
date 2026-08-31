@@ -38,6 +38,7 @@
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`、`list_agents`、`send_message` | `ctx.tools`、`ctx.subagents`、`ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`、`tool/result`、`child session events through ctx.subagents` | - | 这些是控制可继续后台 subagent 的全局命名工具：绑定提供方的 `tool-subagent` 实例注册不同的委派工具；本包注册一次 `send_message` 和 `interrupt_agent`，另由 `list_agents` 通过单独加载的 `/list-agents` 插件提供，其目录行使用 sessionProjections 和实时 Agent 注册表。 |
 | `@deepseek-ai/dsh-tool-subagent-report` | `report` | `ctx.subagents`、`ctx.systemPrompt`、`a live continuable in-process child Agent` | `tool/call`、`tool/result`、`a user-role message in the direct parent session` | - | 按可继续的进程内子级注册，而非全局注册，因此该 schema 仅在这种子级内部可见，并且不受其全局 `toolFilter` 影响。同一份贡献还会安装子级作用域的 `tool:report` 系统提示词 section，本目录不渲染该 section。面向父级的 `send_message` 工具单独安装。 |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`、`job_list`、`job_output` | `ctx.tools`、`ctx.jobs`、`ctx.systemPrompt` | `tool/call`、`tool/result`、`user/message via agent.inject() for background completion notices` | - | 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。 |
+| `@deepseek-ai/dsh-tool-memory` | `memory` | `ctx.tools`、`ctx.memory`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | 一个 `memory` 工具在 `ctx.memory` 之上承载整个 OptMem 对话：模型发送一条命令字符串（wake / note / nap / recall / zoom / forget / import），提供方的结果文本——包括其 `Run:` 下一条命令指令——被逐字返回。该包还贡献 `tool:memory` 系统提示词小节（wake 优先 / 只记持久事实 / subagent 跳过的纪律），本目录不渲染该小节。schema 跨提供方保持稳定，因为存储位于 seam 之后。 |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`、`owning Agent session` | `tool/call`、`todo/write`、`tool/result` | - | todo_write 是会话所有的状态；UI 将最新的 todo/write 事件渲染为检查清单。`allowParallelInProgress` 是没有默认值的必填项，因此本目录明确选择 `true`，对应描述允许同时存在多个 `in_progress` 项。选择 `false` 的部署会获得同一工具，但描述会要求只能有 1 个活动任务。 |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`、`ctx.workflowEngine`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents the script children)` | `tool/call`、`tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`、`web_search` | `ctx.tools`、`ctx.web`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | web_search 和 web_fetch 将提供方选择置于 ctx.web 之后，使模型可见 schema 在更换后端时保持稳定。 |
@@ -1682,6 +1683,33 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 来源：[`packages/jobs/tool-jobs/src/index.ts`](../packages/jobs/tool-jobs/src/index.ts)
 
 与任务种类无关的后台任务控制器：后台 bash 命令、PTY 发送和 subagent 都通过相同的 3 个工具读取、列出和终止。加载该插件会挂接控制器，从而启用生产方的 `ctx.jobs.start()`。
+
+<a id="deepseek-aidsh-tool-memory"></a>
+
+## `@deepseek-ai/dsh-tool-memory`
+
+### `memory`
+
+你的永久记忆，在磁盘上，历经每一次会话、压缩、模型与供应商的更换而存活。发送一条命令字符串：wake（每次会话的第一次调用，先于任何其他工作）、note "一条持久行"、nap [lo-hi "摘要"]（应答到期的压缩）、recall REGEX（搜索每条记忆）、zoom lo-hi（打开一个摘要树节点）、forget lo-hi（丢弃一个错误的摘要以待重建）、projects（列出工作目录下的项目记忆）、use NAME / use global（在项目记忆与全局记忆之间切换）。严格按结果打印的内容去做；"Run:" 之后的任何行就是你的下一条命令字符串，逐字发送。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "command": {
+      "type": "string",
+      "description": "One command in the memory grammar, e.g. \"wake\", \"wake 2 296\", \"note \\\"The user prefers tea\\\"\", \"nap 0-1 \\\"User drinks tea; repo uses pnpm\\\"\", \"recall tea|coffee\", \"zoom 0-31\", \"forget 0-31\". Quote arguments containing spaces with double quotes; \\\" and \\\\ escape inside them."
+    }
+  },
+  "required": [
+    "command"
+  ]
+}
+```
+
+来源：[`packages/memory/tool-memory/src/index.ts`](../packages/memory/tool-memory/src/index.ts)
+
+一个 `memory` 工具在 `ctx.memory` 之上承载整个 OptMem 对话：模型发送一条命令字符串（wake / note / nap / recall / zoom / forget / import），提供方的结果文本——包括其 `Run:` 下一条命令指令——被逐字返回。该包还贡献 `tool:memory` 系统提示词小节（wake 优先 / 只记持久事实 / subagent 跳过的纪律），本目录不渲染该小节。schema 跨提供方保持稳定，因为存储位于 seam 之后。
 
 <a id="deepseek-aidsh-tool-todo"></a>
 

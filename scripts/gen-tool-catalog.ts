@@ -6,8 +6,9 @@
  * `.agents/notes/implemented/process/2026-07-02-tool-schema-catalog.md`.
  */
 
-import { globSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { globSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
@@ -54,6 +55,8 @@ import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
 import * as ToolSchedule from '@deepseek-ai/dsh-schedule'
 import Lsp from '@deepseek-ai/dsh-lsp'
 import * as ToolLsp from '@deepseek-ai/dsh-tool-lsp'
+import LogMemory from '@deepseek-ai/dsh-memory-log'
+import * as ToolMemory from '@deepseek-ai/dsh-tool-memory'
 import * as ToolSkill from '@deepseek-ai/dsh-tool-skill'
 import * as ToolSessionQuery from '@deepseek-ai/dsh-tool-session-query'
 import * as ToolTasks from '@deepseek-ai/dsh-tool-jobs'
@@ -505,6 +508,21 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers\' `ctx.jobs.start()`.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-memory',
+    dir: 'tool-memory',
+    source: 'packages/memory/tool-memory/src/index.ts',
+    requires: ['ctx.tools', 'ctx.memory', 'ctx.systemPrompt'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      // The provider needs a real (here throwaway) store directory; the
+      // schemas do not depend on its contents.
+      await ctx.plugin(LogMemory, { directory: mkdtempSync(join(tmpdir(), 'dsh-memory-catalog-')) })
+      await ctx.plugin(ToolMemory)
+    },
+    note:
+      'One `memory` tool carries the whole OptMem dialogue over `ctx.memory`: the model sends one command string (wake / note / nap / recall / zoom / forget / import) and the provider result text — including its `Run:` next-command instructions — is returned verbatim. The package also contributes the `tool:memory` system-prompt section (the wake-first / note-durable / subagent-skip discipline), which this catalog does not render. Schemas stay stable across providers because storage sits behind the seam.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-todo',
