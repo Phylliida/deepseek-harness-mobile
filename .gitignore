@@ -57,5 +57,6 @@ mobile/android/app/src/main/assets/runtime.tgz
 mobile/android/.gradle/
 mobile/android/app/build/
 mobile/android/build/
+*.apk
 *.keystore
 !mobile/android/app/dsh-debug.keystore
