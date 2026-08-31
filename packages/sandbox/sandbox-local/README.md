@@ -10,6 +10,8 @@ Unsupported platforms and unusable runners fail closed with `SANDBOX_UNAVAILABLE
 
 Policy is per call; the provider stores only the mechanism and cached runner verdict. Each wrap reports enforcement completeness plus backend-specific denial signatures and runner-failure rules. Landlock requires exit 125 and a `landlock-run:` fatal line after excluding only the exact partial-enforcement notice; a notice with child exit 1, 2, or 125 remains a child outcome. Bubblewrap and Seatbelt remain signature-only because neither public contract reserves a launcher-failure status. Consumers spawn the returned argv directly, so a missing or unexecutable runner is an out-of-band spawn failure while a successfully launched child exit 126 or 127 remains ordinary. `runnerCommand` skips probes and requires one or more non-empty, single-line, case-insensitive `runnerFailureSignatures` entries for the custom runner's own fatal dialect. Because its mechanism is unknown, it carries both Linux denial dialects. `probeTimeoutMs` bounds functional probes. The [sandbox Agent Note](../../../.agents/notes/implemented/feature/2026-07-06-sandbox.md) owns selection and failure semantics.
 
+`devicePassthrough` exposes host device nodes read-write inside every confined command — the GPU passthrough for the Linux rungs (bwrap `--dev-bind` pairs, Landlock `--rw` grants; a configured `runnerCommand` receives the same pairs), ignored by the Seatbelt and windows-acl rungs. The grant is mode-independent: `read-only` still governs the ordinary file tree while the listed nodes stay open. Every entry must be an absolute path beneath `/dev/` that exists at plugin load — a violation fails the mount loud, and a node that vanishes later fails the wrap through the runner's own fatal dialect; `/dev` itself is rejected because binding the whole device tree would expose `/dev/shm`, `/dev/pts`, and every unrelated node.
+
 The Seatbelt profile is allow-default with `(deny file-write*)` plus write allow-lists, so exactly the mode's promised file effects are governed: `read-only` grants the `/dev/null` literal alone; `workspace-write` adds the workspace root, `/tmp`, and the per-user darwin temp dir (`os.tmpdir()` — the platform's real temp area for mkstemp-family tools), every root canonicalized because Seatbelt matches resolved paths (`/tmp` IS `/private/tmp`). Apple marks the `sandbox-exec` CLI deprecated but ships it on every macOS; the functional probe is what fails closed if that ever changes.
 
 The Windows rung keeps one deterministic write SID and standing ACE per workspace, but gives every live session/workspace pair a random private temp directory with a distinct SID and revocable ACE. Sessions sharing a workspace therefore share its intended write authority without inheriting one another's temp authority. A fresh provider always chooses a new temp path and SID, so crash residue cannot block or authorize a resumed session; agentless calls receive the same per-invocation isolation from the runner. A workspace equal to or containing the platform temp root fails before any ACL mutation because its inheritable workspace ACE would otherwise reach every private temp child.
@@ -19,6 +21,8 @@ The Windows rung keeps one deterministic write SID and standing ACE per workspac
 ```yaml
 - id: sandbox
   name: '@deepseek-ai/dsh-sandbox-local'
+  config:
+    devicePassthrough: [/dev/dri, /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-modeset, /dev/nvidia-uvm, /dev/nvidia-uvm-tools]
 ```
 
 Consumers: [`@deepseek-ai/dsh-bash-sandbox`](../../shell/bash-sandbox/); see [the acp-agent example](../../../examples/acp-agent/) for the runnable default composition.
@@ -38,3 +42,4 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 - **Seatbelt depends on deprecated `sandbox-exec`** — macOS still ships it, but this provider cannot replace or probe that private policy engine if Apple removes it.
 - **Runner selection is cached for the provider lifetime** — installing, removing, or repairing a runner requires reloading the plugin before selection changes.
 - **`runnerCommand` is an operator assertion** — a configured custom runner skips functional probes and is assumed to implement the bwrap-compatible profile honestly; if it is itself a Bash script, its interpreter startup runs before that script applies confinement.
+- **Device passthrough ignores the file-effect modes** — `devicePassthrough` nodes stay writable even under `read-only`, and only the Linux rungs honor the list; Seatbelt and windows-acl wraps never carry it.

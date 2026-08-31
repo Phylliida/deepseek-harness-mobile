@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
+import type { Config } from '@deepseek-ai/dsh-sandbox-local'
 import { bwrapProfileArgs } from '../src/profiles.ts'
 
 /**
@@ -37,9 +38,9 @@ async function tempDir(base: string): Promise<string> {
   return dir
 }
 
-async function provider(): Promise<LocalSandboxProvider> {
+async function provider(config: Config = {}): Promise<LocalSandboxProvider> {
   ctx = new Context()
-  await ctx.plugin(LocalSandboxProvider, {})
+  await ctx.plugin(LocalSandboxProvider, config)
   return ctx.sandbox as LocalSandboxProvider
 }
 
@@ -104,5 +105,26 @@ describe.skipIf(!bwrapUsable)('sandbox-local: real bwrap confinement', () => {
     expect(result.status).toBe(0)
     expect(result.stdout).toBe('tmp-ok')
     expect(existsSync(target)).toBe(false)
+  })
+})
+
+/** `/dev/dri` marks a GPU host; bwrap's minimal `/dev` never carries it, so its presence inside a wrap proves the passthrough. */
+const driPresent = existsSync('/dev/dri')
+
+describe.skipIf(!bwrapUsable || !driPresent)('sandbox-local: device passthrough through real bwrap', () => {
+  it('a configured device directory appears inside the wrap', async () => {
+    const workdir = await tempDir(tmpdir())
+    const granted = await provider({ devicePassthrough: ['/dev/dri'] })
+    const inside = runConfined(granted, 'ls /dev/dri', { mode: 'read-only', workspaceRoot: workdir })
+    expect(inside.confined.argv).toContain('--dev-bind')
+    expect(inside.result.status).toBe(0)
+    expect(inside.result.stdout).toMatch(/^(card\d|renderD\d+)$/m)
+  })
+
+  it('without the grant the same directory stays hidden', async () => {
+    const workdir = await tempDir(tmpdir())
+    const plain = await provider()
+    const outside = runConfined(plain, 'ls /dev/dri', { mode: 'read-only', workspaceRoot: workdir })
+    expect(outside.result.status).not.toBe(0)
   })
 })

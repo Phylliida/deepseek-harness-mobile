@@ -1588,6 +1588,22 @@ export interface Config {
   runnerFailureSignatures?: string[]
   /** Positive timeout for each functional probe; zero would mean unbounded to Node. */
   probeTimeoutMs?: number
+  /**
+   * Host device nodes exposed read-write inside every confined command — the
+   * GPU passthrough for the Linux rungs (bwrap `--dev-bind` pairs, Landlock
+   * `--rw` grants; a configured `runnerCommand` receives the same bwrap
+   * pairs). The Seatbelt and windows-acl rungs ignore the list. The grant is
+   * mode-independent: `read-only` still governs the ordinary file tree while
+   * the listed nodes stay open. Every entry must be an absolute path beneath
+   * `/dev/` that exists at plugin load — a violation fails the mount loud,
+   * and a node that vanishes later fails the wrap through the runner's own
+   * fatal dialect. `/dev` itself is rejected: binding the whole device tree
+   * would expose `/dev/shm`, `/dev/pts`, and every unrelated node. A host
+   * with one NVIDIA card: `/dev/dri`, `/dev/nvidia0`, `/dev/nvidiactl`,
+   * `/dev/nvidia-modeset`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`; AMD
+   * ROCm adds `/dev/kfd`.
+   */
+  devicePassthrough?: string[]
 }
 ```
 

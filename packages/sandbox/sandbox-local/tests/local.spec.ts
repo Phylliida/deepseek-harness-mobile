@@ -158,6 +158,77 @@ describe('runnerCommand config', () => {
   )
 })
 
+describe('devicePassthrough config', () => {
+  it('profile builders append one read-write bind per device after the mode mounts', () => {
+    expect(bwrapProfileArgs(RO, ['/dev/fb0'])).toEqual([
+      '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent',
+      '--dev-bind', '/dev/fb0', '/dev/fb0',
+    ])
+    expect(bwrapProfileArgs(WW, ['/dev/dri', '/dev/kfd'])).toEqual([
+      '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent',
+      '--tmpfs', '/tmp', '--bind', '/ws', '/ws',
+      '--dev-bind', '/dev/dri', '/dev/dri', '--dev-bind', '/dev/kfd', '/dev/kfd',
+    ])
+    // Devices join the read-write grants BEFORE the mode additions: the
+    // launcher resolves paths once at restrict time, so grant order is
+    // insignificant — the order is pinned only to keep the argv reviewable.
+    expect(landlockProfileArgs(RO, ['/dev/fb0'])).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/dev/fb0'])
+    expect(landlockProfileArgs(WW, ['/dev/fb0'])).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/dev/fb0', '--rw', '/tmp', '--rw', '/ws'])
+  })
+
+  // Rejection paths run on every platform: none of these paths needs to exist.
+  it.each(['dev/fb0', '/etc/hostname', '/dev', '/dev/../etc/hostname'])(
+    'rejects the out-of-tree device path %j at load',
+    async (device) => {
+      await expect(setup({ devicePassthrough: [device] })).rejects.toThrow(
+        `devicePassthrough entries must be absolute paths beneath /dev/ — got "${device}"`,
+      )
+    },
+  )
+
+  it('rejects a device node missing on this host at load', async () => {
+    await expect(setup({ devicePassthrough: ['/dev/dsh-no-such-node'] })).rejects.toThrow(
+      'devicePassthrough entry "/dev/dsh-no-such-node" does not exist on this host',
+    )
+  })
+
+  // The wiring cases need one node that exists: /dev/null (POSIX only).
+  describe.skipIf(process.platform === 'win32')('runner wiring with a real node', () => {
+    const GPU = ['/dev/null']
+
+    it('the bwrap rung appends one --dev-bind pair per configured node', async () => {
+      const { sandbox } = await setup({ devicePassthrough: GPU }, { platform: 'linux', probeBwrap: () => true })
+      expect(sandbox.confine(['true'], RO)).toMatchObject({
+        argv: ['bwrap', ...bwrapProfileArgs(RO, GPU), '--', 'true'],
+        enforcement: 'full',
+      })
+    })
+
+    it('the landlock rung grants each configured node read-write', async () => {
+      const launcher = fakeLauncher()
+      const { sandbox } = await setup(
+        { devicePassthrough: GPU },
+        { platform: 'linux', probeBwrap: () => false, probeLandlock: () => 'full', landlockLauncher: launcher },
+      )
+      expect(sandbox.confine(['true'], WW).argv).toEqual([launcher, ...landlockProfileArgs(WW, GPU), '--', 'true'])
+    })
+
+    it('a configured runnerCommand receives the same bwrap pairs', async () => {
+      const { sandbox } = await setup({
+        runnerCommand: ['fake-runner'],
+        runnerFailureSignatures: ['fake-runner: '],
+        devicePassthrough: GPU,
+      })
+      expect(sandbox.confine(['true'], RO).argv).toEqual(['fake-runner', ...bwrapProfileArgs(RO, GPU), '--', 'true'])
+    })
+
+    it('the seatbelt rung ignores the list: its profile has no device concept', async () => {
+      const { sandbox } = await setup({ devicePassthrough: GPU }, { platform: 'darwin' })
+      expect(sandbox.confine(['true'], RO).argv).toEqual(['sandbox-exec', ...seatbeltProfileArgs(RO), '--', 'true'])
+    })
+  })
+})
+
 describe('the platform chains', () => {
   it('linux probes bwrap first: a passing probe wraps with the bwrap dialect at full enforcement', async () => {
     const probeBwrap = vi.fn(() => true)
