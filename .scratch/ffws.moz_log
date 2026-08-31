@@ -1,0 +1,661 @@
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666d01e100 sessionCount=0 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key u3yfmxX7GNBZsDdbL11VnQ==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key H19G1vcP8HXPY5iusaBx9oIcOfc=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable[7f666d01e100] checking DNS resolution
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable Notifying Listener 7f666e7eea00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnLookupComplete() 7f666d01e100 [7f66784aa3c0 7f666cce1780 0]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocket OnLookupComplete: Proceeding to ConditionallyConnect
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: ConditionallyConnect: [this=7f666d01e100]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::BeginOpen() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: changing state to CONNECTING_IN_PROGRESS
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::BeginOpenInternal() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666d01f300 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key 610jtmHPIKydx+EkeeqpyQ==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key cegKytmBbx+63rE4fCXSjxhUjeY=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666d01fc00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key /DKKeMXrQOkwn3tK7K0Oww==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key jBuOAhtTetrae+hGAwoFVoc2kA8=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666d01f300 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666d01f300, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocket: connection to , , 0 failed: [this=7f666d01f300]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666d01fc00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666d01fc00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666d01fc00]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d01f300
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666d01f300] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666d01fc00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666d01f300
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666effd0b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666d01fc00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666df705f0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnStartRequest(): 7f666d01e100 [7f666d674c40 7f666d674c40] recvdhttpupgrade=0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnStartRequest: HTTP status 101
+[Parent 919466: Main Thread]: D/nsWebSocket WebsocketChannel::OnStartRequest subprotocol [push-notification] not found - none returned
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::HandleExtensions() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnStopRequest() 7f666d01e100 [7f666d674c40 7f666d674c40 0]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ReportConnectionTelemetry() 7f666d01e100 4
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CallOnTransportAvailable 7f667c3f34c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnTransportAvailable 7f666d01e100 [7f666e040118 7f666baf1740 7f666baf1fc0] rcvdonstart=1
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnConnected: [this=7f666d01e100]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: changing state to NOT_CONNECTING
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: RemoveFromQueue: [this=7f666d01e100]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CallStartWebsocketData() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::StartWebsocketData() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::DoStartWebsocketData() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::NotifyOnStart Notifying Listener 7f666e7eea00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SendMsg() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket Added new msg sent for push.services.mozilla.com
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::EnqueueOutgoingMessage 7f666d01e100 queueing msg 7f666bca6370 [type=text len=58]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnOutputStreamReady() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage 7f666d01e100 found queued msg 7f666bca6370 [type=text len=58]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage() using mask edee0537
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnOutputStreamReady: Try to send 64 of hdr/copybreak
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnOutputStreamReady [7f666d01e100]: write 64 rv 0
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CallAcknowledge: Size 58
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnInputStreamReady() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnInputStreamReady: read 115 rv 0
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::ProcessInput 7f666d01e100 [115 0]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::ProcessInput: payload 113 avail 113
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::ProcessInput: Frame accumulated - opcode 1
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel:: text frame received
+[Parent 919466: Socket Thread]: D/nsWebSocket Added new msg received for push.services.mozilla.com
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnInputStreamReady: read 0 rv 80470007
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666d004c00 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key NYxLVtBlYK9zYGCchyLF+g==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key Nm9i39UhoqOtDqO38GxSGktCeWk=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666d005e00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key 2YMJtYB3zrb0+APMJGi6sw==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key tAQE6q+eZtkJaqSq0ySgju8XYJM=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666d004c00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666d004c00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666d004c00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666d005e00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666d005e00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666d005e00]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d004c00
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666d004c00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666d005e00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666d004c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666baf37b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666d005e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666baf3f20
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f6671193c00 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key +Q8fFVTUcD24Sul2oFS/BA==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key g1PUwaDf06jbQMpE1RtmFnyeW20=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f6667586580
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df29a00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6667586580
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6667586580
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key gyaSnKbfrpJmzLaJi6XLYA==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key he7Dwwaged752CCrX3ERGqNG1sc=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f6671193c00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f6671193c00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f6671193c00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f6667586580
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df29a00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df29a00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df29a00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f6671193c00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df29a00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f6667586580
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f6671193c00
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666dbd23c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f6667586580
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f6667586580
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f6671193c00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f668111f700 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key jS4NCoEdez8BM1KXr3z5+A==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key p/tDpGbNhQ54/UTsxYPVo2cUBXw=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df29a00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key w/qP+7mxKVgrSUWSsfAg0Q==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key 3+4SR4CtdmqdLayGgL75kHuDdEM=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f668111f700 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f668111f700, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f668111f700]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df29a00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df29a00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df29a00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f668111f700] Request Already Stopped
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f668111f700
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df29a00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f668111f700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f66779f4d60
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f6678459510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df29a00 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key l28Ihy33hN8rZxd2/JumVg==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key iZkPOtD1FIEbYPWDthhNliCL0vc=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df2be00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key QtUH09NvrH9K7dyB5ghyWg==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key jvLqYess3PZCMKS2tCTP2aVbnQg=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df29a00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df29a00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df29a00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df2be00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df2be00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df2be00]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df29a00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df2be00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f66786c3430
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f66786c3510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df29a00 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key y0lz2lAbHeA2uGcmksi2ig==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key bLpAFNPvJT1Lakl6qJNlfL5N6Gs=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df2ac00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key +SmZWkqycrrGydYAJi3fGg==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key W4A0VW7F/iOv8NIOGCDW0ULAP9w=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df29a00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df29a00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df29a00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df2ac00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df2ac00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df2ac00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df29a00] Request Already Stopped
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df2ac00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f66779f43c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df2ac00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f667a4f4190
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SendMsg() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket Added new msg sent for push.services.mozilla.com
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::EnqueueOutgoingMessage 7f666d01e100 queueing msg 7f666eede1c0 [type=text len=94]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnOutputStreamReady() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage 7f666d01e100 found queued msg 7f666eede1c0 [type=text len=94]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage() using mask 98746b49
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnOutputStreamReady: Try to send 100 of hdr/copybreak
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnOutputStreamReady [7f666d01e100]: write 100 rv 0
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::PrimeNewOutgoingMessage() 7f666d01e100
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CallAcknowledge: Size 94
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnInputStreamReady() 7f666d01e100
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnInputStreamReady: read 98 rv 0
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::ProcessInput 7f666d01e100 [98 0]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::ProcessInput: payload 96 avail 96
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::ProcessInput: Frame accumulated - opcode 1
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel:: text frame received
+[Parent 919466: Socket Thread]: D/nsWebSocket Added new msg received for push.services.mozilla.com
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::OnInputStreamReady: read 0 rv 80470007
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df29a00 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key +9DXCXb2nA+I1w0HjaSeVQ==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key aFIb+MirE58HqUEakNzf2YulJjI=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df2b500 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key 0SF80M2xqNml3hI3e0NY7A==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key hzapgftQwXyU7vjHw0xYdekwfRo=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df29a00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df29a00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df29a00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df2b500 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df2b500, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df2b500]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df29a00
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df29a00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df2b500] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df29a00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666baf30b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df2b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666baf3270
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f666df2be00 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key QS5uzZkP4r8aKXNy/lhYIg==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key 88RuDopf+NNdkLV7Xo4chElyL9U=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f6671194e00 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key dMQ9Ah3azeupDfXaGRvCkA==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key jeSX2buyhfxymAIc12bcnHQBZEE=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f666df2be00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f666df2be00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f666df2be00]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f6671194e00 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f6671194e00, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f6671194e00]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f666df2be00
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f666df2be00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f6671194e00] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f666df2be00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666da39040
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f6671194e00
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f666daa1e40
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f667722b500 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key MECasrgsLUqwvIk45+qhjQ==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key FciuSOmLDJvMUhnxgnAWUgG1ubc=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f66605a3700 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key OaUMBG5i+MW8W3zqJH2jdA==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key t6RnF+wPKusbqlRgwpHsNYdprqQ=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f667722b500 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f667722b500, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f667722b500]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f66605a3700 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f66605a3700, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f66605a3700]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f667722b500] Request Already Stopped
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f667722b500
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f66605a3700] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f6664ada7b0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f6667a1d6d0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f66605a3700 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key EbTtivLTFaiEwA2NbnFO/w==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key DNAku+2hBBTQkPDGRoLJoEwrxsU=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f667722b500 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key S0AUUKzMqmUZIIRS4TLCUg==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key 0MOprkuu7uh3ZGGrW927h4dcXKk=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f66605a3700 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f66605a3700, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f66605a3700]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f667722b500 [804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket: OnStopSession: [this=7f667722b500, reason=0x804b000c]
+[Parent 919466: Main Thread]: D/nsWebSocket Websocket close() before connection to , ,  0 completed [this=7f667722b500]
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f66605a3700
+[Parent 919466: Socket Thread]: D/nsWebSocket WebSocketChannel::CleanupConnection() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f66605a3700] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::OnProxyAvailable: [7f667722b500] Request Already Stopped
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::OnStop() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f669a923510
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvDeleteSelf() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::~WebSocketChannel() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::ActorDestroy() 7f6681143350
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f66811433c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f667722b500 sessionCount=1 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66811433c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f66811433c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key evrj6oQDzBcMgM75ASBfbw==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key 5c4ZIKuOsInBH5jg48yR15/kRIw=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvAsyncOpen() 7f6664b55cf0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::WebSocketChannel() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetNotificationCallbacks() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket BaseWebSocketChannel::SetProtocol() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::AsyncOpen 7f66605a3700 sessionCount=2 max=200
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6664b55cf0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::GetInterface() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::GetInterface() 7f6664b55cf0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: client key ST64sKNY7Vz2NwT03pi0fA==
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::SetupRequest: expected server key DjyC/aEoD0eH2UcPJr9hgQAZjYA=
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::ApplyForAdmission() 7f66605a3700
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannelParent::RecvClose() 7f66811433c0
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() 7f667722b500
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::Close() without transport - error.
+[Parent 919466: Main Thread]: D/nsWebSocket WebSocketChannel::DoStopSession() 7f667722b500 [804b000c]
+[Parent 919466

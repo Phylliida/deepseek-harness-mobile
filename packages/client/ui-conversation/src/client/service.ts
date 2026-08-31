@@ -62,10 +62,23 @@ export interface IConversation {
 function browserDraftAttachment(file: File): ComposerAttachment {
   return {
     kind: 'image',
-    id: crypto.randomUUID() as DraftAttachmentId,
+    id: mintDraftAttachmentId(),
     previewUrl: URL.createObjectURL(file),
     file,
   }
+}
+
+/**
+ * Mint a unique draft key without `crypto.randomUUID()`, which browsers expose
+ * only in secure contexts — the composer must also work on plain-HTTP LAN
+ * origins. `crypto.getRandomValues` is available there; time + counter +
+ * random word make collisions a non-entity for a per-page draft key.
+ */
+let draftAttachmentSeq = 0
+function mintDraftAttachmentId(): DraftAttachmentId {
+  draftAttachmentSeq = (draftAttachmentSeq + 1) % 0xffff
+  const rand = globalThis.crypto.getRandomValues(new Uint32Array(1))[0] as number
+  return `draft-${Date.now().toString(36)}-${draftAttachmentSeq.toString(36)}-${rand.toString(36)}` as DraftAttachmentId
 }
 
 interface ImageUrlEntry {

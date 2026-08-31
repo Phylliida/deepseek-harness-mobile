@@ -1,0 +1,9 @@
+# LAN overlay for `dsh --profile web`: bind the webserver to all interfaces so
+# the GUI is reachable from other devices on the local network. A patch
+# replaces the row's whole `config`, so both keys are restated.
+# Security note: the GUI has no authentication; anyone who can reach the port
+# can drive the agent. Use only on a trusted network.
+- id: webserver
+  config:
+    host: 0.0.0.0
+    port: 3081

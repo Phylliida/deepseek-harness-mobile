@@ -1,0 +1,574 @@
+window.__ModuleLoader__.load({
+	id: "@deepseek-ai/dsh-client-ui-coding-timer",
+	factory: (require) => {
+		var module = { exports: {} };
+		var exports = module.exports;
+		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+		let _deepseek_ai_dsh_client_runtime_client = require("@deepseek-ai/dsh-client-runtime/client");
+		let react_jsx_runtime = require("react/jsx-runtime");
+		let react = require("react");
+		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
+		//#region lib/types/client/store.js
+		/**
+		* The coding timer's durable store: one active session marker plus the
+		* completed-session history, persisted whole to localStorage through the
+		* runtime engine's `persist` channel. The store IS the business state — the
+		* timer is a personal browser surface with no host counterpart, so this is
+		* the one place the data lives (the object-layer rule covers session and
+		* connection state, not a client-only wellbeing timer).
+		*/
+		/** localStorage key for the whole-state JSON (root scope: no suffix). */
+		const CODING_TIMER_PERSIST_KEY = "dsh.coding-timer";
+		/**
+		* Create the coding timer store handle. start/stop are idempotent in the
+		* safe direction: starting a running timer and stopping a stopped one are
+		* no-ops, so a double click never corrupts the history. A stop pressed
+		* before its start (clock skew across reloads) records a zero-length
+		* session rather than a negative one.
+		* @returns the store handle (spec + identity + factory in one).
+		*/
+		function createCodingTimerStore() {
+			return (0, _deepseek_ai_dsh_client_runtime_client.defineStore)({
+				persist: CODING_TIMER_PERSIST_KEY,
+				init: () => ({
+					activeSince: null,
+					sessions: []
+				}),
+				actions: {
+					start: (d, now) => {
+						if (d.activeSince === null) d.activeSince = now;
+					},
+					stop: (d, now) => {
+						if (d.activeSince === null) return;
+						d.sessions.push({
+							start: d.activeSince,
+							end: Math.max(now, d.activeSince)
+						});
+						d.activeSince = null;
+					}
+				}
+			});
+		}
+		//#endregion
+		//#region ../../../node_modules/.pnpm/clsx@2.1.1/node_modules/clsx/dist/clsx.mjs
+		function r(e) {
+			var t, f, n = "";
+			if ("string" == typeof e || "number" == typeof e) n += e;
+			else if ("object" == typeof e) if (Array.isArray(e)) {
+				var o = e.length;
+				for (t = 0; t < o; t++) e[t] && (f = r(e[t])) && (n && (n += " "), n += f);
+			} else for (f in e) e[f] && (n && (n += " "), n += f);
+			return n;
+		}
+		function clsx() {
+			for (var e, t, f = 0, n = "", o = arguments.length; f < o; f++) (e = arguments[f]) && (t = r(e)) && (n && (n += " "), n += t);
+			return n;
+		}
+		//#endregion
+		//#region lib/types/client/totals.js
+		/** Milliseconds in one minute. */
+		const MINUTE_MS = 6e4;
+		/**
+		* Local midnight at or before `ms`.
+		* @param ms - epoch milliseconds.
+		* @returns local midnight of the containing day (epoch ms).
+		*/
+		function dayStart(ms) {
+			const d = new Date(ms);
+			d.setHours(0, 0, 0, 0);
+			return d.getTime();
+		}
+		/**
+		* The same local time `n` signed days after `dayMs` (DST-safe).
+		* @param dayMs - epoch milliseconds inside the source day.
+		* @param n - signed day count.
+		* @returns epoch milliseconds `n` local days later.
+		*/
+		function addDays(dayMs, n) {
+			const d = new Date(dayMs);
+			d.setDate(d.getDate() + n);
+			return d.getTime();
+		}
+		/**
+		* Local Monday (ISO week start) at or before `ms`. Date#getDay yields 0 for
+		* Sunday; the wrap maps it to the Monday six days back.
+		* @param ms - epoch milliseconds.
+		* @returns local midnight of the containing week's Monday (epoch ms).
+		*/
+		function weekStart(ms) {
+			const start = dayStart(ms);
+			return addDays(start, -((new Date(start).getDay() + 6) % 7));
+		}
+		/**
+		* Total coding ms overlapping `[rangeStart, rangeEnd)`: completed sessions
+		* clipped to the range plus the live session (activeSince..now) when one is
+		* running. A stretch crossing midnight splits across both days, which is the
+		* point of the tracker — late-night coding counts against the day it
+		* happened on.
+		* @param sessions - completed session history (epoch ms pairs).
+		* @param activeSince - running session start (epoch ms), or null while stopped.
+		* @param now - the instant the live session counts up to (epoch ms).
+		* @param rangeStart - inclusive range start (epoch ms).
+		* @param rangeEnd - exclusive range end (epoch ms).
+		* @returns total coding milliseconds inside the range.
+		*/
+		function sumRangeMs(sessions, activeSince, now, rangeStart, rangeEnd) {
+			let total = 0;
+			for (const s of sessions) total += Math.max(0, Math.min(s.end, rangeEnd) - Math.max(s.start, rangeStart));
+			if (activeSince !== null) total += Math.max(0, Math.min(now, rangeEnd) - Math.max(activeSince, rangeStart));
+			return total;
+		}
+		/**
+		* Build the viewed month's grid as Monday-first week rows of seven cells.
+		* Rows always run Monday through Sunday (borrowed adjacent-month days
+		* included) so the trailing week-total column counts complete weeks.
+		* @param year - full year of the viewed month.
+		* @param month - zero-based month of the viewed month.
+		* @returns week rows, each exactly seven cells.
+		*/
+		function buildMonthGrid(year, month) {
+			const lead = (new Date(year, month, 1).getDay() + 6) % 7;
+			const gridStart = new Date(year, month, 1 - lead);
+			const weeks = [];
+			let cursor = gridStart;
+			for (;;) {
+				const week = [];
+				for (let i = 0; i < 7; i++) {
+					const day = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + i);
+					week.push({
+						dayMs: day.getTime(),
+						inMonth: day.getMonth() === month
+					});
+				}
+				weeks.push(week);
+				const next = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7);
+				if (next.getMonth() !== month) break;
+				cursor = next;
+			}
+			return weeks;
+		}
+		/**
+		* Shift a `{year, month}` pair by signed months (calendar navigation).
+		* @param year - full year of the viewed month.
+		* @param month - zero-based month of the viewed month.
+		* @param delta - signed month count.
+		* @returns the shifted `{year, month}` pair.
+		*/
+		function shiftMonth(year, month, delta) {
+			const d = new Date(year, month + delta, 1);
+			return {
+				year: d.getFullYear(),
+				month: d.getMonth()
+			};
+		}
+		/**
+		* Format a running elapsed span as `h:mm:ss` for the toggle button — a
+		* ticking clock, so the fixed-width numeric form reads at a glance in both
+		* locales.
+		* @param ms - elapsed milliseconds (negative clamps to zero).
+		* @returns the `h:mm:ss` readout.
+		*/
+		function formatClock(ms) {
+			const totalSeconds = Math.max(0, Math.floor(ms / 1e3));
+			const hours = Math.floor(totalSeconds / 3600);
+			const minutes = Math.floor(totalSeconds % 3600 / 60);
+			const seconds = totalSeconds % 60;
+			const pad = (n) => String(n).padStart(2, "0");
+			return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+		}
+		/**
+		* Decompose a total into whole hours and remaining minutes for the localized
+		* `duration.*` templates. Rounds down to the minute; sub-minute totals stay
+		* zero rather than rounding up (the calendar shows earned time).
+		* @param ms - total milliseconds.
+		* @returns whole hours and remaining minutes.
+		*/
+		function splitDuration(ms) {
+			const totalMinutes = Math.floor(ms / MINUTE_MS);
+			return {
+				hours: Math.floor(totalMinutes / 60),
+				minutes: totalMinutes % 60
+			};
+		}
+		//#endregion
+		//#region \0dsh-css:/home/bepis/prog/deepseek-harness-mobile/packages/client/ui-coding-timer/src/client/CodingTimer.module.css.mjs
+		const css = ".Zz2hjW_row{align-items:center;gap:6px;display:flex}.Zz2hjW_toggle{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-button-elevated-fill);min-width:0;height:38px;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:12px;flex:1;justify-content:center;align-items:center;gap:6px;padding:8px 12px;font-size:13px;font-weight:500;line-height:22px;display:flex;overflow:hidden}.Zz2hjW_toggle:hover{background:var(--dsw-alias-button-floating-hover)}.Zz2hjW_toggleLabel{white-space:nowrap;text-overflow:ellipsis;overflow:hidden}.Zz2hjW_elapsed{color:var(--dsw-alias-state-success-primary);font-variant-numeric:tabular-nums;flex:none}.Zz2hjW_infoButton{width:28px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;border-radius:50%;flex:none;justify-content:center;align-items:center;padding:0;display:inline-flex}.Zz2hjW_infoButton:hover{background:var(--dsw-alias-interactive-bg-hover)}.Zz2hjW_railToggle{width:36px;height:36px;color:var(--dsw-alias-label-primary);cursor:pointer;background:0 0;border:none;border-radius:50%;justify-content:center;align-items:center;padding:0;display:inline-flex;position:relative}.Zz2hjW_railToggle:hover{background:var(--dsw-alias-interactive-bg-hover)}.Zz2hjW_railToggle.Zz2hjW_running{color:var(--dsw-alias-state-success-primary)}.Zz2hjW_railDot{background:var(--dsw-alias-state-success-primary);border-radius:50%;width:6px;height:6px;position:absolute;bottom:4px;right:4px}.Zz2hjW_calendar{flex-direction:column;gap:12px;min-width:380px;display:flex}.Zz2hjW_summary{gap:12px;display:flex}.Zz2hjW_summaryItem{border:1px solid var(--dsw-alias-border-l2);border-radius:8px;flex-direction:column;flex:1;gap:2px;padding:8px 12px;display:flex}.Zz2hjW_summaryLabel{color:var(--dsw-alias-label-secondary);font-size:12px}.Zz2hjW_summaryValue{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;font-size:15px;font-weight:600}.Zz2hjW_monthHead{justify-content:space-between;align-items:center;display:flex}.Zz2hjW_monthTitle{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600}.Zz2hjW_monthNav{width:28px;height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;border-radius:50%;justify-content:center;align-items:center;padding:0;display:inline-flex}.Zz2hjW_monthNav:hover{background:var(--dsw-alias-interactive-bg-hover)}.Zz2hjW_grid{flex-direction:column;gap:2px;display:flex}.Zz2hjW_gridRow{grid-template-columns:repeat(7,1fr) 72px;align-items:stretch;gap:2px;display:grid}.Zz2hjW_weekday{text-align:center;color:var(--dsw-alias-label-secondary);padding:4px 0;font-size:12px}.Zz2hjW_weekTotalHead{text-align:right;padding-right:4px}.Zz2hjW_day{box-sizing:border-box;min-height:40px;color:var(--dsw-alias-label-primary);border-radius:6px;flex-direction:column;align-items:center;gap:1px;padding:3px 0;display:flex}.Zz2hjW_dayOutside{color:var(--dsw-alias-label-dimmed)}.Zz2hjW_dayToday{outline:1px solid var(--dsw-alias-brand-primary);outline-offset:-1px}.Zz2hjW_dayHasTime{background:var(--dsw-alias-bg-layer-2)}.Zz2hjW_dayNumber{font-size:12px;line-height:16px}.Zz2hjW_dayTotal{color:var(--dsw-alias-state-success-primary);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:10px;line-height:14px}.Zz2hjW_weekTotal{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;white-space:nowrap;justify-content:flex-end;align-items:center;padding-right:4px;font-size:11px;display:flex}";
+		const tagId = "@deepseek-ai/dsh-client-ui-coding-timer/CodingTimer.module.css";
+		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
+			const tag = document.createElement("style");
+			tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-coding-timer";
+			tag.dataset.pluginCss = tagId;
+			tag.textContent = css;
+			document.head.appendChild(tag);
+		}
+		var CodingTimer_module_css_default = {
+			"day": "Zz2hjW_day",
+			"toggleLabel": "Zz2hjW_toggleLabel",
+			"elapsed": "Zz2hjW_elapsed",
+			"calendar": "Zz2hjW_calendar",
+			"summaryLabel": "Zz2hjW_summaryLabel",
+			"infoButton": "Zz2hjW_infoButton",
+			"dayOutside": "Zz2hjW_dayOutside",
+			"summaryValue": "Zz2hjW_summaryValue",
+			"dayHasTime": "Zz2hjW_dayHasTime",
+			"dayTotal": "Zz2hjW_dayTotal",
+			"weekTotal": "Zz2hjW_weekTotal",
+			"running": "Zz2hjW_running",
+			"weekday": "Zz2hjW_weekday",
+			"railDot": "Zz2hjW_railDot",
+			"monthTitle": "Zz2hjW_monthTitle",
+			"dayNumber": "Zz2hjW_dayNumber",
+			"monthNav": "Zz2hjW_monthNav",
+			"row": "Zz2hjW_row",
+			"grid": "Zz2hjW_grid",
+			"weekTotalHead": "Zz2hjW_weekTotalHead",
+			"gridRow": "Zz2hjW_gridRow",
+			"dayToday": "Zz2hjW_dayToday",
+			"monthHead": "Zz2hjW_monthHead",
+			"summary": "Zz2hjW_summary",
+			"toggle": "Zz2hjW_toggle",
+			"summaryItem": "Zz2hjW_summaryItem",
+			"railToggle": "Zz2hjW_railToggle"
+		};
+		//#endregion
+		//#region lib/types/client/CodingCalendar.js
+		/**
+		* Coding-time totals calendar: the modal body behind the timer row's info
+		* button. A Monday-first month grid where each day cell shows that day's
+		* coding total and each week row ends in its week total, plus the today /
+		* this-week summary on top. All totals come from totals.ts's single overlap
+		* primitive; navigation is component-private viewing state.
+		*/
+		/** Localized duration text: zero, minutes-only, or hours+minutes. */
+		function durationText(ms, t) {
+			if (ms < 6e4) return t("duration.zero");
+			const { hours, minutes } = splitDuration(ms);
+			return hours > 0 ? t("duration.hm", {
+				h: hours,
+				m: minutes
+			}) : t("duration.m", { m: minutes });
+		}
+		/**
+		* Render the totals calendar for the viewed month.
+		* @param props.sessions - completed session history (store state).
+		* @param props.activeSince - running session start, or null while stopped.
+		* @param props.now - render instant; the live session counts up to it.
+		* @param props.t - the coding-timer namespace translate seat.
+		* @returns the summary strip plus the month grid.
+		*/
+		function CodingCalendar({ sessions, activeSince, now, t }) {
+			const todayMs = dayStart(now);
+			const [view, setView] = (0, react.useState)(() => ({
+				year: new Date(now).getFullYear(),
+				month: new Date(now).getMonth()
+			}));
+			const weeks = (0, react.useMemo)(() => buildMonthGrid(view.year, view.month), [view.year, view.month]);
+			const todayTotal = sumRangeMs(sessions, activeSince, now, todayMs, addDays(todayMs, 1));
+			const thisWeekStart = weekStart(now);
+			const weekTotal = sumRangeMs(sessions, activeSince, now, thisWeekStart, addDays(thisWeekStart, 7));
+			return (0, react_jsx_runtime.jsxs)("div", {
+				className: CodingTimer_module_css_default.calendar,
+				children: [
+					(0, react_jsx_runtime.jsxs)("div", {
+						className: CodingTimer_module_css_default.summary,
+						children: [(0, react_jsx_runtime.jsxs)("div", {
+							className: CodingTimer_module_css_default.summaryItem,
+							children: [(0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.summaryLabel,
+								children: t("today")
+							}), (0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.summaryValue,
+								children: durationText(todayTotal, t)
+							})]
+						}), (0, react_jsx_runtime.jsxs)("div", {
+							className: CodingTimer_module_css_default.summaryItem,
+							children: [(0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.summaryLabel,
+								children: t("thisWeek")
+							}), (0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.summaryValue,
+								children: durationText(weekTotal, t)
+							})]
+						})]
+					}),
+					(0, react_jsx_runtime.jsxs)("div", {
+						className: CodingTimer_module_css_default.monthHead,
+						children: [
+							(0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: CodingTimer_module_css_default.monthNav,
+								"aria-label": t("month.prev"),
+								onClick: () => {
+									setView((v) => shiftMonth(v.year, v.month, -1));
+								},
+								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconChevronLeftOutline14, { size: 14 })
+							}),
+							(0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.monthTitle,
+								children: t("month.title", {
+									year: view.year,
+									month: view.month + 1
+								})
+							}),
+							(0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: CodingTimer_module_css_default.monthNav,
+								"aria-label": t("month.next"),
+								onClick: () => {
+									setView((v) => shiftMonth(v.year, v.month, 1));
+								},
+								children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconChevronRightOutline14, { size: 14 })
+							})
+						]
+					}),
+					(0, react_jsx_runtime.jsxs)("div", {
+						className: CodingTimer_module_css_default.grid,
+						role: "table",
+						"aria-label": t("info"),
+						children: [(0, react_jsx_runtime.jsxs)("div", {
+							className: CodingTimer_module_css_default.gridRow,
+							role: "row",
+							children: [[
+								1,
+								2,
+								3,
+								4,
+								5,
+								6,
+								7
+							].map((d) => (0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.weekday,
+								role: "columnheader",
+								children: t(`wd.${d}`)
+							}, d)), (0, react_jsx_runtime.jsx)("span", {
+								className: clsx(CodingTimer_module_css_default.weekday, CodingTimer_module_css_default.weekTotalHead),
+								role: "columnheader",
+								children: t("week.total")
+							})]
+						}), weeks.map((week) => {
+							const firstCell = week[0];
+							/* v8 ignore next -- unreachable: buildMonthGrid emits full rows. */
+							if (firstCell === void 0) return null;
+							const start = firstCell.dayMs;
+							const total = sumRangeMs(sessions, activeSince, now, start, addDays(start, 7));
+							return (0, react_jsx_runtime.jsxs)("div", {
+								className: CodingTimer_module_css_default.gridRow,
+								role: "row",
+								children: [week.map((cell) => {
+									const dayTotal = sumRangeMs(sessions, activeSince, now, cell.dayMs, addDays(cell.dayMs, 1));
+									return (0, react_jsx_runtime.jsxs)("span", {
+										role: "cell",
+										className: clsx(CodingTimer_module_css_default.day, !cell.inMonth && CodingTimer_module_css_default.dayOutside, cell.dayMs === todayMs && CodingTimer_module_css_default.dayToday, dayTotal >= 6e4 && CodingTimer_module_css_default.dayHasTime),
+										children: [(0, react_jsx_runtime.jsx)("span", {
+											className: CodingTimer_module_css_default.dayNumber,
+											children: new Date(cell.dayMs).getDate()
+										}), dayTotal >= 6e4 && (0, react_jsx_runtime.jsx)("span", {
+											className: CodingTimer_module_css_default.dayTotal,
+											children: durationText(dayTotal, t)
+										})]
+									}, cell.dayMs);
+								}), (0, react_jsx_runtime.jsx)("span", {
+									className: CodingTimer_module_css_default.weekTotal,
+									role: "cell",
+									children: durationText(total, t)
+								})]
+							}, start);
+						})]
+					})
+				]
+			});
+		}
+		//#endregion
+		//#region lib/types/client/CodingTimer.js
+		/**
+		* The sidebar coding-time tracker row: a Start/Stop Coding toggle that
+		* times the running stretch, plus an info button opening the totals
+		* calendar (CodingCalendar). Wide renders the labeled bar with a ticking
+		* elapsed readout and the info affordance; the rail keeps one icon toggle
+		* whose tooltip carries the same readout. State lives in the package's
+		* persisted store (the declared PropsStore share); the ticking `now` and
+		* the modal's open flag are component-private.
+		*/
+		/**
+		* Render the coding timer row for the sidebar.timer seat.
+		* @param props - composed slot props (owner wide flag + store + locale).
+		* @returns the toggle row (wide) or icon toggle (rail), plus the stats modal.
+		*/
+		function CodingTimer({ wide, useStore, actions, t }) {
+			const activeSince = useStore((s) => s.activeSince);
+			const sessions = useStore((s) => s.sessions);
+			const [now, setNow] = (0, react.useState)(() => Date.now());
+			const [statsOpen, setStatsOpen] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				if (activeSince === null) return;
+				const timer = window.setInterval(() => {
+					setNow(Date.now());
+				}, 1e3);
+				return () => {
+					window.clearInterval(timer);
+				};
+			}, [activeSince]);
+			const running = activeSince !== null;
+			const toggle = () => {
+				if (running) actions.stop(Date.now());
+				else actions.start(Date.now());
+			};
+			if (!wide) {
+				const label = running ? `${t("stop")} · ${formatClock(now - activeSince)}` : t("start");
+				return (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+					label,
+					delayMs: 500,
+					children: (0, react_jsx_runtime.jsxs)("button", {
+						type: "button",
+						className: clsx(CodingTimer_module_css_default.railToggle, running && CodingTimer_module_css_default.running),
+						"aria-label": label,
+						"aria-pressed": running,
+						onClick: toggle,
+						children: [running ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconStopFill16, { size: 18 }) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPlayOutline16, { size: 18 }), running && (0, react_jsx_runtime.jsx)("span", {
+							className: CodingTimer_module_css_default.railDot,
+							"aria-hidden": "true"
+						})]
+					})
+				});
+			}
+			return (0, react_jsx_runtime.jsxs)("div", {
+				className: CodingTimer_module_css_default.row,
+				children: [
+					(0, react_jsx_runtime.jsxs)("button", {
+						type: "button",
+						className: clsx(CodingTimer_module_css_default.toggle, running && CodingTimer_module_css_default.running),
+						"aria-pressed": running,
+						onClick: toggle,
+						children: [
+							running ? (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconStopFill16, { size: 14 }) : (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPlayOutline16, { size: 14 }),
+							(0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.toggleLabel,
+								children: running ? t("stop") : t("start")
+							}),
+							running && (0, react_jsx_runtime.jsx)("span", {
+								className: CodingTimer_module_css_default.elapsed,
+								children: formatClock(now - activeSince)
+							})
+						]
+					}),
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Tooltip, {
+						label: t("info"),
+						delayMs: 500,
+						children: (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: CodingTimer_module_css_default.infoButton,
+							"aria-label": t("info"),
+							onClick: () => {
+								setStatsOpen(true);
+							},
+							children: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconQuestionOutline14, { size: 14 })
+						})
+					}),
+					(0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Modal, {
+						open: statsOpen,
+						onClose: () => {
+							setStatsOpen(false);
+						},
+						title: t("info"),
+						closeLabel: t("close"),
+						children: (0, react_jsx_runtime.jsx)(CodingCalendar, {
+							sessions,
+							activeSince,
+							now,
+							t
+						})
+					})
+				]
+			});
+		}
+		//#endregion
+		//#region lib/types/client/locales.js
+		/** `coding-timer` namespace dictionaries: the sidebar timer row and its totals calendar. */
+		/** Simplified Chinese dictionary (the key-set source of truth). */
+		const zh = {
+			"start": "开始编码",
+			"stop": "停止编码",
+			"info": "编码时长统计",
+			"today": "今天",
+			"thisWeek": "本周",
+			"month.title": "{year}年{month}月",
+			"month.prev": "上个月",
+			"month.next": "下个月",
+			"wd.1": "一",
+			"wd.2": "二",
+			"wd.3": "三",
+			"wd.4": "四",
+			"wd.5": "五",
+			"wd.6": "六",
+			"wd.7": "日",
+			"duration.hm": "{h} 小时 {m} 分",
+			"duration.m": "{m} 分钟",
+			"duration.zero": "0 分钟",
+			"week.total": "周总计"
+		};
+		/** English dictionary, checked complete against the zh key set. */
+		const en = {
+			"start": "Start coding",
+			"stop": "Stop coding",
+			"info": "Coding time stats",
+			"today": "Today",
+			"thisWeek": "This week",
+			"month.title": "{year}-{month}",
+			"month.prev": "Previous month",
+			"month.next": "Next month",
+			"wd.1": "Mon",
+			"wd.2": "Tue",
+			"wd.3": "Wed",
+			"wd.4": "Thu",
+			"wd.5": "Fri",
+			"wd.6": "Sat",
+			"wd.7": "Sun",
+			"duration.hm": "{h}h {m}m",
+			"duration.m": "{m}m",
+			"duration.zero": "0m",
+			"week.total": "Week"
+		};
+		//#endregion
+		//#region lib/types/client/index.js
+		/** Dictionary namespace owned by this plugin. */
+		const NS = "coding-timer";
+		/**
+		* Required services: the slot registry and the dictionaries. The store
+		* factory itself is not a service edge — it is seated on the registration.
+		*/
+		const inject = ["slots", "locale"];
+		/**
+		* Client plugin body: register the `coding-timer` dictionaries, then the
+		* timer row once the sidebar's `sidebar.timer` declaration is live.
+		* @param ctx - client root context.
+		*/
+		function apply(ctx) {
+			ctx.effect(() => ctx.locale.register(NS, {
+				zh,
+				en
+			}), "ui-coding-timer: dictionaries");
+			ctx.slots.inject("sidebar.timer", () => ctx.slots.register({
+				name: "sidebar.timer",
+				id: "coding-timer",
+				store: createCodingTimerStore(),
+				locale: NS
+			}, CodingTimer));
+		}
+		//#endregion
+		exports.apply = apply;
+		exports.inject = inject;
+		return module.exports;
+	}
+});
+
+//# sourceMappingURL=client.js.mapI:BB�      j��Xj��XI�L�       �    O^partitionKey=%28http%2C10.0.0.139%29,:http://10.0.0.139:3080/plugins/@deepseek-ai/dsh-client-ui-coding-timer/client.js?rev=e1e6ab98a578 strongly-framed 1 request-method GET response-head HTTP/1.1 200 OK
+content-type: text/javascript; charset=utf-8
+cache-control: no-cache
+date: Sun, 30 Aug 2026 22:27:36 GMT
+ original-response-headers content-type: text/javascript; charset=utf-8
+cache-control: no-cache
+date: Sun, 30 Aug 2026 22:27:36 GMT
+connection: keep-alive
+keep-alive: timeout=5
+transfer-encoding: chunked
+ ctid 2 uncompressed-len 0 net-response-time-onstart 31 net-response-time-onstop 32   b�

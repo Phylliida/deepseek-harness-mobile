@@ -148,6 +148,32 @@ function recorderInto(seen: { method: string; payload: unknown }[]) {
 }
 
 describe('unary round trip', () => {
+  it('mints rpcIds without requiring secure-context randomUUID', async () => {
+    // Browsers expose crypto.randomUUID only on HTTPS/loopback origins; a
+    // plain-HTTP LAN page must still mint rpcIds (via getRandomValues).
+    vi.stubGlobal('crypto', {
+      getRandomValues(bytes: Uint8Array) {
+        return bytes.fill(0)
+      },
+    })
+    try {
+      let seen: RpcRequest<unknown> | undefined
+      const api = scriptedApi({
+        sessions: {
+          list: (r) => {
+            seen = r
+            return ok(r, { items: [] })
+          },
+        },
+      })
+      const response = await client(api).sessions.list({})
+      expect(seen?.rpcId).toBe('00000000-0000-4000-8000-000000000000')
+      expect(response.result).toEqual({ ok: true, value: { items: [] } })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('carries payload out and value back through the full wire form', async () => {
     let seen: RpcRequest<{ cursor?: string }> | undefined
     const api = scriptedApi({
