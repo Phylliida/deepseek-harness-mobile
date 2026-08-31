@@ -1,0 +1,8 @@
+{
+  "steps": [
+    {
+      "op": "prompt",
+      "text": "Wake your memory, note that the user prefers tea and that the project builds with pnpm, answer the due compression, then wake and recall tea. Finish by printing MEMORY READY."
+    }
+  ]
+}

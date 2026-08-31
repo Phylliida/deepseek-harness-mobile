@@ -1,0 +1,72 @@
+[
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_memory_wake_1", "name": "memory", "argumentsDelta": "{\"command\":\"wake\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_memory_wake_1", "name": "memory", "arguments": "{\"command\":\"wake\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 20, "outputTokens": 4 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_memory_note_1", "name": "memory", "argumentsDelta": "{\"command\":\"note \\\"The user prefers tea over coffee.\\\"\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_memory_note_1", "name": "memory", "arguments": "{\"command\":\"note \\\"The user prefers tea over coffee.\\\"\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 30, "outputTokens": 6 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_memory_note_2", "name": "memory", "argumentsDelta": "{\"command\":\"note \\\"The project builds with pnpm workspaces.\\\"\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_memory_note_2", "name": "memory", "arguments": "{\"command\":\"note \\\"The project builds with pnpm workspaces.\\\"\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 40, "outputTokens": 7 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_memory_nap", "name": "memory", "argumentsDelta": "{\"command\":\"nap 0-1 \\\"User prefers tea; the project builds with pnpm workspaces.\\\"\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_memory_nap", "name": "memory", "arguments": "{\"command\":\"nap 0-1 \\\"User prefers tea; the project builds with pnpm workspaces.\\\"\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 60, "outputTokens": 10 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_memory_wake_2", "name": "memory", "argumentsDelta": "{\"command\":\"wake\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_memory_wake_2", "name": "memory", "arguments": "{\"command\":\"wake\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 70, "outputTokens": 4 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_memory_recall", "name": "memory", "argumentsDelta": "{\"command\":\"recall tea\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_memory_recall", "name": "memory", "arguments": "{\"command\":\"recall tea\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 80, "outputTokens": 4 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "text" },
+      { "type": "text-delta", "index": 0, "text": "MEMORY READY" },
+      { "type": "block-end", "index": 0, "block": { "type": "text", "text": "MEMORY READY" } },
+      { "type": "usage", "usage": { "inputTokens": 90, "outputTokens": 2 } },
+      { "type": "finish", "reason": { "kind": "stop" } }
+    ]
+  }
+]
