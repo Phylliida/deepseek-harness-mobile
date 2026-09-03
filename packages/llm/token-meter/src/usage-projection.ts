@@ -6,58 +6,73 @@ import { z } from 'zod'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type { ContextPressureProjection, TokenUsageProjection } from './projection.ts'
+import type { ContextPressureProjection, TokenUsageBuckets, TokenUsageProjection } from './projection.ts'
 import { foldSurfaceProjection } from './surface-projection.ts'
 import type { ShadowPriceClaim } from './surface-projection.ts'
 
 interface UsageSample {
   turn: number
   step: number
-  buckets: TokenUsageProjection
+  buckets: TokenUsageBuckets
+  /** {@link buckets} or all zeros: what the sample contributes to the unrated set. */
+  unrated: TokenUsageBuckets
+  /** The sample's provider-reported billed cost, or 0 when it reported none. */
+  costUsd: number
 }
 
 interface TokenUsageState {
-  totals: TokenUsageProjection
+  totals: TokenUsageBuckets
+  unratedTotals: TokenUsageBuckets
+  reportedCostUsd: number
+  /** Whether any sample has reported a billed cost (a 0 bill still counts). */
+  hasCostedSample: boolean
   last: UsageSample | null
 }
 
-const zeroBuckets = (): TokenUsageProjection => ({
+const zeroBuckets = (): TokenUsageBuckets => ({
   uncachedInputTokens: 0,
   outputTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
 })
 
-const bucketsFrom = (usage: TokenUsage): TokenUsageProjection => ({
+const bucketsFrom = (usage: TokenUsage): TokenUsageBuckets => ({
   uncachedInputTokens: usage.inputTokens,
   outputTokens: usage.outputTokens,
   cacheReadTokens: usage.cacheReadTokens ?? 0,
   cacheWriteTokens: usage.cacheWriteTokens ?? 0,
 })
 
-const bucketsEqual = (left: TokenUsageProjection, right: TokenUsageProjection): boolean =>
+const bucketsEqual = (left: TokenUsageBuckets, right: TokenUsageBuckets): boolean =>
   left.uncachedInputTokens === right.uncachedInputTokens
   && left.outputTokens === right.outputTokens
   && left.cacheReadTokens === right.cacheReadTokens
   && left.cacheWriteTokens === right.cacheWriteTokens
 
 const addReplacing = (
-  totals: TokenUsageProjection,
-  previous: TokenUsageProjection | undefined,
-  next: TokenUsageProjection,
-): TokenUsageProjection => ({
+  totals: TokenUsageBuckets,
+  previous: TokenUsageBuckets | undefined,
+  next: TokenUsageBuckets,
+): TokenUsageBuckets => ({
   uncachedInputTokens: totals.uncachedInputTokens - (previous?.uncachedInputTokens ?? 0) + next.uncachedInputTokens,
   outputTokens: totals.outputTokens - (previous?.outputTokens ?? 0) + next.outputTokens,
   cacheReadTokens: totals.cacheReadTokens - (previous?.cacheReadTokens ?? 0) + next.cacheReadTokens,
   cacheWriteTokens: totals.cacheWriteTokens - (previous?.cacheWriteTokens ?? 0) + next.cacheWriteTokens,
 })
 
-const projectionSchema = z.object({
+const bucketsSchema = z.object({
   uncachedInputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   cacheReadTokens: z.number().int().nonnegative(),
   cacheWriteTokens: z.number().int().nonnegative(),
 }).strict()
+
+// Cast for the optional values: under exactOptionalPropertyTypes zod infers
+// `number | undefined` where the interface declares absent-or-number fields.
+const projectionSchema = bucketsSchema.extend({
+  reportedCostUsd: z.number().nonnegative().optional(),
+  unratedTokens: bucketsSchema.optional(),
+}).strict() as unknown as z.ZodType<TokenUsageProjection>
 
 // Cast for the optional values: under exactOptionalPropertyTypes zod infers
 // `number | undefined` where the interface declares absent-or-number fields.
@@ -103,12 +118,23 @@ interface ContextPressureState {
  * counting it. The single `last` slot relies on the session-log invariant
  * that usage reports for one turn/step are adjacent: once a later step begins,
  * a legal log never reports usage for an earlier step again.
+ *
+ * Provider-reported billed cost folds alongside the buckets with the same
+ * replace semantics: the totals always cover every sample, while
+ * `reportedCostUsd` and the `unratedTokens` subset split costed from unrated
+ * usage so rate-based estimates price only what no provider billed.
  */
 export const tokenUsageProjectionDefinition:
 ProjectionDefinition<'tokenUsage', TokenUsageState> = {
   key: 'tokenUsage',
   schema: projectionSchema,
-  init: () => ({ totals: zeroBuckets(), last: null }),
+  init: () => ({
+    totals: zeroBuckets(),
+    unratedTotals: zeroBuckets(),
+    reportedCostUsd: 0,
+    hasCostedSample: false,
+    last: null,
+  }),
   apply: (state, event) => {
     let turn: number
     let step: number
@@ -123,20 +149,35 @@ ProjectionDefinition<'tokenUsage', TokenUsageState> = {
     }
 
     const buckets = bucketsFrom(usage)
+    // A reported cost is a fact about billing, not size: a $0 report still
+    // pulls the sample's tokens out of the unrated set rates would price.
+    const unrated = usage.costUsd === undefined ? buckets : zeroBuckets()
+    const costUsd = usage.costUsd ?? 0
     const previous = state.last !== null
       && state.last.turn === turn
       && state.last.step === step
-      ? state.last.buckets
+      ? state.last
       : undefined
-    if (previous !== undefined && bucketsEqual(previous, buckets)) return state
+    if (previous !== undefined
+      && bucketsEqual(previous.buckets, buckets)
+      && bucketsEqual(previous.unrated, unrated)
+      && previous.costUsd === costUsd) return state
 
     return {
-      totals: addReplacing(state.totals, previous, buckets),
-      last: { turn, step, buckets },
+      totals: addReplacing(state.totals, previous?.buckets, buckets),
+      unratedTotals: addReplacing(state.unratedTotals, previous?.unrated, unrated),
+      reportedCostUsd: state.reportedCostUsd - (previous?.costUsd ?? 0) + costUsd,
+      hasCostedSample: state.hasCostedSample || usage.costUsd !== undefined,
+      last: { turn, step, buckets, unrated, costUsd },
     }
   },
-  view: state => state.totals,
-  stateVersion: 1,
+  view: state => ({
+    ...state.totals,
+    ...state.hasCostedSample
+      ? { reportedCostUsd: state.reportedCostUsd, unratedTokens: state.unratedTotals }
+      : {},
+  }),
+  stateVersion: 2,
 }
 
 /**

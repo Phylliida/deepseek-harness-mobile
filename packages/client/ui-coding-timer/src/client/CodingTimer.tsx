@@ -12,10 +12,13 @@ import clsx from 'clsx'
 import {
   IconPlayOutline16, IconQuestionOutline14, IconStopFill16, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls ui-sidebar's SlotMap merge (the 'sidebar.timer' hole it
 // declares) into this program so PropsRuntime<'sidebar.timer'> resolves.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type { CodingTimerSettingsFace } from './gate.ts'
+import { gateCovers, idleMinutesOf } from './gate.ts'
+import { IDLE_MINUTES_MAX, IDLE_MINUTES_MIN } from '../settings.ts'
 import type { CodingTimerStoreHandle } from './store.ts'
 import { formatClock } from './totals.ts'
 import { CodingCalendar } from './CodingCalendar.tsx'
@@ -23,22 +26,26 @@ import css from './CodingTimer.module.css'
 
 /**
  * Full component props: the sidebar's column state (owner share), the
- * persisted timer store share, and the standard locale seat. No inject face
- * — the timer is fully client-local.
+ * persisted timer store share, the settings face (the stats modal carries
+ * the gate toggle and the idle timeout), and the standard locale seat.
  */
 export type CodingTimerProps =
   PropsRuntime<'sidebar.timer'>
   & PropsStore<CodingTimerStoreHandle>
+  & InjectFace<CodingTimerSettingsFace>
   & PropsLocale<'coding-timer'>
 
 /**
  * Render the coding timer row for the sidebar.timer seat.
- * @param props - composed slot props (owner wide flag + store + locale).
+ * @param props - composed slot props (owner wide flag + store + settings face + locale).
  * @returns the toggle row (wide) or icon toggle (rail), plus the stats modal.
  */
-export function CodingTimer({ wide, useStore, actions, t }: CodingTimerProps) {
+export function CodingTimer({ wide, useStore, actions, useGate, setGate, setIdleMinutes, t }: CodingTimerProps) {
   const activeSince = useStore(s => s.activeSince)
   const sessions = useStore(s => s.sessions)
+  const gateOn = useGate(gateCovers)
+  const idleMinutes = useGate(idleMinutesOf)
+  const writable = useGate(s => s.writable)
   const [now, setNow] = useState(() => Date.now())
   const [statsOpen, setStatsOpen] = useState(false)
 
@@ -105,6 +112,42 @@ export function CodingTimer({ wide, useStore, actions, t }: CodingTimerProps) {
         closeLabel={t('close')}
       >
         <CodingCalendar sessions={sessions} activeSince={activeSince} now={now} t={t} />
+        {/* The timer's settings rows (the cover's disable link is the gate's
+            off ramp); hidden when the Host document cannot accept the write. */}
+        {writable && (
+          <div className={css.gateRow}>
+            <span className={css.gateRowLabel}>{t('gate.toggle')}</span>
+            <button
+              type="button"
+              className={clsx(css.gateRowToggle, gateOn && css.running)}
+              aria-pressed={gateOn}
+              onClick={() => { setGate(!gateOn) }}
+            >
+              {gateOn ? t('gate.on') : t('gate.off')}
+            </button>
+          </div>
+        )}
+        {writable && (
+          <div className={css.gateRow}>
+            <span className={css.gateRowLabel}>{t('idle.label')}</span>
+            <span className={css.idleControl}>
+              <input
+                type="number"
+                className={css.idleInput}
+                min={IDLE_MINUTES_MIN}
+                max={IDLE_MINUTES_MAX}
+                step={1}
+                value={idleMinutes}
+                aria-label={t('idle.label')}
+                onChange={(event) => {
+                  const minutes = Number.parseInt(event.target.value, 10)
+                  if (!Number.isNaN(minutes)) setIdleMinutes(minutes)
+                }}
+              />
+              <span className={css.gateRowLabel}>{t('idle.minutes')}</span>
+            </span>
+          </div>
+        )}
       </Modal>
     </div>
   )

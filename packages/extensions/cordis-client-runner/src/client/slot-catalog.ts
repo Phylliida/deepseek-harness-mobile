@@ -1439,7 +1439,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     kind: 'list',
     scope: 'root',
     summary: 'Frame-wide floating layer, above every column and outside their scroll containers.',
-    doc: 'Frame-wide floating layer, above every column and outside their scroll\ncontainers. Deliberately generic and unowned by any feature: a badge, a\ntoast stack or a status pill all belong here, and entries order among\nthemselves. The layer itself is click-through — entries opt back into\npointer events — so an occupant never blocks the app underneath.\n\nThis is the additive seat for a frame-wide surface of your own: a fresh\n`id` is added beside the shipped entries instead of replacing them.',
+    doc: 'Frame-wide floating layer, above every column and outside their scroll\ncontainers. Deliberately generic and unowned by any feature: a badge, a\ntoast stack or a status pill all belong here, and entries order among\nthemselves. The layer itself is click-through — entries opt back into\npointer events — so an ordinary occupant never blocks the app\nunderneath; ui-coding-timer\'s focus gate is the one sanctioned\nexception, covering the whole frame on purpose while no session runs.\n\nThis is the additive seat for a frame-wide surface of your own: a fresh\n`id` is added beside the shipped entries instead of replacing them.',
     registerOptions: [
       {
         name: 'id',
@@ -1470,10 +1470,12 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     hookContext: '',
     slotInject: '',
     declaredBy: 'an entry in \'root\' (client-ui-layout), so it exists while that entry is mounted',
-    occupants: [],
+    occupants: [
+      'client-ui-coding-timer CodingGate id \'coding-timer-gate\'',
+    ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'shell.overlay\', () => ctx.slots.register(\n      { name: \'shell.overlay\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-layout/src/client/index.ts:83',
+    source: 'packages/client/ui-layout/src/client/index.ts:85',
   },
   {
     key: 'sidebar',

@@ -15,9 +15,11 @@ export const name = 'client-ui-coding-timer-invariant'
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: the slot registration is an effect owned and
- * observed by the slot registry, and the timer store's persistence rides the
- * runtime engine's localStorage channel, which its own package covers.
+ * No runtime invariant: the slot registrations are effects owned and
+ * observed by the slot registry, the timer store's persistence rides the
+ * runtime engine's localStorage channel (which its own package covers), and
+ * the settings namespace is a registry effect of the settings service (which
+ * its package covers).
  */
 const install: InvariantInstaller = () => {}
 

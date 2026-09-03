@@ -244,6 +244,117 @@ describe('tokenUsage session projection', () => {
   })
 })
 
+describe('tokenUsage provider-reported cost', () => {
+  it('splits a costed sample out of the unrated set while totals keep every token', async () => {
+    const { ctx, session } = await harness()
+    startStep(session, 1, 1)
+    const source = usageChunk(session, {
+      inputTokens: 10, outputTokens: 4, costUsd: 0.0025,
+    }, 1, 1)
+    finalUsage(session, {
+      inputTokens: 10, outputTokens: 4, costUsd: 0.0025,
+    }, 1, 1, [source])
+
+    expect(projected(ctx, session)).toEqual({
+      uncachedInputTokens: 10,
+      outputTokens: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 0.0025,
+      unratedTokens: {
+        uncachedInputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    })
+  })
+
+  it('prices only the unrated step in a mixed session', async () => {
+    const { ctx, session } = await harness()
+    startStep(session, 1, 1)
+    const first = usageChunk(session, { inputTokens: 10, outputTokens: 4 }, 1, 1)
+    finalUsage(session, { inputTokens: 10, outputTokens: 4 }, 1, 1, [first])
+    startStep(session, 1, 2)
+    const second = usageChunk(session, { inputTokens: 20, outputTokens: 9, costUsd: 0.01 }, 1, 2)
+    finalUsage(session, { inputTokens: 20, outputTokens: 9, costUsd: 0.01 }, 1, 2, [second])
+
+    expect(projected(ctx, session)).toEqual({
+      uncachedInputTokens: 30,
+      outputTokens: 13,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 0.01,
+      unratedTokens: {
+        uncachedInputTokens: 10,
+        outputTokens: 4,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    })
+  })
+
+  it('pulls tokens out of the unrated set when only the final sample reports the cost', async () => {
+    const { ctx, session } = await harness()
+    startStep(session, 1, 1)
+    // The early chunk sample carries no cost; the terminal message does.
+    const source = usageChunk(session, { inputTokens: 10, outputTokens: 4 }, 1, 1)
+    finalUsage(session, { inputTokens: 10, outputTokens: 4, costUsd: 0.005 }, 1, 1, [source])
+
+    const value = projected(ctx, session)
+    expect(value.reportedCostUsd).toBe(0.005)
+    expect(value.unratedTokens).toEqual({
+      uncachedInputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    })
+    expect(value.uncachedInputTokens).toBe(10)
+  })
+
+  it('treats a reported zero bill as billed fact, not absence', async () => {
+    const { ctx, session } = await harness()
+    startStep(session, 1, 1)
+    const source = usageChunk(session, { inputTokens: 10, outputTokens: 4, costUsd: 0 }, 1, 1)
+    finalUsage(session, { inputTokens: 10, outputTokens: 4, costUsd: 0 }, 1, 1, [source])
+
+    const value = projected(ctx, session)
+    expect(value.reportedCostUsd).toBe(0)
+    expect(value.unratedTokens).toEqual({
+      uncachedInputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    })
+  })
+
+  it('restores the cost split from a JSON checkpoint', async () => {
+    const { ctx, session, meterFiber } = await harness()
+    startStep(session, 1, 1)
+    usageChunk(session, { inputTokens: 8, outputTokens: 2, costUsd: 0.001 }, 1, 1)
+    const checkpoint = JSON.parse(JSON.stringify(
+      ctx.sessionProjections.checkpoint(session),
+    )) as ReturnType<typeof ctx.sessionProjections.checkpoint>
+    expect(checkpoint.tokenUsage?.ver).toBe(2)
+
+    await meterFiber.dispose()
+    await ctx.plugin(TokenMeter)
+    expect(ctx.sessionProjections.viewCheckpoint(checkpoint).tokenUsage).toEqual({
+      uncachedInputTokens: 8,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 0.001,
+      unratedTokens: {
+        uncachedInputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      },
+    })
+  })
+})
+
 const pressure = (ctx: Context, session: Session): ContextPressureProjection => {
   const value = ctx.sessionProjections.snapshot(session).values.contextPressure
   if (value === undefined) throw new Error('contextPressure projection is not registered')

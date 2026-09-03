@@ -10,7 +10,7 @@ A compaction checkpoint becomes part of the next model request's durable prefix.
 
 ## Decision
 
-`COMPACTION_INSTRUCTION` requires an English-language internal engineering checkpoint. It asks the model to translate narrative source material as needed while preserving exact literals, including paths, commands, errors, identifiers, signatures, and quoted wording when exactness matters. The checkpoint's headings and terse engineering bullets remain the existing structured format.
+`COMPACTION_INSTRUCTION` requires an English-language internal engineering checkpoint. It asks the model to translate narrative source material as needed while preserving exact literals, including paths, commands, errors, identifiers, signatures, and quoted wording when exactness matters. The checkpoint's headings remain a structured format, [prioritized for comprehensive detail](2026-09-01-comprehensive-compaction-checkpoints.md) rather than brevity.
 
 The requirement is integrated into the first sentence of the trailing compaction instruction. The replayed system prompt, tools, and conversation history remain byte-identical to the routed request, so the change retains the prefix-cache reuse owned by the [compaction summary prefix-cache note](2026-07-21-compaction-summary-prefix-cache-reuse.md).
 

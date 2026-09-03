@@ -74,6 +74,12 @@ import { REPO_ROOT, requireDist } from './support.ts'
 export const WELCOME_NOTICE_SETTINGS_NAMESPACE = 'ui-onboarding'
 export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'
 export const WELCOME_NOTICE_VERSION = '2026-08-13.1'
+// The coding gate's settings contract, restated from
+// packages/client/ui-coding-timer/src/settings.ts (the Host aggregate must not
+// reach the Client plane); drift makes the seeding below miss the real
+// namespace, so the gate scenario fails loudly instead of testing a phantom.
+const CODING_GATE_SETTINGS_NAMESPACE = 'coding-timer'
+const CODING_GATE_FIELD = 'gate'
 export const WELCOME_NOTICE_COPY = {
   zh: {
     title: '内测声明',
@@ -235,6 +241,11 @@ export interface LaunchOptions {
   deepSeekMissingCredential?: boolean
   /** Leave the current welcome notice pending; ordinary scenarios pre-acknowledge it before browser boot. */
   welcomeNoticePending?: boolean
+  /**
+   * Leave the coding gate at its shipped default (on); ordinary scenarios
+   * disable it so the cover never intercepts their clicks.
+   */
+  codingGateOn?: boolean
   /**
    * Patch the shipped DeepSeek search row to a deterministic endpoint and
    * credential reference. Browser search scenarios keep the real provider and
@@ -535,6 +546,13 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     if (options.welcomeNoticePending !== true) {
       await ctx.settings.mutate(settingsNamespace(WELCOME_NOTICE_SETTINGS_NAMESPACE), [{
         op: 'set', path: [WELCOME_NOTICE_ACK_FIELD], value: WELCOME_NOTICE_VERSION,
+      }])
+    }
+    // The focus gate ships on; a scenario exercising it opts in, everything
+    // else gets an unobstructed UI.
+    if (options.codingGateOn !== true) {
+      await ctx.settings.mutate(settingsNamespace(CODING_GATE_SETTINGS_NAMESPACE), [{
+        op: 'set', path: [CODING_GATE_FIELD], value: false,
       }])
     }
     const boundPort = ctx.get('webServer')?.port

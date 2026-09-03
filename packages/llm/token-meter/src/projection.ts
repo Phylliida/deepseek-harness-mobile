@@ -5,16 +5,42 @@
  */
 
 /**
- * Durable cumulative provider usage for a complete session log.
+ * The four disjoint token buckets usage accumulates into.
  *
- * The four buckets are disjoint. In particular, reasoning tokens are already
+ * The buckets are disjoint. In particular, reasoning tokens are already
  * included in `outputTokens` and are not accumulated again.
  */
-export interface TokenUsageProjection {
+export interface TokenUsageBuckets {
   uncachedInputTokens: number
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+}
+
+/**
+ * Durable cumulative provider usage for a complete session log.
+ *
+ * The top-level buckets cover every usage sample. Samples whose provider
+ * reported a billed cost (`TokenUsage.costUsd`) additionally sum into
+ * {@link reportedCostUsd}, and their tokens repeat in no other place than the
+ * totals — rate-based estimates price {@link unratedTokens} only, so a
+ * provider-billed call is never priced twice.
+ */
+export interface TokenUsageProjection extends TokenUsageBuckets {
+  /**
+   * Billed cost in USD summed over the samples whose provider reported one.
+   * Present — possibly 0, a legitimate bill — once any sample has reported;
+   * absent means every sample is unrated and {@link unratedTokens} stays
+   * absent with it.
+   */
+  reportedCostUsd?: number
+  /**
+   * The four buckets restricted to samples that reported no billed cost:
+   * exactly the usage a configured rate table still has to price. Absent
+   * while no sample has reported a cost, in which case the top-level buckets
+   * are the unrated set.
+   */
+  unratedTokens?: TokenUsageBuckets
 }
 
 /**

@@ -1,0 +1,36 @@
+diff --git a/dist/api/openai-completions.js b/dist/api/openai-completions.js
+index ed81baa3860fa20cf9d38885f9dd4b6b2f639045..87f71ccb845ae439b0a4f000f17e570834415afa 100644
+--- a/dist/api/openai-completions.js
++++ b/dist/api/openai-completions.js
+@@ -1079,6 +1079,13 @@ function parseChunkUsage(rawUsage, model) {
+         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+     };
+     calculateCost(model, usage);
++    // DeepSeek Harness patch: OpenRouter-compatible endpoints report the
++    // actual billed amount on the usage object (`usage.cost`); preserve it
++    // alongside the catalog estimate so consumers can prefer real billing.
++    const reportedCost = rawUsage.cost;
++    if (typeof reportedCost === "number" && Number.isFinite(reportedCost) && reportedCost >= 0) {
++        usage.providerCost = reportedCost;
++    }
+     return usage;
+ }
+ function mapStopReason(reason) {
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index 0a1b76919766126f1c8c4a306b24e8096a5e02d0..7e4838f32be5ca46a0a9dc783eed25c8ae6a6bda 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -262,6 +262,13 @@ export interface Usage {
+      */
+     reasoning?: number;
+     totalTokens: number;
++    /**
++     * Provider-reported actual billed cost in USD (OpenRouter's `usage.cost`),
++     * when the endpoint reports one. Unlike `cost`, which pi-ai computes from
++     * the model's catalog rates, this is the provider's own billing figure.
++     * Absent when the endpoint reports nothing.
++     */
++    providerCost?: number;
+     cost: {
+         input: number;
+         output: number;

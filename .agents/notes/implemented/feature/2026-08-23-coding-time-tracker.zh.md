@@ -28,4 +28,4 @@ Status: implemented
 
 ## Consequences
 
-该 seat 是可追加的：未来任何控件行都可注册到 `sidebar.timer`，与追踪器并列。历史在 localStorage 中无上限累积（体积很小，已在包 README 记录），且绑定单一浏览器档案——没有跨设备汇总。窄栏只显示开关；日历需要展开的侧边栏。快照覆盖由 ui-sidebar 更新后的外壳快照与本包自身的 props-direct 规格承担；装配后的应用转录不变，因为追踪器不产生模型可见输出。
+该 seat 是可追加的：未来任何控件行都可注册到 `sidebar.timer`，与追踪器并列。历史在 localStorage 中无上限累积（体积很小，已在包 README 记录），且绑定单一浏览器档案——没有跨设备汇总。窄栏只显示开关；日历需要展开的侧边栏。快照覆盖由 ui-sidebar 更新后的外壳快照与本包自身的 props-direct 规格承担；装配后的应用转录不变，因为追踪器不产生模型可见输出。后来加入该包的停止状态专注门禁记录在[其专属笔记](2026-09-01-coding-focus-gate.md)中。

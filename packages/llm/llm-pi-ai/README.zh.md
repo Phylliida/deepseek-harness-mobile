@@ -151,6 +151,7 @@ profile 的 `models` 列表是*替换*该路由已安装 catalog，而不是扩�
 - pi-ai 工具调用参数是已解析对象；harness 存储原始 JSON 字符串。适配器会解析输入，并将输出重新字符串化。
 - pi-ai 将失败报告为流内错误事件；它们会映射到 `finish {kind:'error'|'aborted', failure}` 分片。提供方特定错误文本会区分终止型 `QUOTA` 与暂时型 `RATE_LIMIT`，针对已解析模型上下文窗口评估的文本与 usage 信号则将溢出规范化为 `CONTEXT_WINDOW_EXCEEDED`。终止时的 `stop` 若消息不含内容块，则会映射为 `finish {kind:'error'}`，code 为 `EMPTY_RESPONSE`（默认策略会重试），而非成功空消息。
 - pi-ai 将推理 token 折叠到输出 usage 中；没有可映射的独立推理计数。
+- OpenRouter 兼容端点会在响应的 usage 对象上报告实际计费金额。harness 对 pi-ai 的 pnpm 补丁（`patches/@earendil-works__pi-ai@0.82.1.patch`）将其保留为 `Usage.providerCost`，并由 `mapUsage` 携带到 `TokenUsage.costUsd`，使基于费率的成本估算不会为该次调用重复计价；pi-ai 自身按 catalog 估算的 `usage.cost` 块不被读取。
 - pi-ai 的 `off` 思考级别会原样穿过 Harness 能力 seam，并在分派时变为被省略的 pi-ai 通用 `reasoning` 选项。
 - `GenerateOptions.stop` 会以 `UNSUPPORTED_OPTION` 被拒绝，因为 pi-ai 的通用流式输出接口无法保证所有提供方都支持它。
 

@@ -188,7 +188,9 @@
     - id: ui-sidebar
       name: '@deepseek-ai/dsh-client-ui-sidebar'
 
-    # Coding-time tracker: Start/Stop Coding row + totals calendar in the sidebar.
+    # Coding-time tracker: Start/Stop Coding row + totals calendar in the sidebar,
+    # the focus gate covering the whole UI while no coding session runs, and the
+    # idle auto-stop ending a forgotten timer at its last activity.
     - id: ui-coding-timer
       name: '@deepseek-ai/dsh-client-ui-coding-timer'
 

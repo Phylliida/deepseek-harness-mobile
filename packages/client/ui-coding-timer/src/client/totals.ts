@@ -6,6 +6,7 @@
  * never disagree. Day stepping goes through Date arithmetic, not fixed
  * millisecond strides, so DST transitions never shift a cell off midnight.
  */
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CodingSession } from './store.ts'
 
 /** Milliseconds in one minute. */
@@ -148,4 +149,18 @@ export function formatClock(ms: number): string {
 export function splitDuration(ms: number): { hours: number; minutes: number } {
   const totalMinutes = Math.floor(ms / MINUTE_MS)
   return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 }
+}
+
+/**
+ * Localized duration text over the `duration.*` templates: zero,
+ * minutes-only, or hours+minutes. The one formatter every surface (calendar
+ * cells, summary strip, gate cover) shares, so readouts never diverge.
+ * @param ms - total milliseconds.
+ * @param t - the coding-timer namespace translate seat.
+ * @returns the localized duration text.
+ */
+export function formatDuration(ms: number, t: TranslateNS<'coding-timer'>): string {
+  if (ms < MINUTE_MS) return t('duration.zero')
+  const { hours, minutes } = splitDuration(ms)
+  return hours > 0 ? t('duration.hm', { h: hours, m: minutes }) : t('duration.m', { m: minutes })
 }

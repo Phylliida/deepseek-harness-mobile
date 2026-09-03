@@ -845,6 +845,17 @@ describe('mapStopReason / mapUsage', () => {
     })
     expect(mapUsage(usage(10, 5))).toEqual({ inputTokens: 10, outputTokens: 5 })
   })
+
+  it('maps a provider-reported billed cost and ignores pi-ai\'s catalog estimate', () => {
+    const reported = usage(10, 5)
+    reported.providerCost = 0.0042
+    reported.cost.total = 9.99
+    expect(mapUsage(reported)).toEqual({ inputTokens: 10, outputTokens: 5, costUsd: 0.0042 })
+    // A zero bill is still a report and must survive as costUsd, not absence.
+    const free = usage(3, 1)
+    free.providerCost = 0
+    expect(mapUsage(free)).toEqual({ inputTokens: 3, outputTokens: 1, costUsd: 0 })
+  })
 })
 
 describe('toStreamChunks edge branches', () => {

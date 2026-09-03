@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-24-kimi-quota-costline.md
 2026-08-24-kimi-quota-costline.md: 223bbf1d7200203736be1795b06911fece06a2fe
-2026-08-24-kimi-quota-costline.zh.md: ad7c6b47ce9c40411182ca7a37cc05bf019296f0
+2026-08-24-kimi-quota-costline.zh.md: 33a43193ea535e327d1414898eb4710436837f17

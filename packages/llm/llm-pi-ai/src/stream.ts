@@ -17,7 +17,11 @@ import { toPiReplayState } from './replay.ts'
 /**
  * Map pi-ai usage (reasoning folded into output by pi-ai).
  * @param usage - cumulative usage from the terminal pi-ai event.
- * @returns harness counts; cache fields appear only when non-zero (pi-ai reports zeros, not absence).
+ * @returns harness counts; cache fields appear only when non-zero (pi-ai
+ *   reports zeros, not absence). A provider-reported billed cost (OpenRouter's
+ *   `usage.cost`, preserved by the harness's pi-ai patch as `providerCost`)
+ *   rides along as `costUsd`; pi-ai's own catalog-estimated `cost` block is
+ *   not read.
  */
 export function mapUsage(usage: PiUsage): TokenUsage {
   return {
@@ -25,6 +29,7 @@ export function mapUsage(usage: PiUsage): TokenUsage {
     outputTokens: usage.output,
     ...usage.cacheRead > 0 ? { cacheReadTokens: usage.cacheRead } : {},
     ...usage.cacheWrite > 0 ? { cacheWriteTokens: usage.cacheWrite } : {},
+    ...usage.providerCost !== undefined ? { costUsd: usage.providerCost } : {},
   }
 }
 

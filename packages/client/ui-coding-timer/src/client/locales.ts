@@ -1,4 +1,4 @@
-/** `coding-timer` namespace dictionaries: the sidebar timer row and its totals calendar. */
+/** `coding-timer` namespace dictionaries: the sidebar timer row, its totals calendar, and the focus-gate cover. */
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
@@ -21,6 +21,13 @@ export const zh = {
   'duration.m': '{m} 分钟',
   'duration.zero': '0 分钟',
   'week.total': '周总计',
+  'gate.today': '今天已编码',
+  'gate.disable': '保持界面常显',
+  'gate.toggle': '停止时显示开始界面',
+  'gate.on': '已开启',
+  'gate.off': '已关闭',
+  'idle.label': '无操作自动停止',
+  'idle.minutes': '分钟',
 } satisfies Record<string, string>
 
 /** The coding-timer namespace key union. */
@@ -47,4 +54,11 @@ export const en = {
   'duration.m': '{m}m',
   'duration.zero': '0m',
   'week.total': 'Week',
+  'gate.today': 'Coded today',
+  'gate.disable': 'Keep the UI always visible',
+  'gate.toggle': 'Show the start screen while stopped',
+  'gate.on': 'On',
+  'gate.off': 'Off',
+  'idle.label': 'Auto-stop when idle for',
+  'idle.minutes': 'min',
 } satisfies Record<CodingTimerKey, string>

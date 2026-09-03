@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-14-session-cost-estimate-line.md
-2026-08-14-session-cost-estimate-line.md: 946f3f6f0704da91dd77a0177e8018ca8e0e9159
-2026-08-14-session-cost-estimate-line.zh.md: f3fbd01a8d5ea59d3f100a7e55ad0fabdad6ae98
+2026-08-14-session-cost-estimate-line.md: 037e92d0b04b5aebe9cf11d2ebdab3496bac1ac3
+2026-08-14-session-cost-estimate-line.zh.md: 96701d1eaffdc8783d463afd86452fc0a8e1c0f2

@@ -11,16 +11,9 @@ import { IconChevronLeftOutline14, IconChevronRightOutline14 } from '@deepseek-a
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { CodingSession } from './store.ts'
 import {
-  addDays, buildMonthGrid, dayStart, MINUTE_MS, shiftMonth, splitDuration, sumRangeMs, weekStart,
+  addDays, buildMonthGrid, dayStart, formatDuration, MINUTE_MS, shiftMonth, sumRangeMs, weekStart,
 } from './totals.ts'
 import css from './CodingTimer.module.css'
-
-/** Localized duration text: zero, minutes-only, or hours+minutes. */
-function durationText(ms: number, t: TranslateNS<'coding-timer'>): string {
-  if (ms < MINUTE_MS) return t('duration.zero')
-  const { hours, minutes } = splitDuration(ms)
-  return hours > 0 ? t('duration.hm', { h: hours, m: minutes }) : t('duration.m', { m: minutes })
-}
 
 /**
  * Render the totals calendar for the viewed month.
@@ -50,11 +43,11 @@ export function CodingCalendar({ sessions, activeSince, now, t }: {
       <div className={css.summary}>
         <div className={css.summaryItem}>
           <span className={css.summaryLabel}>{t('today')}</span>
-          <span className={css.summaryValue}>{durationText(todayTotal, t)}</span>
+          <span className={css.summaryValue}>{formatDuration(todayTotal, t)}</span>
         </div>
         <div className={css.summaryItem}>
           <span className={css.summaryLabel}>{t('thisWeek')}</span>
-          <span className={css.summaryValue}>{durationText(weekTotal, t)}</span>
+          <span className={css.summaryValue}>{formatDuration(weekTotal, t)}</span>
         </div>
       </div>
 
@@ -109,11 +102,11 @@ export function CodingCalendar({ sessions, activeSince, now, t }: {
                     )}
                   >
                     <span className={css.dayNumber}>{new Date(cell.dayMs).getDate()}</span>
-                    {dayTotal >= MINUTE_MS && <span className={css.dayTotal}>{durationText(dayTotal, t)}</span>}
+                    {dayTotal >= MINUTE_MS && <span className={css.dayTotal}>{formatDuration(dayTotal, t)}</span>}
                   </span>
                 )
               })}
-              <span className={css.weekTotal} role="cell">{durationText(total, t)}</span>
+              <span className={css.weekTotal} role="cell">{formatDuration(total, t)}</span>
             </div>
           )
         })}

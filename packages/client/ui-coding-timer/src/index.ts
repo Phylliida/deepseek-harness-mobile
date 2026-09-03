@@ -1,10 +1,28 @@
 /**
  * Coding-time tracker plugin, node half.
  *
- * Deliberately empty. The timer is a personal browser-side wellbeing
- * surface: its state lives in the client store's localStorage persistence,
- * never in the session log, and no model-facing tool reads it.
+ * The timer itself is a personal browser-side wellbeing surface: its history
+ * lives in the client store's localStorage persistence, never in the session
+ * log, and no model-facing tool reads it. The one Host concern is the
+ * preference pair (focus gate, idle auto-stop): registering the `coding-timer`
+ * settings namespace so the browser scope can durably store whether the
+ * stopped timer covers the UI and how many idle minutes stop a forgotten
+ * timer (src/settings.ts owns the shared section contract).
  */
+import type { Context } from '@deepseek-ai/cordis'
+import { settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { CODING_TIMER_SETTINGS_NAMESPACE, CodingTimerSettingsSchema } from './settings.ts'
 
-/** Host plugin body — the timer has no host-side behavior. */
-export function apply(): void {}
+const NAMESPACE = settingsNamespace(CODING_TIMER_SETTINGS_NAMESPACE)
+
+/**
+ * Register the coding-timer settings namespace when the deployment composes
+ * a settings provider; without one there is no preference to keep and the
+ * browser gate falls back to its shipped default.
+ * @param ctx - Host context that may acquire the settings service.
+ */
+export function apply(ctx: Context): void {
+  ctx.inject(['settings'], (settingsCtx) => {
+    settingsCtx.settings.register(NAMESPACE, CodingTimerSettingsSchema)
+  })
+}

@@ -75,7 +75,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * containers. Deliberately generic and unowned by any feature: a badge, a
      * toast stack or a status pill all belong here, and entries order among
      * themselves. The layer itself is click-through — entries opt back into
-     * pointer events — so an occupant never blocks the app underneath.
+     * pointer events — so an ordinary occupant never blocks the app
+     * underneath; ui-coding-timer's focus gate is the one sanctioned
+     * exception, covering the whole frame on purpose while no session runs.
      *
      * This is the additive seat for a frame-wide surface of your own: a fresh
      * `id` is added beside the shipped entries instead of replacing them.

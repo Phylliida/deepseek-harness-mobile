@@ -24,7 +24,16 @@
       "path": "../ui-sidebar"
     },
     {
+      "path": "../ui-layout"
+    },
+    {
+      "path": "../ui-settings"
+    },
+    {
       "path": "../locale"
+    },
+    {
+      "path": "../../settings/settings"
     },
     {
       "path": "../../runtime-diagnostics/invariants"

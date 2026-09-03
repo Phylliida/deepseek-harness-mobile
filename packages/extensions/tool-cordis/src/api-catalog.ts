@@ -4353,7 +4353,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TokenUsage',
-    declaration: 'export interface TokenUsage {\n    inputTokens: number;\n    outputTokens: number;\n    cacheReadTokens?: number;\n    cacheWriteTokens?: number;\n    reasoningTokens?: number;\n}',
+    declaration: 'export interface TokenUsage {\n    inputTokens: number;\n    outputTokens: number;\n    cacheReadTokens?: number;\n    cacheWriteTokens?: number;\n    reasoningTokens?: number;\n    costUsd?: number;\n}',
   },
   {
     name: 'ToolCallKind',
