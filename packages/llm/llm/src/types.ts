@@ -138,6 +138,13 @@ export interface TokenUsage {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+  /**
+   * Provider-reported billed cost for this call in USD (OpenRouter's
+   * `usage.cost`), when the provider reports one. Absence is the common case
+   * and is what rate-based estimates key off: a call carrying it is billed
+   * fact those rates must never price again.
+   */
+  costUsd?: number
 }
 
 /** Display metadata for one registered provider route. */

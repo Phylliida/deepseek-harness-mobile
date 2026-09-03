@@ -237,3 +237,114 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* Focus gate (shell.overlay seat): the one deliberately blocking overlay
+   occupant — an opaque full-frame cover while no session runs. The panel is
+   a quiet centered column: today's total, the Start Coding button, and the
+   low-key always-visible escape link. */
+.gate {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dsw-alias-bg-base);
+}
+
+.gatePanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px;
+}
+
+.gateTodayLabel {
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.gateTodayValue {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 34px;
+  color: var(--dsw-alias-label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.gateStart {
+  margin-top: 8px;
+  padding: 0 28px;
+  height: 44px;
+  font-size: 15px;
+}
+
+.gateDisable {
+  margin-top: 12px;
+  border: none;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.gateDisable:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Timer settings rows at the foot of the stats modal. */
+.gateRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+}
+
+.gateRowLabel {
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.gateRowToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 13px;
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.gateRowToggle.running {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.idleControl {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.idleInput {
+  width: 56px;
+  height: 26px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-button-elevated-fill);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}

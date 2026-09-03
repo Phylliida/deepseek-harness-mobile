@@ -6,7 +6,7 @@ Status: implemented
 
 ## Problem
 
-跑在 Kimi Code 订阅上的部署受三把配额时钟约束——滚动 5 小时速率窗口、每周配额、每月会员配额——但 composer 停靠栏只显示[会话费用估计](2026-08-14-session-cost-estimate-line.zh.md)。撞上 5 小时窗口表现为回合中途突如其来的 API 失败，查剩余配额还得离开产品去 Kimi 控制台。需求是把配额读数放到估计旁边。
+跑在 Kimi Code 订阅上的部署受三把配额时钟约束——滚动 5 小时速率窗口、每周配额、每月会员配额——但 composer 停靠栏只显示[会话费用估计](2026-08-14-session-cost-estimate-line.md)。撞上 5 小时窗口表现为回合中途突如其来的 API 失败，查剩余配额还得离开产品去 Kimi 控制台。需求是把配额读数放到估计旁边。
 
 ## Decision
 

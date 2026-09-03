@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-23-coding-time-tracker.md
-2026-08-23-coding-time-tracker.md: faedc19eb15384fa23638f1b39ebfcac12086a35
-2026-08-23-coding-time-tracker.zh.md: ba969250deaf217e613872770dc5810dd1eacec2
+2026-08-23-coding-time-tracker.md: 3f01de30f2fedce8fb034c4219d345e059ace544
+2026-08-23-coding-time-tracker.zh.md: 995b085dac7017d2f52467eed65e834a3e67ae6b

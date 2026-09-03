@@ -1250,8 +1250,8 @@ describe('default one-shot summarizer', () => {
     expect(messages[0]).toEqual(prefix)
     const last = messages.at(-1)?.content[0]
     const lastText = last?.type === 'text' ? last.text : ''
-    expect(lastText).toContain('Write concise English engineering prose.')
-    expect(lastText).toContain('numeric values, function signatures, and syntax fragments.')
+    expect(lastText).toContain('Write in English engineering prose.')
+    expect(lastText).toContain('line numbers, commands, error strings, identifiers, numeric values, function signatures, and syntax fragments;')
     expect(lastText).toContain('## Primary Request and Intent')
   })
 

@@ -2,11 +2,11 @@
 
 English | [中文](README.zh.md)
 
-Session cost estimate for the composer dock: a stats-family line above the stats row pricing the session's whole durable token log at a user-configurable rate table. Both halves ship from one package — the Host entry owns the settings section, the browser entry renders the estimate.
+Session cost estimate for the composer dock: a stats-family line above the stats row pricing the session's durable token log — provider-reported billed cost sums in as fact where a provider reports it, and a user-configurable rate table prices the rest. Both halves ship from one package — the Host entry owns the settings section, the browser entry renders the estimate.
 
 ## What it shows
 
-The line reads the durable `tokenUsage` projection (`uncachedInputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens`) and multiplies each bucket by the configured per-million-token rate. It registers on `conversation.composer.dock` at `order: -1`, ahead of the stats row's `0`, so the estimate leads the summary band below the composer. Hovering shows the per-bucket breakdown; both locales ship in the package. The row renders nothing until a session has billed tokens, and the figure is a reference estimate, not a billing record — billing remains the provider's own account.
+The line reads the durable `tokenUsage` projection and prices it in two parts: `reportedCostUsd` — billed cost the provider itself reported (OpenRouter returns one per request as `usage.cost`) — sums in directly, while the `unratedTokens` buckets (`uncachedInputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `outputTokens` restricted to usage no provider billed) are multiplied by the configured per-million-token rates, so a provider-billed call is never priced twice. It registers on `conversation.composer.dock` at `order: -1`, ahead of the stats row's `0`, so the estimate leads the summary band below the composer. Hovering shows the per-bucket breakdown; both locales ship in the package. The row renders nothing until a session has billed tokens, and the figure is a reference estimate, not a billing record — billing remains the provider's own account.
 
 Because the figure is a pure function of the durable projection and the durable settings section, it survives paging, compaction, and reconnects without any resident bookkeeping: no cross-plugin mutable state exists to desynchronize.
 
@@ -35,5 +35,5 @@ None.
 ## Known Limitations and Deferred Work
 
 - **No in-UI rates editor** — the section is edited in the user-settings document only; a Settings-page row with four numeric fields is deferred until someone asks for it.
-- **One rate table per deployment** — sessions on differently priced models share the table; per-adapter rate routing would need model identity in the fold, which the durable projection deliberately does not carry into UI arithmetic.
+- **One rate table per deployment** — unrated usage on differently priced models shares the table; per-adapter rate routing would need model identity in the fold, which the durable projection deliberately does not carry into UI arithmetic. Usage a provider bills and reports (OpenRouter) never touches the table, so a deployment mixing reported and unrated providers reads actuals plus one flat-rate estimate.
 - **Estimates clip display precision, not arithmetic** — costs under a cent show four decimals, and the budget share floors a nonzero share under one permille to `<0.1%`; exact figures stay available through the hover breakdown's token counts and the configured rates.

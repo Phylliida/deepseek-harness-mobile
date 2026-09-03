@@ -9,7 +9,7 @@ import type { SnapshotStore, UseProjection } from '@deepseek-ai/dsh-client-runti
 import type { KimiQuotaSnapshot } from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: merges the tokenUsage key into SessionProjectionMap for useProjection.
 import type {} from '@deepseek-ai/dsh-token-meter/client'
-import { estimateCost, formatBudgetPercent, formatCost, formatTokens } from '../cost.ts'
+import { estimateSessionCost, formatBudgetPercent, formatCost, formatTokens } from '../cost.ts'
 import type { CostEstimateSettings } from '../cost-settings.ts'
 import { formatQuotaSegments, formatQuotaTooltip } from './quota-format.ts'
 import css from './CostLine.module.css'
@@ -37,8 +37,10 @@ export type CostLineProps = { useProjection: UseProjection }
  * Render the whole-session cost estimate with its share of the configured
  * weekly budget, plus the Kimi Code subscription quota segment when the Host
  * quota Remote reports one. The figure rides the durable `tokenUsage`
- * projection, so paging and compaction cannot change it; the row drops out
- * whole until a session has billed tokens or a quota snapshot has arrived.
+ * projection, so paging and compaction cannot change it; provider-reported
+ * billed amounts sum in as fact while everything else is priced from the
+ * configured rates (see {@link estimateSessionCost}). The row drops out whole
+ * until a session has billed tokens or a quota snapshot has arrived.
  * @param props - composed slot props.
  * @returns the line element, or null while nothing billable or quotable exists.
  */
@@ -59,7 +61,7 @@ export function CostLine({ useProjection, useSettings, useQuota, t }: CostLinePr
       </Tooltip>
     )
   }
-  const spend = estimateCost(usage, settings.rates)
+  const spend = estimateSessionCost(usage, settings.rates)
   const breakdown = t('breakdown', {
     input: formatTokens(usage.uncachedInputTokens),
     cache: formatTokens(usage.cacheReadTokens),

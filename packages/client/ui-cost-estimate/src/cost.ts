@@ -30,6 +30,26 @@ export function estimateCost(buckets: TokenBuckets, rates: CostRates): number {
 }
 
 /**
+ * Price one session's usage projection. Provider-reported billed cost
+ * (`reportedCostUsd`, e.g. OpenRouter's per-request `usage.cost`) is billing
+ * fact and sums in directly; only buckets no provider billed for —
+ * `unratedTokens`, or every bucket while no provider has reported a cost —
+ * are priced from the configured flat rates, so a reported call is never
+ * priced twice. A session with no reported cost therefore estimates exactly
+ * as before.
+ * @param usage - the session's cumulative token buckets plus the
+ *   provider-billing split (both optional, absent in older projections).
+ * @param rates - per-million-token USD prices for the unrated remainder.
+ * @returns the session spend in USD: reported fact plus rated estimate.
+ */
+export function estimateSessionCost(
+  usage: TokenBuckets & { reportedCostUsd?: number; unratedTokens?: TokenBuckets },
+  rates: CostRates,
+): number {
+  return (usage.reportedCostUsd ?? 0) + estimateCost(usage.unratedTokens ?? usage, rates)
+}
+
+/**
  * Compact USD figure: four decimals under a cent, three under a dollar, two
  * from there on, `~` prefixed because the figure is an estimate.
  * @param cost - estimated spend in USD.

@@ -5,10 +5,18 @@
  * local-time by design).
  */
 import { describe, expect, it } from 'vitest'
+import { en } from '../src/client/locales.ts'
 import type { CodingSession } from '../src/client/store.ts'
 import {
-  addDays, buildMonthGrid, dayStart, formatClock, shiftMonth, splitDuration, sumRangeMs, weekStart,
+  addDays, buildMonthGrid, dayStart, formatClock, formatDuration, shiftMonth, splitDuration, sumRangeMs, weekStart,
 } from '../src/client/totals.ts'
+
+/** English-dictionary translate stub with {name} interpolation. */
+const t = (key: string, params?: Record<string, unknown>): string => {
+  let s = (en as Record<string, string>)[key] ?? key
+  for (const [k, v] of Object.entries(params ?? {})) s = s.replaceAll(`{${k}}`, String(v))
+  return s
+}
 
 /** Local wall-clock constructor keeping expectations readable. */
 function at(year: number, month: number, day: number, hour = 0, minute = 0): number {
@@ -91,6 +99,13 @@ describe('formats', () => {
     expect(formatClock(59_000)).toBe('0:00:59')
     expect(formatClock(3_600_000 + 62_000)).toBe('1:01:02')
     expect(formatClock(-5)).toBe('0:00:00')
+  })
+
+  it('formats localized durations as zero, minutes-only, or hours+minutes', () => {
+    expect(formatDuration(0, t)).toBe('0m')
+    expect(formatDuration(59_999, t)).toBe('0m')
+    expect(formatDuration(45 * 60_000, t)).toBe('45m')
+    expect(formatDuration(150 * 60_000, t)).toBe('2h 30m')
   })
 
   it('splits totals into whole hours and remaining minutes, truncating', () => {

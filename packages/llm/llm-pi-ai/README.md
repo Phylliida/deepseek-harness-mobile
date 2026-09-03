@@ -150,6 +150,7 @@ If a listener rewrites assembled assistant content, the loop drops replay state 
 - pi-ai tool-call arguments are parsed objects; the harness stores raw JSON strings. The adapter parses input and re-stringifies output.
 - pi-ai reports failures as in-stream error events; these map to `finish {kind:'error'|'aborted', failure}` chunks. Provider-specific error text distinguishes terminal `QUOTA` from transient `RATE_LIMIT`, while text and usage signals evaluated against the resolved model's context window normalize overflow to `CONTEXT_WINDOW_EXCEEDED`. A terminal `stop` whose message carries no content blocks maps to a `finish {kind:'error'}` with code `EMPTY_RESPONSE` (retried by default policy) instead of a successful empty message.
 - pi-ai folds reasoning tokens into output usage; there is no separate reasoning count to map.
+- OpenRouter-compatible endpoints report the actual billed amount on the response usage object. The harness's pnpm patch on pi-ai (`patches/@earendil-works__pi-ai@0.82.1.patch`) preserves it as `Usage.providerCost`, and `mapUsage` carries it to `TokenUsage.costUsd` so rate-based cost estimates never price that call again; pi-ai's own catalog-estimated `usage.cost` block is not read.
 - pi-ai's `off` thinking level crosses the Harness capability seam unchanged and becomes an omitted pi-ai common `reasoning` option at dispatch.
 - `GenerateOptions.stop` is rejected with `UNSUPPORTED_OPTION` because pi-ai's common streaming UI cannot guarantee it across providers.
 

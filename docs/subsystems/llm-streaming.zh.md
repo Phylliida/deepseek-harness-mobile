@@ -247,7 +247,7 @@ interface AppIdentity {
 
 ## `TokenUsage`
 
-逐调用 token 记账。各计数**互不重叠**：`inputTokens` 只包含未缓存输入；缓存输入单独报告，计费输入是三者之和。若提供方把缓存命中折入单一提示词总数（如 DeepSeek 的 `prompt_tokens`），适配器会再将其扣除。`reasoningTokens` 存在时只是信息性细节，已经包含在 `outputTokens` 中；汇总时不得重复相加。
+逐调用 token 记账。各计数**互不重叠**：`inputTokens` 只包含未缓存输入；缓存输入单独报告，计费输入是三者之和。若提供方把缓存命中折入单一提示词总数（如 DeepSeek 的 `prompt_tokens`），适配器会再将其扣除。`reasoningTokens` 存在时只是信息性细节，已经包含在 `outputTokens` 中；汇总时不得重复相加。`costUsd` 存在时是该次调用由提供方报告的美元计费金额（OpenRouter 每次请求都会报告一个）；基于费率的估算以其缺席为依据，因此已由提供方计费的调用绝不会被重复计价。
 
 ```ts type-equiv
 /**
@@ -264,6 +264,13 @@ interface TokenUsage {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+  /**
+   * Provider-reported billed cost for this call in USD (OpenRouter's
+   * `usage.cost`), when the provider reports one. Absence is the common case
+   * and is what rate-based estimates key off: a call carrying it is billed
+   * fact those rates must never price again.
+   */
+  costUsd?: number
 }
 ```
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estimateCost, formatBudgetPercent, formatCost, formatTokens } from '../src/cost.ts'
+import { estimateCost, estimateSessionCost, formatBudgetPercent, formatCost, formatTokens } from '../src/cost.ts'
 import { DEFAULT_COST_RATES } from '../src/cost-settings.ts'
 
 describe('estimateCost', () => {
@@ -26,6 +26,43 @@ describe('estimateCost', () => {
       cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0,
     }, { input: 50, cacheRead: 0, cacheWrite: 0, output: 0 })
     expect(cost).toBe(50)
+  })
+})
+
+describe('estimateSessionCost', () => {
+  const buckets = {
+    uncachedInputTokens: 1_000_000,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+  }
+
+  it('prices every bucket from the rates while no provider reported a cost', () => {
+    expect(estimateSessionCost(buckets, DEFAULT_COST_RATES)).toBe(3)
+  })
+
+  it('takes a reported cost as fact and prices nothing from the rates', () => {
+    expect(estimateSessionCost({
+      ...buckets,
+      reportedCostUsd: 0.42,
+      unratedTokens: { uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 },
+    }, DEFAULT_COST_RATES)).toBe(0.42)
+  })
+
+  it('combines reported fact with the rated remainder in a mixed session', () => {
+    expect(estimateSessionCost({
+      ...buckets,
+      reportedCostUsd: 0.42,
+      unratedTokens: { uncachedInputTokens: 500_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 },
+    }, DEFAULT_COST_RATES)).toBe(1.92)
+  })
+
+  it('keeps a reported zero bill out of the rate estimate', () => {
+    expect(estimateSessionCost({
+      ...buckets,
+      reportedCostUsd: 0,
+      unratedTokens: { uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 },
+    }, DEFAULT_COST_RATES)).toBe(0)
   })
 })
 

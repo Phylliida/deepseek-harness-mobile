@@ -11,9 +11,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
+import type { SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
 import { CodingTimer } from '../src/client/CodingTimer.tsx'
 import type { CodingTimerProps } from '../src/client/CodingTimer.tsx'
 import { en } from '../src/client/locales.ts'
+import type { CodingTimerSettings } from '../src/settings.ts'
 import { createCodingTimerStore } from '../src/client/store.ts'
 
 /** Local wall-clock constructor keeping seed data readable. */
@@ -37,17 +39,35 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
 // share; stub them as never-called functions.
 const neverHook = (() => { throw new Error('timer must not read global hooks') }) as never
 
+/** One ready settings snapshot; only the fields under test vary. */
+function gateSnap(over: Partial<SettingsScopeSnapshot<CodingTimerSettings>> = {}): SettingsScopeSnapshot<CodingTimerSettings> {
+  return {
+    status: 'ready',
+    value: { gate: true, idleMinutes: 10 },
+    base: undefined,
+    user: undefined,
+    revision: 0,
+    writable: true,
+    mode: 'host',
+    ...over,
+  }
+}
+
 /** Mount the row against a fresh store (persist key rehydrates: clear first). */
-function mount(wide: boolean) {
+function mount(wide: boolean, gate = gateSnap()) {
   const instance = createCodingTimerStore().create()
+  const source = { subscribe: () => () => {}, getSnapshot: () => gate }
+  const setGate = vi.fn()
+  const setIdleMinutes = vi.fn()
   const utils = render(
     <CodingTimer
       wide={wide}
       useSessions={neverHook} useWorkspaces={neverHook}
-      useStore={hookOf(instance)} actions={instance.actions} t={t}
+      useStore={hookOf(instance)} actions={instance.actions}
+      useGate={hookOf(source)} setGate={setGate} setIdleMinutes={setIdleMinutes} t={t}
     />,
   )
-  return { instance, ...utils }
+  return { instance, setGate, setIdleMinutes, ...utils }
 }
 
 beforeEach(() => {
@@ -92,6 +112,45 @@ describe('CodingTimer wide row', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('flips the gate preference from the stats modal toggle', () => {
+    const { setGate } = mount(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Coding time stats' }))
+    const toggle = screen.getByRole('button', { name: 'On' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(toggle)
+    expect(setGate).toHaveBeenCalledWith(false)
+  })
+
+  it('hides the settings rows when the Host document accepts no writes', () => {
+    mount(true, gateSnap({ writable: false }))
+    fireEvent.click(screen.getByRole('button', { name: 'Coding time stats' }))
+    expect(screen.queryByRole('button', { name: 'On' })).toBeNull()
+    expect(screen.queryByText('Show the start screen while stopped')).toBeNull()
+    expect(screen.queryByRole('spinbutton', { name: 'Auto-stop when idle for' })).toBeNull()
+  })
+
+  it('writes the idle timeout from the stats modal, ignoring non-numbers', () => {
+    const { setIdleMinutes } = mount(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Coding time stats' }))
+    const input = screen.getByRole('spinbutton', { name: 'Auto-stop when idle for' })
+    expect((input as HTMLInputElement).value).toBe('10')
+    // A cleared field parses to NaN and writes nothing (the controlled value
+    // stays); a whole number rides the face's write callback.
+    fireEvent.change(input, { target: { value: '' } })
+    expect(setIdleMinutes).not.toHaveBeenCalled()
+    fireEvent.change(input, { target: { value: '25' } })
+    expect(setIdleMinutes).toHaveBeenCalledWith(25)
+  })
+
+  it('re-enables the gate from the modal when the preference is off', () => {
+    const { setGate } = mount(true, gateSnap({ value: { gate: false, idleMinutes: 10 } }))
+    fireEvent.click(screen.getByRole('button', { name: 'Coding time stats' }))
+    const toggle = screen.getByRole('button', { name: 'Off' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    fireEvent.click(toggle)
+    expect(setGate).toHaveBeenCalledWith(true)
+  })
+
   it('shows daily and weekly totals, including the live stretch', () => {
     const { instance } = mount(true)
     // Completed: 1h today (09:00–10:00), 45m on Monday (same ISO week).
@@ -112,8 +171,7 @@ describe('CodingTimer wide row', () => {
     expect(screen.getByText('45m')).toBeTruthy()
   })
 
-  it('navigates months without losing totals', () => {
-    const { instance } = mount(true)
+  it('navigates months without losing totals', () => {    const { instance } = mount(true)
     act(() => {
       instance.actions.start(at(2, 10, 9)) // February: 1h
       instance.actions.stop(at(2, 10, 10))

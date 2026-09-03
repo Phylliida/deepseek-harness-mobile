@@ -83,6 +83,17 @@ describe('CostLine', () => {
     expect(line({ tokenUsage: USAGE }, DEFAULT_SETTINGS, tEn).container.textContent).toBe('est. cost ~$5.10 (4.3%)')
   })
 
+  it('sums provider-reported cost as fact and prices only the unrated remainder', () => {
+    // $0.42 reported + 1M unrated uncached input at $3 = $3.42, 2.9% of $120;
+    // the reported call's own tokens stay in the totals but out of the arithmetic.
+    const usage = {
+      ...USAGE,
+      reportedCostUsd: 0.42,
+      unratedTokens: { uncachedInputTokens: 1_000_000, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 },
+    }
+    expect(line({ tokenUsage: usage }, DEFAULT_SETTINGS, tEn).container.textContent).toBe('est. cost ~$3.42 (2.9%)')
+  })
+
   it('reprices and re-shares when the configured rates and budget differ', () => {
     // 10.00 + 2.00 + 0.50 = $12.50, 25% of a $50 budget.
     const custom = {
