@@ -240,7 +240,7 @@ function validatePolicy(
   if (retainRatio !== undefined && retainTokens !== undefined) {
     throw new Error(`${name}: retainRatio and retainTokens are mutually exclusive`)
   }
-  if (maxTokens !== undefined) assertPositiveInteger(`${name}.maxTokens`, maxTokens)
+  if (maxTokens !== undefined) assertNonNegativeInteger(`${name}.maxTokens`, maxTokens)
   if (compactionRetries !== undefined) {
     assertNonNegativeInteger(`${name}.compactionRetries`, compactionRetries)
   }
@@ -288,12 +288,6 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 function assertNonEmptyString(name: string, value: unknown): asserts value is string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`${name} must be a non-empty string`)
-  }
-}
-
-function assertPositiveInteger(name: string, value: unknown): asserts value is number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
-    throw new Error(`${name} (${String(value)}) must be a positive integer`)
   }
 }
 

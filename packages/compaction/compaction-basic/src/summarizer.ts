@@ -171,7 +171,9 @@ export async function summarizeWithLlm(
     messages,
     ...input.system === undefined ? {} : { system: input.system },
     ...input.tools === undefined ? {} : { tools: [...input.tools] },
-    maxTokens: config.maxTokens,
+    // A 0 cap omits maxTokens from the request, so the provider applies the
+    // model's own output maximum instead of a harness-side budget.
+    ...config.maxTokens === 0 ? {} : { maxTokens: config.maxTokens },
     sessionId: agent.session.id,
     purpose: 'compaction',
     ...signal === undefined ? {} : { signal },
@@ -191,7 +193,7 @@ export async function summarizeWithLlm(
     llmStreamCall: true,
     provider: options.provider,
     model: options.model,
-    maxTokens: config.maxTokens,
+    ...config.maxTokens === 0 ? {} : { maxTokens: config.maxTokens },
     ...(assembler.usage === undefined ? {} : { usage: assembler.usage }),
   }
 }
