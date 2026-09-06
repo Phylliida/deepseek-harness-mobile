@@ -412,7 +412,7 @@ describe('compact configuration and defaults', () => {
 
   it('validates common values and pressure-policy invariants', () => {
     const bad = [
-      [{ maxTokens: 0 }, /maxTokens/],
+      [{ maxTokens: -1 }, /maxTokens/],
       [{ compactionRetries: -1 }, /compactionRetries/],
       [{ maxOverflowRetries: -1 }, /maxOverflowRetries/],
       [{ auto: 'yes' }, /auto must be a boolean/],
@@ -1217,6 +1217,24 @@ describe('default one-shot summarizer', () => {
     })
     const instruction = adapter.lastOptions?.messages.at(-1)?.content[0]
     expect(instruction?.type === 'text' ? instruction.text : '').toContain('## Primary Request and Intent')
+  })
+
+  it('omits the generation cap from request and result when maxTokens is 0', async () => {
+    const { adapter, compact } = await summarizerHarness(
+      [{ type: 'text', text: 'summary' }],
+      undefined,
+      MODEL,
+      {
+        auto: false,
+        summarizationProvider: MODEL,
+        summarizationModel: MODEL,
+        maxTokens: 0,
+      },
+    )
+    const output = await compact.runSummarize(promptInput('transcript'), agent(conversation(1), 'fallback'), SIGNAL)
+
+    expect(adapter.lastOptions?.maxTokens).toBeUndefined()
+    expect(output.maxTokens).toBeUndefined()
   })
 
   it('replays the conversation prefix and appends the instruction as the final message', async () => {
