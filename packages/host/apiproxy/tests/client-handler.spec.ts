@@ -99,6 +99,10 @@ function scriptedApi(overrides: {
       remove: r => ok(r, {}),
       ...overrides.agentPresets,
     },
+    coding: {
+      read: r => ok(r, { revision: 0, spans: [] }),
+      write: r => ok(r, { revision: 0, spans: [] }),
+    },
     goals: {
       create: err,
       edit: err,

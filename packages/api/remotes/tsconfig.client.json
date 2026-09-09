@@ -21,6 +21,9 @@
       "path": "../../client/connection/tsconfig.client.json"
     },
     {
+      "path": "../../coding/coding-activity"
+    },
+    {
       "path": "../../credentials/credentials"
 
     },

@@ -1,3 +1,4 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { PassThrough } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
@@ -95,6 +96,52 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_TOKEN
       delete process.env.SCRUB_PROBE_PASSWORD
       delete process.env.SCRUB_PROBE_PLAIN
+    }
+  })
+
+  it('scrubbedParentEnv always exports one existing temp directory, coherently across the standard variable spellings', () => {
+    // The default fallback must itself be a directory a child can use, on
+    // every platform, without relying on the ambient (possibly stale) TMPDIR.
+    const base = scrubbedParentEnv()
+    expect(existsSync(base.TMPDIR as string)).toBe(true)
+    expect(base.TMP).toBe(base.TMPDIR)
+  })
+
+  it('scrubbedParentEnv repoints a stale temp variable to the fallback but honors an operator-owned one', () => {
+    // This very process can inherit a dead nix-shell TMPDIR, so the test owns
+    // every sanitized variable explicitly: a path that does not exist is
+    // repointed; an existing operator directory (created under the sanitized
+    // fallback itself) is forwarded verbatim.
+    const stale = '/definitely/not/an/existing/dsh-scrub-probe'
+    const previous = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP, TEMPDIR: process.env.TEMPDIR }
+    // The repoint target is the platform default — derived with the ambient
+    // (possibly live, custom) temp variables absent, because a live ambient
+    // value is honored, not the fallback.
+    delete process.env.TMPDIR
+    delete process.env.TMP
+    delete process.env.TEMP
+    delete process.env.TEMPDIR
+    const fallback = scrubbedParentEnv().TMPDIR as string
+    const kept = mkdtempSync(`${fallback}/dsh-scrub-tmpdir-probe-`)
+    process.env.TMPDIR = stale
+    process.env.TMP = stale
+    process.env.TEMP = kept
+    delete process.env.TEMPDIR
+    try {
+      const env = scrubbedParentEnv()
+      expect(env.TMPDIR).toBe(fallback)
+      expect(env.TMP).toBe(fallback)
+      expect(env.TEMP).toBe(kept)
+    } finally {
+      delete process.env.TMPDIR
+      delete process.env.TMP
+      delete process.env.TEMP
+      delete process.env.TEMPDIR
+      if (previous.TMPDIR !== undefined) process.env.TMPDIR = previous.TMPDIR
+      if (previous.TMP !== undefined) process.env.TMP = previous.TMP
+      if (previous.TEMP !== undefined) process.env.TEMP = previous.TEMP
+      if (previous.TEMPDIR !== undefined) process.env.TEMPDIR = previous.TEMPDIR
+      rmSync(kept, { recursive: true, force: true })
     }
   })
 })

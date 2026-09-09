@@ -6,7 +6,6 @@
  */
 import { describe, expect, it } from 'vitest'
 import { en } from '../src/client/locales.ts'
-import type { CodingSession } from '../src/client/store.ts'
 import {
   addDays, buildMonthGrid, dayStart, formatClock, formatDuration, shiftMonth, splitDuration, sumRangeMs, weekStart,
 } from '../src/client/totals.ts'
@@ -43,24 +42,25 @@ describe('dayStart / addDays / weekStart', () => {
 })
 
 describe('sumRangeMs', () => {
-  const sessions: CodingSession[] = [
+  const spans = [
     { start: at(2026, 3, 16, 9), end: at(2026, 3, 16, 11) }, // 2h same day
     { start: at(2026, 3, 16, 23), end: at(2026, 3, 17, 1) }, // 2h across midnight
   ]
 
-  it('clips completed sessions to the range', () => {
-    expect(sumRangeMs(sessions, null, 0, at(2026, 3, 16), at(2026, 3, 17)))
+  it('clips spans to the range', () => {
+    expect(sumRangeMs(spans, at(2026, 3, 16), at(2026, 3, 17)))
       .toBe(2 * 3_600_000 + 3_600_000)
-    expect(sumRangeMs(sessions, null, 0, at(2026, 3, 17), at(2026, 3, 18))).toBe(3_600_000)
-    expect(sumRangeMs(sessions, null, 0, at(2026, 3, 18), at(2026, 3, 19))).toBe(0)
+    expect(sumRangeMs(spans, at(2026, 3, 17), at(2026, 3, 18))).toBe(3_600_000)
+    expect(sumRangeMs(spans, at(2026, 3, 18), at(2026, 3, 19))).toBe(0)
   })
 
-  it('counts the live session up to now', () => {
+  it('clips a display-projected live tail the same way', () => {
+    // bridging.ts may extend the tail span right up to `now`; the range math
+    // must not treat the extension any differently from stored history.
     const now = at(2026, 3, 18, 12)
-    expect(sumRangeMs([], at(2026, 3, 18, 10), now, at(2026, 3, 18), at(2026, 3, 19)))
+    expect(sumRangeMs([{ start: at(2026, 3, 18, 10), end: now }], at(2026, 3, 18), at(2026, 3, 19)))
       .toBe(2 * 3_600_000)
-    // A range before the live session contributes nothing.
-    expect(sumRangeMs([], at(2026, 3, 18, 10), now, at(2026, 3, 17), at(2026, 3, 18))).toBe(0)
+    expect(sumRangeMs([{ start: at(2026, 3, 18, 10), end: now }], at(2026, 3, 17), at(2026, 3, 18))).toBe(0)
   })
 })
 

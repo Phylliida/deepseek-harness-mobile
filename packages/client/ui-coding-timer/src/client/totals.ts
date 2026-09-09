@@ -7,7 +7,7 @@
  * millisecond strides, so DST transitions never shift a cell off midnight.
  */
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { CodingSession } from './store.ts'
+import type { CodingSpanView } from '@deepseek-ai/dsh-client-connection/client'
 
 /** Milliseconds in one minute. */
 export const MINUTE_MS = 60_000
@@ -47,31 +47,25 @@ export function weekStart(ms: number): number {
 }
 
 /**
- * Total coding ms overlapping `[rangeStart, rangeEnd)`: completed sessions
- * clipped to the range plus the live session (activeSince..now) when one is
- * running. A stretch crossing midnight splits across both days, which is the
- * point of the tracker — late-night coding counts against the day it
- * happened on.
- * @param sessions - completed session history (epoch ms pairs).
- * @param activeSince - running session start (epoch ms), or null while stopped.
- * @param now - the instant the live session counts up to (epoch ms).
+ * Total coding ms overlapping `[rangeStart, rangeEnd)`. Callers pass the
+ * display projection's spans (bridging.ts): canonical log spans with pending
+ * stamps folded and a live tail extended to the render instant, so one
+ * primitive serves history and the live run alike. A stretch crossing
+ * midnight splits across both days, which is the point of the tracker —
+ * late-night coding counts against the day it happened on.
+ * @param spans - display spans (epoch ms pairs).
  * @param rangeStart - inclusive range start (epoch ms).
  * @param rangeEnd - exclusive range end (epoch ms).
  * @returns total coding milliseconds inside the range.
  */
 export function sumRangeMs(
-  sessions: readonly CodingSession[],
-  activeSince: number | null,
-  now: number,
+  spans: readonly CodingSpanView[],
   rangeStart: number,
   rangeEnd: number,
 ): number {
   let total = 0
-  for (const s of sessions) {
+  for (const s of spans) {
     total += Math.max(0, Math.min(s.end, rangeEnd) - Math.max(s.start, rangeStart))
-  }
-  if (activeSince !== null) {
-    total += Math.max(0, Math.min(now, rangeEnd) - Math.max(activeSince, rangeStart))
   }
   return total
 }

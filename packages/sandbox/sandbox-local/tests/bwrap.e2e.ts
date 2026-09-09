@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -14,12 +14,15 @@ import { bwrapProfileArgs } from '../src/profiles.ts'
  * Keyless backend integration through `confine()` and a real bwrap process. With no rung forced,
  * a passing probe must select the first rung. Tests assert world effects, wrap shape, and that the
  * kernel denial matches the advertised dialect; consumer coverage lives in dsh-bash-sandbox.
- * Skips when bwrap or user namespaces are unavailable. HOME-based workspaces avoid bwrap's
- * ephemeral `/tmp`, so workspace-write actually proves the workspace-root rebind.
+ * Skips when bwrap or user namespaces are unavailable. Fresh per-test workspace directories
+ * keep each assertion independent, so workspace-write actually proves the workspace-root rebind.
  */
 
 const probe = spawnSync('bwrap', [...bwrapProfileArgs({ mode: 'read-only', workspaceRoot: '/' }), '--', 'true'], { timeout: 5_000, stdio: 'ignore' })
 const bwrapUsable = probe.status === 0
+
+/** unshare(1) needs user namespaces too; a harness run may itself be wrapped. */
+const unshareUsable = spawnSync('unshare', ['--mount', 'true'], { timeout: 5_000, stdio: 'ignore' }).status === 0
 
 let ctx: Context | undefined
 const tempDirs: string[] = []
@@ -51,6 +54,23 @@ function runConfined(sandbox: LocalSandboxProvider, command: string, policy: San
   return { result, confined }
 }
 
+/** Quote one argv element for re-assembly into a shell string. */
+function shellQuote(arg: string): string {
+  return `'${arg.replaceAll("'", String.raw`'\''`)}'`
+}
+
+/**
+ * Run a shell `command` in a scratch child mount namespace where /tmp is a
+ * PRIVATE tmpfs: host /tmp is the shared world-writable cauldron (another
+ * process could place anything there mid-run), so a private, empty tmpfs is
+ * the only scratch area guaranteed to stay outside every one of the wrap's
+ * grants. unshare(1) builds the namespace without privilege; the tmpfs dies
+ * with the child.
+ */
+function runInPrivateTmpfs(command: string) {
+  return spawnSync('unshare', ['--mount', 'sh', '-c', `mount --make-rprivate / && mount -t tmpfs tmpfs /tmp && ${command}`], { timeout: 30_000, encoding: 'utf8' })
+}
+
 describe.skipIf(!bwrapUsable)('sandbox-local: real bwrap confinement', () => {
   it('the passing probe selects the bwrap rung naturally — first in the ladder, full enforcement, EROFS dialect', async () => {
     const workdir = await tempDir(tmpdir())
@@ -79,32 +99,35 @@ describe.skipIf(!bwrapUsable)('sandbox-local: real bwrap confinement', () => {
     expect(result.stdout).toBe('dev-ok\n')
   })
 
-  it('workspace-write lands a write inside the workspace root and still denies one beside it', async () => {
-    const workdir = await tempDir(homedir())
-    const outside = await tempDir(homedir())
+  it.skipIf(!unshareUsable)('workspace-write lands a write inside the workspace root and still denies one outside it', async () => {
+    const workdir = await tempDir(tmpdir())
     const sandbox = await provider()
 
     const inside = runConfined(sandbox, `printf bwrap-ok > ${workdir}/allowed.txt`, { mode: 'workspace-write', workspaceRoot: workdir })
     expect(inside.result.status).toBe(0)
     expect(readFileSync(join(workdir, 'allowed.txt'), 'utf8')).toBe('bwrap-ok')
 
-    const denied = runConfined(sandbox, `echo hi > ${outside}/denied.txt`, { mode: 'workspace-write', workspaceRoot: workdir })
-    expect(denied.result.status).not.toBe(0)
-    expect(existsSync(join(outside, 'denied.txt'))).toBe(false)
+    // /tmp is writable under workspace-write, so the denied target lives in a
+    // child mount namespace whose /tmp is a private tmpfs: that tree is real
+    // on disk but outside every grant of the wrap, so the confined write can
+    // only fail with the wrap's own read-only denial.
+    const scratch = `/tmp/dsh-bwrap-e2e-outside-${process.pid}`
+    const confined = sandbox.confine(['bash', '-c', `echo hi > ${scratch}/denied.txt`], { mode: 'workspace-write', workspaceRoot: workdir })
+    const denied = runInPrivateTmpfs(`mkdir -p ${scratch} && ${confined.argv.map(shellQuote).join(' ')}`)
+    expect(denied.status).not.toBe(0)
+    expect(denied.stderr.toLowerCase()).toContain('read-only file system')
   })
 
-  it('workspace-write mounts an EPHEMERAL /tmp: the write succeeds inside, the host /tmp stays untouched', async () => {
-    // The documented bwrap-profile difference: Landlock and Seatbelt grant
-    // the HOST temp areas, bwrap swaps in a fresh tmpfs that dies with the
-    // process — the strongest of the three temp semantics.
-    const workdir = await tempDir(homedir())
-    const target = `/tmp/dsh-bwrap-e2e-ephemeral-${process.pid}.txt`
+  it('workspace-write grants the host /tmp: the write lands on the host temp area and outlives the command', async () => {
+    // Temp parity across the runners: a confined command's /tmp write is a
+    // HOST file, so a later command or session can reopen the same path.
+    const workdir = await tempDir(tmpdir())
+    const target = `/tmp/dsh-bwrap-e2e-persistent-${process.pid}.txt`
     tempFiles.push(target)
     const sandbox = await provider()
-    const { result } = runConfined(sandbox, `printf tmp-ok > ${target} && cat ${target}`, { mode: 'workspace-write', workspaceRoot: workdir })
+    const { result } = runConfined(sandbox, `printf tmp-ok > ${target}`, { mode: 'workspace-write', workspaceRoot: workdir })
     expect(result.status).toBe(0)
-    expect(result.stdout).toBe('tmp-ok')
-    expect(existsSync(target)).toBe(false)
+    expect(readFileSync(target, 'utf8')).toBe('tmp-ok')
   })
 })
 

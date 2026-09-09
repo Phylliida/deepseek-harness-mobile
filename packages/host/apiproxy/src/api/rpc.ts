@@ -77,6 +77,8 @@ export interface RpcErrorDetailsMap {
   'settings-conflict': { ns: string; expected: number; actual: number }
   /** A credential write was refused (read-only shadowing layer or storage failure); the message is the seam's own text. */
   'credential-rejected': { ref: string }
+  /** A coding-activity batch was refused (a stamp beyond the Host clock's future-skew window, or a storage failure); the message is the log's own text. */
+  'coding-rejected': {}
   /**
    * Interrogating a draft provider endpoint did not produce a model listing:
    * no adapter family serves the namespace, the protocol has no listing this

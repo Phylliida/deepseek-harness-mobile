@@ -1,12 +1,14 @@
+// @vitest-environment jsdom
 /**
  * apply wiring on a real cordis Context + SlotRegistry: the timer row and the
- * gate cover wait on their declaring slots (slots.inject declaration
- * tracking), register sharing ONE persisted store handle, the `coding-timer`
- * locale namespace, and the same settings face (the bound settings scope as
- * the hooks.gate source + the setGate/setIdleMinutes write callbacks), and
- * unregister on fiber teardown. Component behavior is covered props-direct in
- * coding-timer.client.spec.tsx and coding-gate.client.spec.tsx; no renderer
- * machinery here.
+ * idle cover wait on their declaring slots (slots.inject declaration
+ * tracking), register the `coding-timer` locale namespace and the same
+ * settings/activity face (the bound settings scope as the hooks.gate source,
+ * the shared activity controller as hooks.activity, plus the
+ * setGate/setIdleMinutes write callbacks), and unregister on fiber teardown
+ * (which also disposes the controller). Component behavior is covered
+ * props-direct in coding-timer.client.spec.tsx and coding-gate.client.spec.tsx;
+ * no renderer machinery here.
  */
 import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -64,13 +66,25 @@ async function bench() {
       },
     },
   })
+  const remote = new TestRemote(ctx)
   ctx.provide('connection', {
-    api: { settings: { describe: vi.fn().mockResolvedValue(describedGate(true)), mutate } },
+    api: {
+      settings: { describe: vi.fn().mockResolvedValue(describedGate(true)), mutate },
+      coding: {
+        read: vi.fn().mockResolvedValue({
+          rpcId: 'coding-timer-spec-2' as never,
+          result: { ok: true, value: { revision: 0, spans: [] } },
+        }),
+        write: vi.fn().mockResolvedValue({
+          rpcId: 'coding-timer-spec-3' as never,
+          result: { ok: true, value: { revision: 1, spans: [] } },
+        }),
+      },
+    },
     isLoopback: true,
   } as never)
-  new TestRemote(ctx)
   await ctx.plugin(SettingsScopeBinder).await()
-  return { ctx, mutate }
+  return { ctx, mutate, remote }
 }
 
 /** Stand in for ui-sidebar's and ui-layout's declaring registrations. */
@@ -111,7 +125,7 @@ describe('ui-coding-timer apply', () => {
     expect(ctx.slots.entries('shell.overlay')).toHaveLength(1)
   })
 
-  it('registers both surfaces with one shared store, the locale seat, and the settings face', async () => {
+  it('registers both surfaces with the locale seat and the settings/activity face', async () => {
     let mutate: ReturnType<typeof vi.fn>
     ;({ ctx, mutate } = await bench())
     declareTimerSeats(ctx)
@@ -122,22 +136,24 @@ describe('ui-coding-timer apply', () => {
     expect(gate.component).toBe(CodingGate)
     expect(row.locale).toBe('coding-timer')
     expect(gate.locale).toBe('coding-timer')
-    // One persisted store handle across both registrations: the gate reads
-    // the same activeSince/sessions the row writes.
-    expect(row.store).toBeDefined()
-    expect(row.store).toBe(gate.store)
-    // The settings face: one shared factory, the settings scope riding the
-    // hooks compartment, and the write callbacks as the one mutation path.
+    // The face: one shared factory, the settings scope and the activity
+    // controller riding the hooks compartment, the write callbacks as the one
+    // mutation path.
     expect(row.inject).toBe(gate.inject)
     const face = (row.inject as (...args: never[]) => Record<string, unknown>)()
     expect(typeof face['setGate']).toBe('function')
     expect(typeof face['setIdleMinutes']).toBe('function')
     const hooks = face['hooks'] as Record<string, unknown>
     const scope = hooks['gate'] as { getSnapshot: () => { value: unknown } }
+    const activity = hooks['activity'] as { getSnapshot: () => { status: string } }
+    // The activity controller answers the ready view the stub read promised.
+    await vi.waitFor(() => {
+      expect(activity.getSnapshot().status).toBe('ready')
+    })
     // The describe answer carries the pre-idle wire section { gate } only;
     // the scope's decoder defaults idleMinutes into the resolved value.
     await vi.waitFor(() => {
-      expect(scope.getSnapshot().value).toEqual({ gate: true, idleMinutes: 10 })
+      expect(scope.getSnapshot().value).toEqual({ gate: true, idleMinutes: 2 })
     })
     // setGate writes the gate field through the bound scope's mutation queue.
     ;(face['setGate'] as (on: boolean) => void)(false)

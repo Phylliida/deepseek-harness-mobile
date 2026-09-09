@@ -6,9 +6,9 @@
  * (`@deepseek-ai/dsh-sandbox-local`) and the in-process filesystem fence
  * (`@deepseek-ai/dsh-fs-sandbox`) both derive their allow-list here, so "the
  * write tool cannot write /tmp but bash can" asymmetries cannot arise between
- * them. The bwrap and Landlock dialects keep their own grant spellings (an
- * ephemeral `/tmp` mount, launcher-owned flags) — the honest per-runner
- * differences recorded in the sandbox RFC — with parity pinned by test.
+ * them. The bwrap and Landlock dialects keep their own grant spellings (a
+ * read-write bind of the host `/tmp`, launcher-owned flags) — the same
+ * roots in different dialects — with parity pinned by test.
  *
  * @module dsh-sandbox/roots
  */

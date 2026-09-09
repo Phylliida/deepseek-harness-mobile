@@ -1,9 +1,9 @@
-/** `coding-timer` namespace dictionaries: the sidebar timer row, its totals calendar, and the focus-gate cover. */
+/** `coding-timer` namespace dictionaries: the sidebar timer row, its totals calendar, and the idle cover. */
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'start': '开始编码',
-  'stop': '停止编码',
+  'status.active': '进行中',
+  'status.idle': '休息中',
   'info': '编码时长统计',
   'today': '今天',
   'thisWeek': '本周',
@@ -23,10 +23,11 @@ export const zh = {
   'week.total': '周总计',
   'gate.today': '今天已编码',
   'gate.disable': '保持界面常显',
-  'gate.toggle': '停止时显示开始界面',
+  'gate.hint': '动一下鼠标或敲一下键盘即可回到界面',
+  'gate.toggle': '空闲时显示开始界面',
   'gate.on': '已开启',
   'gate.off': '已关闭',
-  'idle.label': '无操作自动停止',
+  'idle.label': '无操作后遮住界面',
   'idle.minutes': '分钟',
 } satisfies Record<string, string>
 
@@ -35,8 +36,8 @@ export type CodingTimerKey = keyof typeof zh
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
-  'start': 'Start coding',
-  'stop': 'Stop coding',
+  'status.active': 'Active',
+  'status.idle': 'Idle',
   'info': 'Coding time stats',
   'today': 'Today',
   'thisWeek': 'This week',
@@ -56,9 +57,10 @@ export const en = {
   'week.total': 'Week',
   'gate.today': 'Coded today',
   'gate.disable': 'Keep the UI always visible',
-  'gate.toggle': 'Show the start screen while stopped',
+  'gate.hint': 'Move the mouse or press a key to return',
+  'gate.toggle': 'Show the start screen while idle',
   'gate.on': 'On',
   'gate.off': 'Off',
-  'idle.label': 'Auto-stop when idle for',
-  'idle.minutes': 'min',
+  'idle.label': 'Cover the UI after',
+  'idle.minutes': 'min without input',
 } satisfies Record<CodingTimerKey, string>

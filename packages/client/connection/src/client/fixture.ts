@@ -21,6 +21,8 @@ import type {
   UserMessage,
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentIdType, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { mergeSpans } from '@deepseek-ai/dsh-coding-activity/document'
+import type { CodingSpan } from '@deepseek-ai/dsh-coding-activity/document'
 import type {
   SessionEvent,
   SessionId,
@@ -1526,6 +1528,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     String(FIXTURE_IMAGE_REF.attachmentId),
     { attachment: FIXTURE_IMAGE_REF, data: FIXTURE_IMAGE_DATA },
   ]])
+  /** Activity-log double: the fixture's per-page span list and revision. */
+  let codingSpans: CodingSpan[] = []
+  let codingRevision = 0
   /** Credential store double: set/unset flip the describe badge, values never read back. */
   const fixtureCredentials = new Map<string, true>([
     // The assembled fixture represents an already-configured shipped
@@ -2926,6 +2931,26 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         details: { ns: request.payload.ns },
       }),
     },
+    coding: {
+      // An in-memory activity log so fixture journeys can stamp interactions
+      // and read totals back; nothing here is shared across pages, unlike the
+      // real Host document.
+      read: request => ok(request, { revision: codingRevision, spans: codingSpans }),
+      write: (request) => {
+        const folded = mergeSpans([
+          ...codingSpans,
+          ...(request.payload.spans ?? []),
+          ...(request.payload.stamps ?? []).map(stamp => ({ start: stamp, end: stamp })),
+        ])
+        const changed = folded.length !== codingSpans.length
+          || folded.some((span, index) => span.start !== codingSpans[index]?.start || span.end !== codingSpans[index]?.end)
+        if (changed) {
+          codingSpans = folded
+          codingRevision += 1
+        }
+        return ok(request, { revision: codingRevision, spans: codingSpans })
+      },
+    },
     credentials: {
       describe: request => ok(request, {
         credentials: Object.fromEntries(request.payload.refs.map(ref => [ref, {
@@ -3118,6 +3143,8 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'goal.resume': return this.api.goals.resume(request)
       case 'goal.complete': return this.api.goals.complete(request)
       case 'goal.clear': return this.api.goals.clear(request)
+      case 'coding.read': return this.api.coding.read(request)
+      case 'coding.write': return this.api.coding.write(request)
       case 'settings.describe': return this.api.settings.describe(request)
       case 'settings.openDocument': return this.api.settings.openDocument(request, signal)
       case 'settings.update': return this.api.settings.update(request)

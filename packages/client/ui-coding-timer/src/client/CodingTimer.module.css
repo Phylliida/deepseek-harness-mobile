@@ -1,8 +1,8 @@
 /* Coding timer row (sidebar.timer seat) and its totals calendar. The wide
-   toggle mirrors the shell's New Session bar geometry (38px, 12px radius);
-   the rail toggle mirrors the rail's 36px icon controls. Running state is
-   the success ink: the dot and the elapsed readout carry it, the bar keeps
-   the quiet elevated chrome. */
+   indicator mirrors the shell's New Session bar geometry (38px, 12px
+   radius); the rail button mirrors the rail's 36px icon controls. Live
+   state is the success ink: the dot and the elapsed readout carry it, the
+   bar keeps the quiet elevated chrome. */
 
 .row {
   display: flex;
@@ -27,12 +27,19 @@
   font-size: 13px;
   font-weight: 500;
   line-height: 22px;
-  cursor: pointer;
   overflow: hidden;
 }
 
-.toggle:hover {
-  background: var(--dsw-alias-button-floating-hover);
+.liveDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-dimmed);
+}
+
+.liveDot.running {
+  background: var(--dsw-alias-state-success-primary);
 }
 
 .toggleLabel {
@@ -238,10 +245,10 @@
   white-space: nowrap;
 }
 
-/* Focus gate (shell.overlay seat): the one deliberately blocking overlay
-   occupant — an opaque full-frame cover while no session runs. The panel is
-   a quiet centered column: today's total, the Start Coding button, and the
-   low-key always-visible escape link. */
+/* Idle cover (shell.overlay seat): the one deliberately blocking overlay
+   occupant — an opaque full-frame cover after idle minutes without input.
+   The panel is a quiet centered column: today's total, the return hint, and
+   the low-key always-visible escape link. */
 .gate {
   position: absolute;
   inset: 0;
@@ -270,13 +277,6 @@
   line-height: 34px;
   color: var(--dsw-alias-label-primary);
   font-variant-numeric: tabular-nums;
-}
-
-.gateStart {
-  margin-top: 8px;
-  padding: 0 28px;
-  height: 44px;
-  font-size: 15px;
 }
 
 .gateDisable {

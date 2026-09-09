@@ -1,13 +1,14 @@
 /**
  * Coding-time tracker plugin, node half.
  *
- * The timer itself is a personal browser-side wellbeing surface: its history
- * lives in the client store's localStorage persistence, never in the session
- * log, and no model-facing tool reads it. The one Host concern is the
- * preference pair (focus gate, idle auto-stop): registering the `coding-timer`
- * settings namespace so the browser scope can durably store whether the
- * stopped timer covers the UI and how many idle minutes stop a forgotten
- * timer (src/settings.ts owns the shared section contract).
+ * The timer itself is a personal wellbeing surface: its history is the
+ * cross-device interaction log the `coding-activity` provider keeps
+ * (`coding.read`/`coding.write` over the gateway), never the session log,
+ * and no model-facing tool reads it. The one settings concern is the
+ * preference pair (idle cover on/off, idle minutes): registering the
+ * `coding-timer` settings namespace so the browser scope can durably store
+ * whether idle time covers the UI and after how long (src/settings.ts owns
+ * the shared section contract).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'

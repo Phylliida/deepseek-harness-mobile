@@ -8,6 +8,8 @@
  * @module @deepseek-ai/dsh-subprocess
  */
 
+import { statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { Context, Service } from '@deepseek-ai/cordis'
 import { DSH_ENV_PREFIX } from './types.ts'
 import type { SubprocessHandle, SubprocessSpawnSpec } from './types.ts'
@@ -55,14 +57,45 @@ export const SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i
  * deliberate lowercase `dsh_*` names on POSIX are implausible. Exported as a plain function so spawners
  * that cannot route through the service (node-pty backends, SDK-managed
  * transports) share the one scrub definition.
+ *
+ * Stale standard TMP variables are REPOINTED, not forwarded: the harness is
+ * routinely launched from shells whose temp contract dies with them (a
+ * nix-shell deletes its `TMPDIR` tree on exit, so a long-lived harness keeps
+ * forwarding a path that no longer exists — every child honoring `TMPDIR`,
+ * nested `nix-shell` invocations included, fails to create its scratch dir).
+ * A variable that names an existing directory is honored verbatim, so an
+ * operator's deliberate custom temp root keeps working; the fallback is the
+ * genuine platform default, recomputed at each call.
  * @returns a fresh environment object safe to hand to a child spawn.
  */
 export function scrubbedParentEnv(): Record<string, string> {
+  // Held OUTSIDE the map under construction: the ambient loop below may copy
+  // a stale TMPDIR over any seeded fallback, but the repoint step must still
+  // know the real platform default it is repointing TO.
+  const fallback = defaultTempDir(process.platform)
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !SENSITIVE_ENV_PATTERN.test(key) && !key.toUpperCase().startsWith(DSH_ENV_PREFIX)) env[key] = value
   }
+  for (const variable of TEMP_VARS) {
+    const value = env[variable]
+    if (value === undefined || !isDirectory(value)) env[variable] = fallback
+  }
   return env
+}
+
+/** The temp variables a spawn sanitizes; both spellings so cross-platform children see a coherent pair. */
+const TEMP_VARS = ['TMPDIR', 'TMP', 'TEMP', 'TEMPDIR']
+
+/** The temp root a platform consults with no variables set (POSIX `/tmp`; the Windows per-user profile temp). */
+function defaultTempDir(platform: NodeJS.Platform): string {
+  if (platform === 'win32') return `${homedir()}\\AppData\\Local\\Temp`
+  return '/tmp'
+}
+
+/** Whether `path` names an existing directory (ENOENT, EACCES, and files all read as unusable). */
+function isDirectory(path: string): boolean {
+  try { return statSync(path).isDirectory() } catch { return false }
 }
 
 declare module '@deepseek-ai/cordis' {

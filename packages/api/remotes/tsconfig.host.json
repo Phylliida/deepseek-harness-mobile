@@ -23,6 +23,9 @@
       "path": "../../core/session"
     },
     {
+      "path": "../../coding/coding-activity"
+    },
+    {
       "path": "../../credentials/credentials"
     },
     {
