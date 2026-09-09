@@ -78,6 +78,12 @@
     - id: settings
       name: '@deepseek-ai/dsh-settings-file'
 
+    # Cross-device coding-activity log (`$DSH_HOME/coding-activity.json`): the
+    # web GUI's timer stamps every browser's interactions here, and its totals
+    # read this one record back, whichever device produced them.
+    - id: coding-activity
+      name: '@deepseek-ai/dsh-coding-activity'
+
     # Credential sources: inherited environment over the managed
     # `$DSH_HOME/.credentials.yaml`, with project and user `.env` fallbacks.
     # Adapters resolve references per request; the Models page writes only the

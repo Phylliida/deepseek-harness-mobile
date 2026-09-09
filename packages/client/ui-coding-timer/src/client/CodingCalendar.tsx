@@ -2,14 +2,16 @@
  * Coding-time totals calendar: the modal body behind the timer row's info
  * button. A Monday-first month grid where each day cell shows that day's
  * coding total and each week row ends in its week total, plus the today /
- * this-week summary on top. All totals come from totals.ts's single overlap
- * primitive; navigation is component-private viewing state.
+ * this-week summary on top. The caller passes the display projection's spans
+ * (pending stamps folded, live tail extended to now), so history and the
+ * running stretch share totals.ts's single overlap primitive; navigation is
+ * component-private viewing state.
  */
 import { useMemo, useState } from 'react'
 import clsx from 'clsx'
 import { IconChevronLeftOutline14, IconChevronRightOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import type { CodingSession } from './store.ts'
+import type { CodingSpanView } from '@deepseek-ai/dsh-client-connection/client'
 import {
   addDays, buildMonthGrid, dayStart, formatDuration, MINUTE_MS, shiftMonth, sumRangeMs, weekStart,
 } from './totals.ts'
@@ -17,15 +19,13 @@ import css from './CodingTimer.module.css'
 
 /**
  * Render the totals calendar for the viewed month.
- * @param props.sessions - completed session history (store state).
- * @param props.activeSince - running session start, or null while stopped.
- * @param props.now - render instant; the live session counts up to it.
+ * @param props.spans - display spans (bridging projection over the shared log).
+ * @param props.now - render instant; the live run counts up to it.
  * @param props.t - the coding-timer namespace translate seat.
  * @returns the summary strip plus the month grid.
  */
-export function CodingCalendar({ sessions, activeSince, now, t }: {
-  sessions: readonly CodingSession[]
-  activeSince: number | null
+export function CodingCalendar({ spans, now, t }: {
+  spans: readonly CodingSpanView[]
   now: number
   t: TranslateNS<'coding-timer'>
 }) {
@@ -34,9 +34,9 @@ export function CodingCalendar({ sessions, activeSince, now, t }: {
 
   // Derived data is a pure function over store slices + the viewed month.
   const weeks = useMemo(() => buildMonthGrid(view.year, view.month), [view.year, view.month])
-  const todayTotal = sumRangeMs(sessions, activeSince, now, todayMs, addDays(todayMs, 1))
+  const todayTotal = sumRangeMs(spans, todayMs, addDays(todayMs, 1))
   const thisWeekStart = weekStart(now)
-  const weekTotal = sumRangeMs(sessions, activeSince, now, thisWeekStart, addDays(thisWeekStart, 7))
+  const weekTotal = sumRangeMs(spans, thisWeekStart, addDays(thisWeekStart, 7))
 
   return (
     <div className={css.calendar}>
@@ -85,11 +85,11 @@ export function CodingCalendar({ sessions, activeSince, now, t }: {
           /* v8 ignore next -- unreachable: buildMonthGrid emits full rows. */
           if (firstCell === undefined) return null
           const start = firstCell.dayMs
-          const total = sumRangeMs(sessions, activeSince, now, start, addDays(start, 7))
+          const total = sumRangeMs(spans, start, addDays(start, 7))
           return (
             <div key={start} className={css.gridRow} role="row">
               {week.map((cell) => {
-                const dayTotal = sumRangeMs(sessions, activeSince, now, cell.dayMs, addDays(cell.dayMs, 1))
+                const dayTotal = sumRangeMs(spans, cell.dayMs, addDays(cell.dayMs, 1))
                 return (
                   <span
                     key={cell.dayMs}

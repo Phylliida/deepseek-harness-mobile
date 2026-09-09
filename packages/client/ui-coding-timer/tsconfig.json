@@ -33,6 +33,9 @@
       "path": "../locale"
     },
     {
+      "path": "../../coding/coding-activity"
+    },
+    {
       "path": "../../settings/settings"
     },
     {

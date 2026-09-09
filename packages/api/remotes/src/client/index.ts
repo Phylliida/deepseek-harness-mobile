@@ -23,6 +23,7 @@ export type { ApiRemoteForwardedEvent } from '../types.ts'
 // The owner packages' client-safe `./types` exports supply the `Events`
 // signatures `$on` hands to a listener, so a consumer reads the very
 // declaration the Host emits rather than a flattened restatement of it.
+export type {} from '@deepseek-ai/dsh-coding-activity/types'
 export type {} from '@deepseek-ai/dsh-commands/types'
 export type {} from '@deepseek-ai/dsh-cordis-host-runner/types'
 export type {} from '@deepseek-ai/dsh-credentials/types'
@@ -36,7 +37,8 @@ export type {} from '@deepseek-ai/dsh-settings/types'
  * the carrier's runtime values stay behind their own module edge.
  */
 export type {
-  ClientResponse, ConfigurableProviderView, ConnectionHandle, ConnectionSinks, ContentBlock,
+  ClientResponse, CodingActivityLogView, CodingSpanView, ConfigurableProviderView, ConnectionHandle,
+  ConnectionSinks, ContentBlock,
   CredentialView, DirectoryListing, DiscoveredModelView, HistoryEntry, HostFrame, IApiClient,
   MessageId, ModelCatalogFailure, ModelProviderGroup, ModelReasoningEffort, ModelSelection,
   MuxFrame, PromptContentPart, QuestionResponsePayload, QueueAction, RpcError, RpcId, RpcReceipt,

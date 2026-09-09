@@ -19,7 +19,10 @@ import type { SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 export function bwrapProfileArgs(policy: SandboxPolicy, devices: readonly string[] = []): string[] {
   const args = ['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent']
   if (policy.mode === 'workspace-write') {
-    args.push('--tmpfs', '/tmp')
+    // The host /tmp, not a fresh tmpfs: temp artifacts then persist across
+    // commands and sessions — parity with Landlock and with the fs fence's
+    // writableRoots, so bash and the write tool cannot disagree on /tmp.
+    args.push('--bind', '/tmp', '/tmp')
     args.push('--bind', policy.workspaceRoot, policy.workspaceRoot)
   }
   for (const device of devices) args.push('--dev-bind', device, device)

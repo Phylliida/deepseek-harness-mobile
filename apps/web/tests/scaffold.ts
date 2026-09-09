@@ -74,10 +74,10 @@ import { REPO_ROOT, requireDist } from './support.ts'
 export const WELCOME_NOTICE_SETTINGS_NAMESPACE = 'ui-onboarding'
 export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'
 export const WELCOME_NOTICE_VERSION = '2026-08-13.1'
-// The coding gate's settings contract, restated from
+// The coding cover's settings contract, restated from
 // packages/client/ui-coding-timer/src/settings.ts (the Host aggregate must not
 // reach the Client plane); drift makes the seeding below miss the real
-// namespace, so the gate scenario fails loudly instead of testing a phantom.
+// namespace, so the cover scenario fails loudly instead of testing a phantom.
 const CODING_GATE_SETTINGS_NAMESPACE = 'coding-timer'
 const CODING_GATE_FIELD = 'gate'
 export const WELCOME_NOTICE_COPY = {
@@ -246,6 +246,8 @@ export interface LaunchOptions {
    * disable it so the cover never intercepts their clicks.
    */
   codingGateOn?: boolean
+  /** Idle minutes the cover scenario seeds; omitted keeps the shipped default (2). */
+  codingGateIdleMinutes?: number
   /**
    * Patch the shipped DeepSeek search row to a deterministic endpoint and
    * credential reference. Browser search scenarios keep the real provider and
@@ -463,6 +465,7 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
       : [{ id: 'connection', config: { trustedHosts: [options.remoteAuthority] } }],
     { id: 'settings', config: { dshHome: harnessHome } },
     { id: 'credentials', config: { dshHome: harnessHome } },
+    { id: 'coding-activity', config: { dshHome: harnessHome } },
     // The shipped directory-picker row is the -auto chooser, which resolves
     // the interaction from the RUNNING host (display, SSH launch, bind). The
     // lane's goldens are interaction-specific (workspace-management drives
@@ -548,11 +551,16 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
         op: 'set', path: [WELCOME_NOTICE_ACK_FIELD], value: WELCOME_NOTICE_VERSION,
       }])
     }
-    // The focus gate ships on; a scenario exercising it opts in, everything
-    // else gets an unobstructed UI.
+    // The idle cover ships on; a scenario exercising it opts in (and may
+    // shorten the delay), everything else gets an unobstructed UI.
     if (options.codingGateOn !== true) {
       await ctx.settings.mutate(settingsNamespace(CODING_GATE_SETTINGS_NAMESPACE), [{
         op: 'set', path: [CODING_GATE_FIELD], value: false,
+      }])
+    }
+    if (options.codingGateIdleMinutes !== undefined) {
+      await ctx.settings.mutate(settingsNamespace(CODING_GATE_SETTINGS_NAMESPACE), [{
+        op: 'set', path: ['idleMinutes'], value: options.codingGateIdleMinutes,
       }])
     }
     const boundPort = ctx.get('webServer')?.port

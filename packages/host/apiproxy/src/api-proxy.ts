@@ -78,6 +78,8 @@ import type {} from '@deepseek-ai/dsh-skill'
 // The settings/credentials seams: brand guards run at this wire boundary; the
 // service reads stay optional (`ctx.get`) so a composition without either
 // provider still serves every other domain.
+// Type-only: the coding-activity Context merge the domain reads (ctx.codingActivity).
+import type {} from '@deepseek-ai/dsh-coding-activity/types'
 import { SettingsConflictError, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { SettingsDescriptor, SettingsNamespace, SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -1871,6 +1873,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return { code: 'internal', message: 'settings service is absent: this deployment does not mount a settings provider (e.g. @deepseek-ai/dsh-settings-file) in its composition', details: {} }
   }
 
+  /** Missing-service report of the coding domain (settings-domain stance). */
+  function codingAbsent(): RpcError {
+    return { code: 'internal', message: 'coding-activity service is absent: this deployment does not mount @deepseek-ai/dsh-coding-activity in its composition', details: {} }
+  }
+
   /** Open one Host-resolved target and map native failures onto the wire vocabulary. */
   async function openTarget(
     request: RpcRequest<unknown>, path: string, signal: AbortSignal,
@@ -3253,6 +3260,35 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           })
         } catch (error: unknown) {
           return err(request, { code: 'internal', message: `skill listing failed: ${String(error)}`, details: {} })
+        }
+      },
+    },
+
+    coding: {
+      async read(request) {
+        const log = ctx.get('codingActivity')
+        if (log === undefined) return err(request, codingAbsent())
+        try {
+          return ok(request, await log.read())
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'coding-rejected',
+            message: error instanceof Error ? error.message : String(error),
+            details: {},
+          })
+        }
+      },
+      async write(request) {
+        const log = ctx.get('codingActivity')
+        if (log === undefined) return err(request, codingAbsent())
+        try {
+          return ok(request, await log.append(request.payload))
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'coding-rejected',
+            message: error instanceof Error ? error.message : String(error),
+            details: {},
+          })
         }
       },
     },

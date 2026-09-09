@@ -2,13 +2,14 @@
 // Assembled coding-gate snapshot: boots the real built `packages/client/*/lib/
 // client.js` bundles through AppWebEntry's ModuleLoader path against the
 // keyless FixtureApiClient transport — but on a REDUCED plugin graph, not the
-// shared one in assembled-boot.ts. The gate defaults on whenever its settings
+// shared one in assembled-boot.ts. The cover defaults on whenever its settings
 // namespace is absent (the fixture serves only `llm-deepseek`), so adding the
 // timer to the shared graph would cover every other assembled snapshot; a
 // local graph pins the behavior without touching them. What this file pins:
-// stopped boot shows the modal cover (today's total + Start Coding), Start
-// lifts it and runs the sidebar row, Stop brings the cover back, and ten idle
-// minutes stop a forgotten timer at its last activity.
+// boot leaves the UI open for the idle-delay window, the modal cover arrives
+// after idle minutes with today's total and the return hint, ANY interaction
+// lifts it again, and a later idle stretch covers again — the fixture's
+// shared-log double is what the totals read.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { act, fireEvent, screen, within } from '@testing-library/react'
@@ -72,45 +73,34 @@ function mountGateApp(): void {
   })
 }
 
+/** Idle delay the shipped default arms (two minutes), plus margin. */
+const IDLE_MARGIN_MS = 2 * 60_000 + 1_000
+
 describe('assembled coding gate', () => {
-  it('covers the stopped UI, lifts on Start Coding, and returns on Stop', async () => {
+  it('covers after idle minutes, lifts on any interaction, and covers again after more idle', async () => {
     mountGateApp()
-    // The fixture serves no coding-timer namespace: the scope reads
-    // unavailable, so the shipped default keeps the gate on.
-    const gate = await screen.findByRole('dialog', { name: 'Start coding' }, { timeout: 15_000 })
-    expect(within(gate).getByText('Coded today')).toBeTruthy()
-    expect(within(gate).getByText('0m')).toBeTruthy()
+    // Boot counts as arrival: the app opens uncovered and the row is up.
+    await screen.findByRole('button', { name: 'New Session' }, { timeout: 15_000 })
+    expect(screen.queryByRole('dialog', { name: 'Coded today' })).toBeNull()
 
-    fireEvent.click(within(gate).getByRole('button', { name: 'Start coding' }))
-    // The sidebar row underneath was never unmounted: it takes over running.
-    const stop = await screen.findByRole('button', { name: /Stop coding/ }, { timeout: 10_000 })
-    expect(screen.queryByRole('dialog', { name: 'Start coding' })).toBeNull()
-
-    fireEvent.click(stop)
-    await screen.findByRole('dialog', { name: 'Start coding' }, { timeout: 10_000 })
-  })
-
-  it('stops a forgotten timer after ten idle minutes, trimmed to the last activity', async () => {
-    mountGateApp()
-    const gate = await screen.findByRole('dialog', { name: 'Start coding' }, { timeout: 15_000 })
-    fireEvent.click(within(gate).getByRole('button', { name: 'Start coding' }))
-    await screen.findByRole('button', { name: /Stop coding/ }, { timeout: 10_000 })
-
-    // Freeze the clock at the start click (fake timers take the real now);
-    // the watch armed before the freeze never fires inside the test window.
+    // One real interaction restamps the local idle clock, then the clock is
+    // frozen so the idle boundary is exactly testable.
+    fireEvent.pointerMove(window)
     vi.useFakeTimers()
     try {
-      // Five idle minutes, then one pointer drift re-arms the timeout.
-      act(() => { vi.advanceTimersByTime(5 * 60_000) })
+      act(() => { vi.advanceTimersByTime(IDLE_MARGIN_MS) })
+      const cover = screen.getByRole('dialog', { name: 'Coded today' })
+      expect(within(cover).getByText('0m')).toBeTruthy()
+      expect(within(cover).getByText('Move the mouse or press a key to return')).toBeTruthy()
+
+      // Any interaction lifts the cover — even a bare pointer drift.
       fireEvent.pointerMove(window)
-      act(() => { vi.advanceTimersByTime(10 * 60_000 - 1_000) })
-      // 9:59 past the drift: still running, still no cover.
-      expect(screen.queryByRole('dialog', { name: 'Start coding' })).toBeNull()
-      act(() => { vi.advanceTimersByTime(2_000) })
-      // Stopped at the drift (5 minutes in), not at the fire instant: the
-      // returning cover's today total is the trimmed stretch.
-      const cover = screen.getByRole('dialog', { name: 'Start coding' })
-      expect(within(cover).getByText('5m')).toBeTruthy()
+      expect(screen.queryByRole('dialog', { name: 'Coded today' })).toBeNull()
+
+      // Idling beyond the delay covers again: the cover is the standing idle
+      // state, not a one-shot.
+      act(() => { vi.advanceTimersByTime(IDLE_MARGIN_MS) })
+      expect(screen.getByRole('dialog', { name: 'Coded today' })).toBeTruthy()
     } finally {
       vi.useRealTimers()
     }

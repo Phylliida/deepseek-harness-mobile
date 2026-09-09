@@ -1,10 +1,11 @@
 /**
- * The coding timer's Host user-settings section: the focus-gate preference
- * and the idle auto-stop timeout, shared by the Host namespace registration
- * (src/index.ts) and the browser settings scope (src/client/). Unlike the
- * timer history (localStorage, per-browser), these preferences live in the
- * Host document, so every browser pointed at one deployment — desktop and
- * phone alike — obeys the same choices.
+ * The coding timer's Host user-settings section: the idle cover's on/off
+ * preference and the idle minutes that bring it, shared by the Host
+ * namespace registration (src/index.ts) and the browser settings scope
+ * (src/client/). The interaction history itself is the shared activity log
+ * (dsh-coding-activity's document, cross-device by design); these
+ * preferences are the smaller Host-side state every loopback browser pointed
+ * at one deployment agrees on.
  */
 
 import z from '@deepseek-ai/schemastery'
@@ -12,25 +13,24 @@ import z from '@deepseek-ai/schemastery'
 /** Settings namespace owned by the coding timer plugin. */
 export const CODING_TIMER_SETTINGS_NAMESPACE = 'coding-timer'
 
-/** Field carrying the focus-gate preference. */
+/** Field carrying the idle-cover preference. */
 export const CODING_TIMER_GATE_FIELD = 'gate'
 
-/** Field carrying the idle auto-stop timeout, in whole minutes. */
+/** Field carrying the idle delay that covers the UI, in whole minutes. */
 export const CODING_TIMER_IDLE_FIELD = 'idleMinutes'
 
 /**
- * Default when the user-settings document has no opinion: the gate shows
- * whenever no coding session runs. The product default is the guarded one —
+ * Default when the user-settings document has no opinion: the cover shows
+ * after idle minutes without input. The product default is the guarded one —
  * a missing setting must never silently disable the wellbeing surface.
  */
 export const DEFAULT_GATE = true
 
 /**
- * Default idle auto-stop timeout in minutes: a running timer with no input
- * activity for this long stops itself, ending the session at the last
- * activity rather than at the fire instant.
+ * Default idle cover delay in minutes: no input activity for this long
+ * brings the cover back; any interaction lifts it.
  */
-export const DEFAULT_IDLE_MINUTES = 10
+export const DEFAULT_IDLE_MINUTES = 2
 
 /** Shortest accepted idle timeout, in minutes. */
 export const IDLE_MINUTES_MIN = 1
@@ -39,9 +39,9 @@ export const IDLE_MINUTES_MAX = 480
 
 /** Durable coding-timer section shared by the Host schema and the browser scope. */
 export interface CodingTimerSettings {
-  /** Whether the stopped timer covers the UI behind the Start Coding gate. */
+  /** Whether idle minutes without input cover the UI behind the start screen. */
   [CODING_TIMER_GATE_FIELD]: boolean
-  /** Idle minutes after which a running timer stops itself. */
+  /** Idle minutes that bring the cover. */
   [CODING_TIMER_IDLE_FIELD]: number
 }
 

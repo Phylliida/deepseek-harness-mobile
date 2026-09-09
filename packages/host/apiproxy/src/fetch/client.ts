@@ -70,6 +70,7 @@ import {
   goalCompleteValueSchema,
   goalClearValueSchema,
 } from '../api/goals.schema.ts'
+import { codingReadValueSchema, codingWriteValueSchema } from '../api/coding.schema.ts'
 import {
   settingsDescribeValueSchema, settingsMutateValueSchema, settingsOpenDocumentValueSchema,
   settingsReplaceValueSchema, settingsUpdateValueSchema,
@@ -161,6 +162,10 @@ export interface IApiClient {
     complete(payload: RequestPayload<'goal.complete'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.complete'>>>
     clear(payload: RequestPayload<'goal.clear'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'goal.clear'>>>
   }
+  coding: {
+    read(payload: RequestPayload<'coding.read'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'coding.read'>>>
+    write(payload: RequestPayload<'coding.write'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'coding.write'>>>
+  }
   settings: {
     describe(payload: RequestPayload<'settings.describe'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.describe'>>>
     openDocument(payload: RequestPayload<'settings.openDocument'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'settings.openDocument'>>>
@@ -228,6 +233,8 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'goal.resume': goalResumeValueSchema,
   'goal.complete': goalCompleteValueSchema,
   'goal.clear': goalClearValueSchema,
+  'coding.read': codingReadValueSchema,
+  'coding.write': codingWriteValueSchema,
   'settings.describe': settingsDescribeValueSchema,
   'settings.openDocument': settingsOpenDocumentValueSchema,
   'settings.update': settingsUpdateValueSchema,
@@ -494,6 +501,11 @@ export abstract class AbstractApiClient implements IApiClient {
     resume: (payload, signal) => this.callUnary('goal.resume', payload, signal),
     complete: (payload, signal) => this.callUnary('goal.complete', payload, signal),
     clear: (payload, signal) => this.callUnary('goal.clear', payload, signal),
+  }
+
+  readonly coding: IApiClient['coding'] = {
+    read: (payload, signal) => this.callUnary('coding.read', payload, signal),
+    write: (payload, signal) => this.callUnary('coding.write', payload, signal),
   }
 
   readonly settings: IApiClient['settings'] = {

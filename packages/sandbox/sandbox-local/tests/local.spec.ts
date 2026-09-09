@@ -66,10 +66,10 @@ describe('profile dialects', () => {
     expect(bwrapProfileArgs(RO)).toEqual(['--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent'])
   })
 
-  it('bwrap workspace-write: adds an ephemeral /tmp and rebinds the workspace root', () => {
+  it('bwrap workspace-write: rebinds the host /tmp and the workspace root read-write', () => {
     expect(bwrapProfileArgs(WW)).toEqual([
       '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent',
-      '--tmpfs', '/tmp', '--bind', '/ws', '/ws',
+      '--bind', '/tmp', '/tmp', '--bind', '/ws', '/ws',
     ])
   })
 
@@ -166,7 +166,7 @@ describe('devicePassthrough config', () => {
     ])
     expect(bwrapProfileArgs(WW, ['/dev/dri', '/dev/kfd'])).toEqual([
       '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--die-with-parent',
-      '--tmpfs', '/tmp', '--bind', '/ws', '/ws',
+      '--bind', '/tmp', '/tmp', '--bind', '/ws', '/ws',
       '--dev-bind', '/dev/dri', '/dev/dri', '--dev-bind', '/dev/kfd', '/dev/kfd',
     ])
     // Devices join the read-write grants BEFORE the mode additions: the

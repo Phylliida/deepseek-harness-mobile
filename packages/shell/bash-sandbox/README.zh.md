@@ -11,7 +11,7 @@
 | 模式 | 文件影响 |
 |---|---|
 | `read-only`（默认） | 任何位置都不可写（在 `/dev` 中只有 `/dev/null` 节点可写，因此 `>/dev/null` 仍可正常工作） |
-| `workspace-write` | 只能写入 `workspaceRoot` + `/tmp`（在 bwrap 下为临时目录，在 Landlock 下为宿主 `/tmp`，在 Seatbelt 下为 `/private/tmp` 加每用户临时目录） |
+| `workspace-write` | 只能写入 `workspaceRoot` + `/tmp`（在 bwrap 和 Landlock 下为持久的宿主 `/tmp`，在 Seatbelt 下为 `/private/tmp` 加每用户临时目录） |
 | `danger-full-access` | 不作限制；绝不咨询提供方。前台结果携带 `sandbox: { mode, denied: false }`；后台进程句柄不携带沙箱事实。 |
 
 语义：
