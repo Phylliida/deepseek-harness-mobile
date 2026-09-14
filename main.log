@@ -1,0 +1,1776 @@
+[1789254124] Log start
+[1789254124] Cmd: /home/bepis/prog/llm-tests/ik_llama.cpp/build-cuda/bin/llama-cli -m /home/bepis/prog/llm-tests/.nvme-bind/GLM-5.3-Flash-UD-IQ4_XS/UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00001-of-00005.gguf -ngl 99 -ot ffn_.*_exps=CPU -t 32 -fa on --expert-cache 24 --temp 1.0 --top-p 0.95 -c 40960 -cnv
+[1789254124] main: build = 70 (85e46bc)
+[1789254124] main: built with gcc (GCC) 14.3.0 for x86_64-unknown-linux-gnu
+[1789254124] main: seed  = 1789254124
+[1789254124] main: llama backend init
+[1789254124] main: load the model and apply lora adapter, if any
+[1789254124] CUDA0: using device CUDA0 - 23299 MiB free
+[1789254124] llama_model_loader: additional 4 GGUFs metadata loaded.
+[1789254124] llama_model_loader: loaded meta data with 72 key-value pairs and 1412 tensors from /home/bepis/prog/llm-tests/.nvme-bind/GLM-5.3-Flash-UD-IQ4_XS/UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00001-of-00005.gguf (version GGUF V3 (latest))
+[1789254124] llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+[1789254124] llama_model_loader: - kv   0:                       general.architecture str              = glm5next
+[1789254124] llama_model_loader: - kv   1:                               general.type str              = model
+[1789254124] llama_model_loader: - kv   2:                     general.sampling.top_p f32              = 0.950000
+[1789254124] llama_model_loader: - kv   3:                      general.sampling.temp f32              = 1.000000
+[1789254124] llama_model_loader: - kv   4:                               general.name str              = GLM 5.3 Flash
+[1789254124] llama_model_loader: - kv   5:                         general.size_label str              = 288x10B
+[1789254124] llama_model_loader: - kv   6:                            general.license str              = mit
+[1789254124] llama_model_loader: - kv   7:                               general.tags arr[str,2]       = ["conversational", "unsloth"]
+[1789254124] llama_model_loader: - kv   8:                          general.languages arr[str,2]       = ["en", "zh"]
+[1789254124] llama_model_loader: - kv   9:                       glm5next.block_count u32              = 46
+[1789254124] llama_model_loader: - kv  10:                    glm5next.context_length u32              = 1048576
+[1789254124] llama_model_loader: - kv  11:                  glm5next.embedding_length u32              = 4096
+[1789254124] llama_model_loader: - kv  12:               glm5next.feed_forward_length u32              = 12288
+[1789254124] llama_model_loader: - kv  13:              glm5next.attention.head_count u32              = 64
+[1789254124] llama_model_loader: - kv  14:  glm5next.attention.layer_norm_rms_epsilon f32              = 0.000010
+[1789254124] llama_model_loader: - kv  15:                      glm5next.expert_count u32              = 288
+[1789254124] llama_model_loader: - kv  16:                 glm5next.expert_used_count u32              = 8
+[1789254124] llama_model_loader: - kv  17:                glm5next.expert_group_count u32              = 1
+[1789254124] llama_model_loader: - kv  18:           glm5next.expert_group_used_count u32              = 1
+[1789254124] llama_model_loader: - kv  19:                glm5next.expert_gating_func u32              = 2
+[1789254124] llama_model_loader: - kv  20:                        glm5next.vocab_size u32              = 154880
+[1789254124] llama_model_loader: - kv  21:           glm5next.attention.head_count_kv arr[i32,46]      = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, ...
+[1789254124] llama_model_loader: - kv  22:             glm5next.attention.q_lora_rank u32              = 1536
+[1789254124] llama_model_loader: - kv  23:            glm5next.attention.kv_lora_rank u32              = 512
+[1789254124] llama_model_loader: - kv  24:              glm5next.rope.dimension_count u32              = 0
+[1789254124] llama_model_loader: - kv  25:              glm5next.attention.key_length u32              = 512
+[1789254124] llama_model_loader: - kv  26:            glm5next.attention.value_length u32              = 512
+[1789254124] llama_model_loader: - kv  27:          glm5next.attention.key_length_mla u32              = 256
+[1789254124] llama_model_loader: - kv  28:        glm5next.attention.value_length_mla u32              = 256
+[1789254124] llama_model_loader: - kv  29:      glm5next.attention.layer_norm_epsilon f32              = 0.000001
+[1789254124] llama_model_loader: - kv  30:                   glm5next.ssm.conv_kernel u32              = 4
+[1789254124] llama_model_loader: - kv  31:                      glm5next.kda.head_dim u32              = 128
+[1789254124] llama_model_loader: - kv  32:              glm5next.kda.gate_lower_bound f32              = -5.000000
+[1789254124] llama_model_loader: - kv  33:      glm5next.attention.indexer.head_count u32              = 32
+[1789254124] llama_model_loader: - kv  34:      glm5next.attention.indexer.key_length u32              = 128
+[1789254124] llama_model_loader: - kv  35:           glm5next.attention.indexer.top_k u32              = 2048
+[1789254124] llama_model_loader: - kv  36:           glm5next.attention.indexer.kpool u32              = 4
+[1789254124] llama_model_loader: - kv  37:            glm5next.hyper_connection.count u32              = 4
+[1789254124] llama_model_loader: - kv  38: glm5next.hyper_connection.sinkhorn_iterations u32              = 20
+[1789254124] llama_model_loader: - kv  39:          glm5next.hyper_connection.epsilon f32              = 0.000001
+[1789254124] llama_model_loader: - kv  40:        glm5next.expert_feed_forward_length u32              = 2048
+[1789254124] llama_model_loader: - kv  41: glm5next.expert_shared_feed_forward_length u32              = 2048
+[1789254124] llama_model_loader: - kv  42:               glm5next.expert_shared_count u32              = 1
+[1789254124] llama_model_loader: - kv  43:         glm5next.leading_dense_block_count u32              = 3
+[1789254124] llama_model_loader: - kv  44:              glm5next.expert_weights_scale f32              = 2.500000
+[1789254124] llama_model_loader: - kv  45:               glm5next.expert_weights_norm bool             = true
+[1789254124] llama_model_loader: - kv  46:                  glm5next.swiglu_clamp_exp arr[f32,46]      = [10.000000, 10.000000, 10.000000, 10....
+[1789254124] llama_model_loader: - kv  47:                glm5next.swiglu_clamp_shexp arr[f32,46]      = [10.000000, 10.000000, 10.000000, 10....
+[1789254124] llama_model_loader: - kv  48:              glm5next.nextn_predict_layers u32              = 1
+[1789254124] llama_model_loader: - kv  49:                       tokenizer.ggml.model str              = gpt2
+[1789254124] llama_model_loader: - kv  50:                         tokenizer.ggml.pre str              = glm4
+[1789254124] llama_model_loader: - kv  51:                      tokenizer.ggml.tokens arr[str,154880]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+[1789254124] llama_model_loader: - kv  52:                  tokenizer.ggml.token_type arr[i32,154880]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+[1789254124] llama_model_loader: - kv  53:                      tokenizer.ggml.merges arr[str,321649]  = ["Ġ Ġ", "Ġ ĠĠĠ", "ĠĠ ĠĠ", "...
+[1789254124] llama_model_loader: - kv  54:                tokenizer.ggml.eos_token_id u32              = 154820
+[1789254124] llama_model_loader: - kv  55:            tokenizer.ggml.padding_token_id u32              = 154820
+[1789254124] llama_model_loader: - kv  56:                tokenizer.ggml.bos_token_id u32              = 154822
+[1789254124] llama_model_loader: - kv  57:                tokenizer.ggml.eot_token_id u32              = 154827
+[1789254124] llama_model_loader: - kv  58:            tokenizer.ggml.unknown_token_id u32              = 154820
+[1789254124] llama_model_loader: - kv  59:                tokenizer.ggml.eom_token_id u32              = 154829
+[1789254124] llama_model_loader: - kv  60:               general.quantization_version u32              = 2
+[1789254124] llama_model_loader: - kv  61:                          general.file_type u32              = 30
+[1789254124] llama_model_loader: - kv  62:                      quantize.imatrix.file str              = GLM-5.3-Flash-GGUF/imatrix_unsloth.gguf
+[1789254124] llama_model_loader: - kv  63:                   quantize.imatrix.dataset str              = unsloth_calibration_GLM-5.3-Flash.txt
+[1789254124] llama_model_loader: - kv  64:             quantize.imatrix.entries_count u32              = 809
+[1789254124] llama_model_loader: - kv  65:              quantize.imatrix.chunks_count u32              = 88
+[1789254124] llama_model_loader: - kv  66:                                   split.no u16              = 0
+[1789254124] llama_model_loader: - kv  67:                        split.tensors.count i32              = 1412
+[1789254124] llama_model_loader: - kv  68:                                split.count u16              = 5
+[1789254124] llama_model_loader: - kv  69:                    tokenizer.chat_template str              = [gMASK]<sop>\n{%- set effective_reason...
+[1789254124] llama_model_loader: - kv  70:                       general.quantized_by str              = Unsloth
+[1789254124] llama_model_loader: - kv  71:                           general.repo_url str              = https://huggingface.co/unsloth
+[1789254124] llama_model_loader: - type  f32:  638 tensors
+[1789254124] llama_model_loader: - type q8_0:  644 tensors
+[1789254124] llama_model_loader: - type q3_K:    2 tensors
+[1789254124] llama_model_loader: - type q4_K:    1 tensors
+[1789254124] llama_model_loader: - type q6_K:    4 tensors
+[1789254124] llama_model_loader: - type iq3_s:   82 tensors
+[1789254124] llama_model_loader: - type iq4_xs:   41 tensors
+[1789254124] load: 0 unused tokens
+[1789254125] load: special_eot_id is not in special_eog_ids - the tokenizer config may be incorrect
+[1789254125] load: special_eom_id is not in special_eog_ids - the tokenizer config may be incorrect
+[1789254125] load: printing all EOG tokens:
+[1789254125] load:   - 154820 ('<|endoftext|>')
+[1789254125] load:   - 154827 ('<|user|>')
+[1789254125] load:   - 154829 ('<|observation|>')
+[1789254125] load: special tokens cache size = 36
+[1789254125] load: token to piece cache size = 0.9811 MB
+[1789254125] llm_load_print_meta: format           = GGUF V3 (latest)
+[1789254125] llm_load_print_meta: arch             = glm5next
+[1789254125] llm_load_print_meta: n_ctx_train      = 1048576
+[1789254125] llm_load_print_meta: n_embd           = 4096
+[1789254125] llm_load_print_meta: n_layer          = 46
+[1789254125] llm_load_print_meta: n_head           = 64
+[1789254125] llm_load_print_meta: n_head_kv        = [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1]
+[1789254125] llm_load_print_meta: n_rot            = 0
+[1789254125] llm_load_print_meta: n_swa            = 0
+[1789254125] llm_load_print_meta: n_swa_pattern    = 1
+[1789254125] llm_load_print_meta: n_embd_head_k    = 256
+[1789254125] llm_load_print_meta: n_embd_head_v    = 256
+[1789254125] llm_load_print_meta: n_gqa            = [0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 0, 0, 64, 0, 64]
+[1789254125] llm_load_print_meta: n_embd_k_gqa     = [0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 256]
+[1789254125] llm_load_print_meta: n_embd_v_gqa     = [0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 0, 0, 256, 0, 256]
+[1789254125] llm_load_print_meta: f_norm_eps       = 1.0e-06
+[1789254125] llm_load_print_meta: f_norm_rms_eps   = 1.0e-05
+[1789254125] llm_load_print_meta: f_clamp_kqv      = 0.0e+00
+[1789254125] llm_load_print_meta: f_max_alibi_bias = 0.0e+00
+[1789254125] llm_load_print_meta: f_logit_scale    = 0.0e+00
+[1789254125] llm_load_print_meta: n_ff             = 12288
+[1789254125] llm_load_print_meta: n_expert         = 288
+[1789254125] llm_load_print_meta: n_expert_used    = 8
+[1789254125] llm_load_print_meta: causal attn      = 1
+[1789254125] llm_load_print_meta: pooling type     = 0
+[1789254125] llm_load_print_meta: rope type        = -1
+[1789254125] llm_load_print_meta: rope scaling     = linear
+[1789254125] llm_load_print_meta: freq_base_train  = 10000.0
+[1789254125] llm_load_print_meta: freq_scale_train = 1
+[1789254125] llm_load_print_meta: n_ctx_orig_yarn  = 1048576
+[1789254125] llm_load_print_meta: rope_finetuned   = unknown
+[1789254125] llm_load_print_meta: ssm_d_conv       = 4
+[1789254125] llm_load_print_meta: ssm_d_inner      = 8192
+[1789254125] llm_load_print_meta: ssm_d_state      = 128
+[1789254125] llm_load_print_meta: ssm_dt_rank      = 64
+[1789254125] llm_load_print_meta: ssm_n_group      = 64
+[1789254125] llm_load_print_meta: model type       = 312B.A17B
+[1789254125] llm_load_print_meta: model ftype      = IQ4_XS - 4.25 bpw
+[1789254125] llm_load_print_meta: model params     = 320.759 B
+[1789254125] llm_load_print_meta: model size       = 146.043 GiB (3.911 BPW) 
+[1789254125] llm_load_print_meta: repeating layers = 144.931 GiB (3.897 BPW[1789254125] , 319.491 B parameters)
+[1789254125] llm_load_print_meta: general.name     = GLM 5.3 Flash
+[1789254125] llm_load_print_meta: n_layer_dense_lead   = 3
+[1789254125] llm_load_print_meta: n_lora_q             = 1536
+[1789254125] llm_load_print_meta: n_lora_kv            = 512
+[1789254125] llm_load_print_meta: n_ff_exp             = 2048
+[1789254125] llm_load_print_meta: n_expert_shared      = 1
+[1789254125] llm_load_print_meta: expert_weights_scale = 2.5
+[1789254125] llm_load_print_meta: expert_weights_norm  = 1
+[1789254125] llm_load_print_meta: expert_gating_func   = sigmoid
+[1789254125] llm_load_print_meta: rope_yarn_log_mul    = 0.0000
+[1789254125] llm_load_print_meta: kda_gate_lower_bound   = -5.000000
+[1789254125] llm_load_print_meta: hyper_connection.count = 4
+[1789254125] llm_load_print_meta: sinkhorn_iterations    = 20
+[1789254125] llm_load_print_meta: indexer_n_head         = 32
+[1789254125] llm_load_print_meta: indexer_head_size      = 128
+[1789254125] llm_load_print_meta: indexer_top_k          = 2048
+[1789254125] llm_load_print_meta: indexer_block_size     = 4
+[1789254125] llm_load_print_meta: nextn_predict_layers   = 1
+[1789254125] print_info: vocab type            = BPE
+[1789254125] print_info: n_vocab               = 154880
+[1789254125] print_info: n_merges              = 321649
+[1789254125] print_info: BOS token             = 154822 '[gMASK]'
+[1789254125] print_info: EOS token             = 154820 '<|endoftext|>'
+[1789254125] print_info: EOT token             = 154827 '<|user|>'
+[1789254125] print_info: EOM token             = 154829 '<|observation|>'
+[1789254125] print_info: UNK token             = 154820 '<|endoftext|>'
+[1789254125] print_info: PAD token             = 154820 '<|endoftext|>'
+[1789254125] print_info: LF token              = 198 'Ċ'
+[1789254125] print_info: FIM PRE token         = 154838 '<|code_prefix|>'
+[1789254125] print_info: FIM SUF token         = 154840 '<|code_suffix|>'
+[1789254125] print_info: FIM MID token         = 154839 '<|code_middle|>'
+[1789254125] print_info: EOG token             = 154820 '<|endoftext|>'
+[1789254125] print_info: EOG token             = 154827 '<|user|>'
+[1789254125] print_info: EOG token             = 154829 '<|observation|>'
+[1789254125] print_info: max token length      = 1024
+[1789254125] ======================================= HAVE_FANCY_SIMD is NOT defined
+[1789254125] llm_load_tensors: expert cache: H=24 slots/layer x 43 layers, 12179.69 MiB, target GPU
+[1789254125] llm_load_tensors: reserved 12179.69 MiB on device 0 for the expert cache
+[1789254125] ------------------- Layer sizes:
+[1789254125] Layer  0:    293.69,      4.28,    297.97       72.00  MiB
+[1789254125] Layer  1:    293.69,      4.28,    297.97       72.00  MiB
+[1789254125] Layer  2:    293.69,      4.28,    297.97       72.00  MiB
+[1789254125] Layer  3:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer  4:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer  5:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer  6:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer  7:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer  8:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer  9:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 10:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 11:   4546.78,     40.00,   4586.78      160.00  MiB
+[1789254125] Layer 12:   4040.69,      4.28,   4044.97      144.00  MiB
+[1789254125] Layer 13:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 14:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 15:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 16:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 17:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 18:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 19:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 20:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 21:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 22:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 23:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 24:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 25:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 26:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 27:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 28:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 29:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 30:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 31:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 32:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 33:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 34:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 35:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 36:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 37:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 38:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 39:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 40:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 41:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 42:   3374.69,      4.28,   3378.97      144.00  MiB
+[1789254125] Layer 43:   3412.78,     40.00,   3452.78      160.00  MiB
+[1789254125] Layer 44:   4040.69,      4.28,   4044.97      144.00  MiB
+[1789254125] Layer 45:      0.00,     40.00,     40.00        8.00  MiB
+[1789254125] Layer 46:    496.29,    142.50,    638.79 MiB (output layer)
+[1789254125] --------------------------------------------------------------------------
+[1789254125] Total   : 145503.00,    768.06, 146271.06 MiB
+[1789254125] Memory required for model tensors + cache: 146767 MiB
+[1789254125] Memory available on all devices - compute: 9936 MiB
+[1789254125] llm_load_tensors: ggml ctx size =    1.23 MiB
+[1789254125] Tensor blk.3.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.3.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.3.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.4.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.4.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.4.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.5.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.5.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.5.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.6.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.6.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.6.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.7.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.7.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.7.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.8.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.8.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.8.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.9.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.9.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.9.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.10.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.10.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.10.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.11.ffn_up_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.11.ffn_gate_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.11.ffn_down_exps.weight (size = 1890.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.12.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.12.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.12.ffn_down_exps.weight (size = 1890.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.13.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.13.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.13.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.14.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.14.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.14.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.15.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.15.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.15.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.16.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.16.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.16.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.17.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.17.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.17.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.18.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.18.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.18.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.19.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.19.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.19.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.20.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.20.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.20.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.21.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.21.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.21.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.22.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.22.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.22.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.23.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.23.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.23.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.24.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.24.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.24.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.25.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.25.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.25.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.26.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.26.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.26.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.27.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.27.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.27.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.28.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.28.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.28.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.29.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.29.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.29.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.30.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.30.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.30.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.31.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.31.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.31.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.32.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.32.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.32.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.33.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.33.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.33.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.34.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.34.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.34.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.35.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.35.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.35.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.36.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.36.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.36.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.37.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.37.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.37.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.38.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.38.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.38.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.39.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.39.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.39.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.40.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.40.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.40.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.41.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.41.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.41.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.42.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.42.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.42.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.43.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.43.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.43.ffn_down_exps.weight (size = 1224.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.44.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.44.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] Tensor blk.44.ffn_down_exps.weight (size = 1890.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] model has unused tensor blk.45.attn_norm.weight (size = 16384 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_q_a.weight (size = 6684672 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_q_a_norm.weight (size = 6144 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_q_b.weight (size = 26738688 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_kv_a_mqa.weight (size = 2228224 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_kv_a_norm.weight (size = 2048 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_k_b.weight (size = 8912896 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_v_b.weight (size = 8912896 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.attn_output.weight (size = 71303168 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer.k_norm.weight (size = 512 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer.k_norm.bias (size = 512 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer.proj.weight (size = 524288 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer.attn_k.weight (size = 557056 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer.attn_q_b.weight (size = 6684672 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer_compressor_gate.weight (size = 557056 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.indexer_compressor_ape.weight (size = 2048 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.ffn_norm.weight (size = 16384 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.ffn_gate_inp.weight (size = 4718592 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.exp_probs_b.bias (size = 1152 bytes) -- ignoring
+[1789254125] Tensor blk.45.ffn_up_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] model has unused tensor blk.45.ffn_up_exps.weight (size = 1038090240 bytes) -- ignoring
+[1789254125] Tensor blk.45.ffn_gate_exps.weight (size = 990.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] model has unused tensor blk.45.ffn_gate_exps.weight (size = 1038090240 bytes) -- ignoring
+[1789254125] Tensor blk.45.ffn_down_exps.weight (size = 1296.00 MiB) buffer type overridden to CUDA_Host
+[1789254125] model has unused tensor blk.45.ffn_down_exps.weight (size = 1358954496 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.ffn_gate_shexp.weight (size = 8912896 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.ffn_down_shexp.weight (size = 8912896 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.ffn_up_shexp.weight (size = 8912896 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.nextn.eh_proj.weight (size = 35651584 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.nextn.enorm.weight (size = 16384 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.nextn.hnorm.weight (size = 16384 bytes) -- ignoring
+[1789254125] model has unused tensor blk.45.nextn.shared_head_norm.weight (size = 16384 bytes) -- ignoring
+[1789254140] llm_load_tensors: offloading 46 repeating layers to GPU
+[1789254140] llm_load_tensors: offloading non-repeating layers to GPU
+[1789254140] llm_load_tensors: offloaded 47/47 layers to GPU
+[1789254140] llm_load_tensors:        CPU buffer size = 47125.96 MiB
+[1789254140] llm_load_tensors:        CPU buffer size = 47057.74 MiB
+[1789254140] llm_load_tensors:        CPU buffer size = 47040.75 MiB
+[1789254140] llm_load_tensors:        CPU buffer size =  3891.52 MiB
+[1789254140] llm_load_tensors:      CUDA0 buffer size =  8404.35 MiB
+[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254140] .[1789254141] .[1789254141] .[1789254141] .[1789254141] 
+[1789254141] ============ llm_prepare_mla: need to compute 11 wkv_b tensors
+[1789254142] Computed blk.3.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.7.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.11.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.15.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.19.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.23.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.27.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.31.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.35.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.39.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] Computed blk.43.attn_kv_b.weight as 512 x 32768 of type q8_0 and stored in buffer CUDA0
+[1789254142] llm_load_tensors: layer 45 lost expert-cache eligibility at tensor creation; skipping
+[1789254144] llm_load_tensors: expert cache: H=24 slots/layer x 42 layers, 11895.31 MiB total (CUDA0)
+[1789254144] llama_init_from_model: expert cache active: H=24, 42 layers (initial assignment experts 0..H-1, slots on GPU, classify device)
+[1789254144] llama_init_from_model: n_ctx         = 40960
+[1789254144] llama_init_from_model: n_batch       = 2048
+[1789254144] llama_init_from_model: n_ubatch      = 512
+[1789254144] llama_init_from_model: flash_attn    = 1
+[1789254144] llama_init_from_model: mla_attn      = 3
+[1789254144] llama_init_from_model: attn_max_b    = 256
+[1789254144] llama_init_from_model: fused_moe     = 1
+[1789254144] llama_init_from_model: grouped er    = 0
+[1789254144] llama_init_from_model: fused_up_gate = 1
+[1789254144] llama_init_from_model: fused_mmad    = 1
+[1789254144] llama_init_from_model: rope_cache    = 0
+[1789254144] llama_init_from_model: graph_reuse   = 1
+[1789254144] llama_init_from_model: k_cache_hadam = 0
+[1789254144] llama_init_from_model: v_cache_hadam = 0
+[1789254144] llama_init_from_model: split_mode_graph_scheduling = 0
+[1789254144] llama_init_from_model: reduce_type   = f16
+[1789254144] llama_init_from_model: sched_async   = 0
+[1789254144] llama_init_from_model: ser           = -1, 0
+[1789254144] llama_init_from_model: freq_base     = 10000.0
+[1789254144] llama_init_from_model: freq_scale    = 1
+[1789254144] llama_kv_cache_init:      CUDA0 KV buffer size =   805.56 MiB
+[1789254144] llama_init_from_model: KV self size  =  440.00 MiB, c^KV (f16):  440.00 MiB, kv^T: not used
+[1789254144] llama_init_from_model: KV self indexer size =  220.00 MiB (f16)
+[1789254144] llama_init_from_model:        CPU  output buffer size =     0.59 MiB
+[1789254144] llama_init_from_model:      CUDA0 compute buffer size =   318.50 MiB
+[1789254144] llama_init_from_model:  CUDA_Host compute buffer size =   136.01 MiB
+[1789254144] llama_init_from_model: graph nodes  = 4519
+[1789254144] llama_init_from_model: graph splits = 128
+[1789254144] llama_init_from_model: enabling only_active_experts scheduling
+[1789254144] llama_init_from_gpt_params: setting dry_penalty_last_n to ctx_size = 40960
+[1789254144] warming up the model with an empty run
+[1789254157] n_ctx: 40960
+[1789254157] main: chat template example:
+[gMASK]<sop><|system|>
+You are a helpful assistant<|user|>
+Hello<|assistant|>
+Hi there<|user|>
+How are you?<|assistant|>
+[1789254157] 
+[1789254157] system_info: n_threads = 32 / 64 | AVX = 1 | AVX_VNNI = 0 | AVX2 = 1 | AVX512 = 0 | AVX512_VBMI = 0 | AVX512_VNNI = 0 | AVX512_BF16 = 0 | FMA = 1 | NEON = 0 | SVE = 0 | ARM_FMA = 0 | F16C = 1 | FP16_VA = 0 | WASM_SIMD = 0 | SSE3 = 1 | SSSE3 = 1 | VSX = 0 | MATMUL_INT8 = 0 | 
+[1789254157] add_bos: 0
+[1789254157] tokenize the prompt
+[1789254157] prompt: ""
+[1789254157] tokens: [  ]
+[1789254157] recalculate the cached logits (check): embd_inp.empty() true, n_matching_session_tokens 0, embd_inp.size() 0, session_tokens.size() 0, embd_inp.size() 0
+[1789254157] main: interactive mode on.
+[1789254157] sampling: 
+	repeat_last_n = 64, repeat_penalty = 1.000, frequency_penalty = 0.000, presence_penalty = 0.000
+	top_k = 40, tfs_z = 1.000, top_p = 0.950, min_p = 0.050, typical_p = 1.000, temp = 1.000
+	mirostat = 0, mirostat_lr = 0.100, mirostat_ent = 5.000
+	xtc_probability = 0.000, xtc_threshold = 1.000, top_n_sigma = 0.000
+	adaptive_target = -1.00, adaptive_decay = 0.90
+[1789254157] sampling order: 
+CFG -> Penalties -> dry -> top_k -> tfs_z -> typical_p -> top_p -> min_p -> xtc -> top_n_sigma -> temperature -> adaptive_p 
+[1789254157] generate: n_ctx = 40960, n_batch = 2048, n_predict = -1, n_keep = 0
+[1789254157] 
+
+[1789254157] == Running in interactive mode. ==
+[1789254157]  - Press Ctrl+C to interject at any time.
+[1789254157]  - Press Return to return control to the AI.
+ - To return control without starting a new line, end your input with '/'.
+ - If you want to submit another line, end your input with '\'.
+
+[1789254157] embd_inp.size(): 0, n_consumed: 0
+[1789254157] waiting for user input
+[1789254231] buffer: 'hello!
+'
+[1789254231] input tokens: [ '[gMASK]':154822, '<sop>':154824, '<|user|>':154827, '':198, 'hello':14978, '!':4894, '<|assistant|>':154828 ]
+[1789254231] n_remain: -8
+[1789254231] embd_inp.size(): 7, n_consumed: 0
+[1789254231] eval: [ '[gMASK]':154822, '<sop>':154824, '<|user|>':154827, '':198, 'hello':14978, '!':4894, '<|assistant|>':154828 ]
+[1789254232] n_past = 7
+[1789254232] last: [ '<th':13699 ]
+[1789254232] n_remain: -9
+[1789254232] eval: [ '<th':13699 ]
+[1789254233] n_past = 8
+[1789254233] last: [ 'ink':766 ]
+[1789254233] n_remain: -10
+[1789254233] eval: [ 'ink':766 ]
+[1789254233] n_past = 9
+[1789254233] last: [ '>The':16343 ]
+[1789254233] n_remain: -11
+[1789254233] eval: [ '>The':16343 ]
+[1789254234] n_past = 10
+[1789254234] last: [ ' user':1196 ]
+[1789254234] n_remain: -12
+[1789254234] eval: [ ' user':1196 ]
+[1789254234] n_past = 11
+[1789254234] last: [ ' just':1101 ]
+[1789254234] n_remain: -13
+[1789254234] eval: [ ' just':1101 ]
+[1789254235] n_past = 12
+[1789254235] last: [ ' said':1053 ]
+[1789254235] n_remain: -14
+[1789254235] eval: [ ' said':1053 ]
+[1789254235] n_past = 13
+[1789254235] last: [ ' "':330 ]
+[1789254235] n_remain: -15
+[1789254235] eval: [ ' "':330 ]
+[1789254235] n_past = 14
+[1789254235] last: [ 'hello':14978 ]
+[1789254235] n_remain: -16
+[1789254235] eval: [ 'hello':14978 ]
+[1789254236] n_past = 15
+[1789254236] last: [ '!"':8955 ]
+[1789254236] n_remain: -17
+[1789254236] eval: [ '!"':8955 ]
+[1789254236] n_past = 16
+[1789254236] last: [ ' -':481 ]
+[1789254236] n_remain: -18
+[1789254236] eval: [ ' -':481 ]
+[1789254236] n_past = 17
+[1789254236] last: [ ' a':264 ]
+[1789254236] n_remain: -19
+[1789254236] eval: [ ' a':264 ]
+[1789254236] n_past = 18
+[1789254236] last: [ ' simple':4285 ]
+[1789254236] n_remain: -20
+[1789254236] eval: [ ' simple':4285 ]
+[1789254237] n_past = 19
+[1789254237] last: [ ' greeting':41875 ]
+[1789254237] n_remain: -21
+[1789254237] eval: [ ' greeting':41875 ]
+[1789254237] n_past = 20
+[1789254237] last: [ '.':13 ]
+[1789254237] n_remain: -22
+[1789254237] eval: [ '.':13 ]
+[1789254237] n_past = 21
+[1789254237] last: [ ' I':358 ]
+[1789254237] n_remain: -23
+[1789254237] eval: [ ' I':358 ]
+[1789254238] n_past = 22
+[1789254238] last: [ ' should':1265 ]
+[1789254238] n_remain: -24
+[1789254238] eval: [ ' should':1265 ]
+[1789254238] n_past = 23
+[1789254238] last: [ ' respond':5889 ]
+[1789254238] n_remain: -25
+[1789254238] eval: [ ' respond':5889 ]
+[1789254238] n_past = 24
+[1789254238] last: [ ' warmly':95563 ]
+[1789254238] n_remain: -26
+[1789254238] eval: [ ' warmly':95563 ]
+[1789254238] n_past = 25
+[1789254238] last: [ ' and':323 ]
+[1789254238] n_remain: -27
+[1789254238] eval: [ ' and':323 ]
+[1789254239] n_past = 26
+[1789254239] last: [ ' naturally':17687 ]
+[1789254239] n_remain: -28
+[1789254239] eval: [ ' naturally':17687 ]
+[1789254239] n_past = 27
+[1789254239] last: [ ',':11 ]
+[1789254239] n_remain: -29
+[1789254239] eval: [ ',':11 ]
+[1789254239] n_past = 28
+[1789254239] last: [ ' perhaps':8364 ]
+[1789254239] n_remain: -30
+[1789254239] eval: [ ' perhaps':8364 ]
+[1789254239] n_past = 29
+[1789254239] last: [ ' introducing':31781 ]
+[1789254239] n_remain: -31
+[1789254239] eval: [ ' introducing':31781 ]
+[1789254240] n_past = 30
+[1789254240] last: [ ' myself':7037 ]
+[1789254240] n_remain: -32
+[1789254240] eval: [ ' myself':7037 ]
+[1789254240] n_past = 31
+[1789254240] last: [ ' briefly':26667 ]
+[1789254240] n_remain: -33
+[1789254240] eval: [ ' briefly':26667 ]
+[1789254240] n_past = 32
+[1789254240] last: [ ' and':323 ]
+[1789254240] n_remain: -34
+[1789254240] eval: [ ' and':323 ]
+[1789254240] n_past = 33
+[1789254240] last: [ ' offering':9999 ]
+[1789254240] n_remain: -35
+[1789254240] eval: [ ' offering':9999 ]
+[1789254241] n_past = 34
+[1789254241] last: [ ' to':311 ]
+[1789254241] n_remain: -36
+[1789254241] eval: [ ' to':311 ]
+[1789254241] n_past = 35
+[1789254241] last: [ ' help':1492 ]
+[1789254241] n_remain: -37
+[1789254241] eval: [ ' help':1492 ]
+[1789254241] n_past = 36
+[1789254241] last: [ '.':13 ]
+[1789254241] n_remain: -38
+[1789254241] eval: [ '.':13 ]
+[1789254241] n_past = 37
+[1789254241] last: [ ' Keep':13646 ]
+[1789254241] n_remain: -39
+[1789254241] eval: [ ' Keep':13646 ]
+[1789254242] n_past = 38
+[1789254242] last: [ ' it':432 ]
+[1789254242] n_remain: -40
+[1789254242] eval: [ ' it':432 ]
+[1789254242] n_past = 39
+[1789254242] last: [ ' friendly':11651 ]
+[1789254242] n_remain: -41
+[1789254242] eval: [ ' friendly':11651 ]
+[1789254242] n_past = 40
+[1789254242] last: [ ' and':323 ]
+[1789254242] n_remain: -42
+[1789254242] eval: [ ' and':323 ]
+[1789254242] n_past = 41
+[1789254242] last: [ ' concise':63141 ]
+[1789254242] n_remain: -43
+[1789254242] eval: [ ' concise':63141 ]
+[1789254243] n_past = 42
+[1789254243] last: [ '.</':3918 ]
+[1789254243] n_remain: -44
+[1789254243] eval: [ '.</':3918 ]
+[1789254243] n_past = 43
+[1789254243] last: [ 'think':26779 ]
+[1789254243] n_remain: -45
+[1789254243] eval: [ 'think':26779 ]
+[1789254243] n_past = 44
+[1789254243] last: [ '>':29 ]
+[1789254243] n_remain: -46
+[1789254243] eval: [ '>':29 ]
+[1789254244] n_past = 45
+[1789254244] last: [ 'Hi':13041 ]
+[1789254244] n_remain: -47
+[1789254244] eval: [ 'Hi':13041 ]
+[1789254244] n_past = 46
+[1789254244] last: [ ' there':1052 ]
+[1789254244] n_remain: -48
+[1789254244] eval: [ ' there':1052 ]
+[1789254244] n_past = 47
+[1789254244] last: [ '!':0 ]
+[1789254244] n_remain: -49
+[1789254244] eval: [ '!':0 ]
+[1789254244] n_past = 48
+[1789254244] last: [ ' I':358 ]
+[1789254244] n_remain: -50
+[1789254244] eval: [ ' I':358 ]
+[1789254245] n_past = 49
+[1789254245] last: [ ''m':2776 ]
+[1789254245] n_remain: -51
+[1789254245] eval: [ ''m':2776 ]
+[1789254245] n_past = 50
+[1789254245] last: [ ' the':279 ]
+[1789254245] n_remain: -52
+[1789254245] eval: [ ' the':279 ]
+[1789254245] n_past = 51
+[1789254245] last: [ ' GL':5588 ]
+[1789254245] n_remain: -53
+[1789254245] eval: [ ' GL':5588 ]
+[1789254246] n_past = 52
+[1789254246] last: [ 'M':44 ]
+[1789254246] n_remain: -54
+[1789254246] eval: [ 'M':44 ]
+[1789254246] n_past = 53
+[1789254246] last: [ ' language':4128 ]
+[1789254246] n_remain: -55
+[1789254246] eval: [ ' language':4128 ]
+[1789254246] n_past = 54
+[1789254246] last: [ ' model':1614 ]
+[1789254246] n_remain: -56
+[1789254246] eval: [ ' model':1614 ]
+[1789254247] n_past = 55
+[1789254247] last: [ ' from':504 ]
+[1789254247] n_remain: -57
+[1789254247] eval: [ ' from':504 ]
+[1789254247] n_past = 56
+[1789254247] last: [ ' Z':1863 ]
+[1789254247] n_remain: -58
+[1789254247] eval: [ ' Z':1863 ]
+[1789254247] n_past = 57
+[1789254247] last: [ '.ai':40161 ]
+[1789254247] n_remain: -59
+[1789254247] eval: [ '.ai':40161 ]
+[1789254248] n_past = 58
+[1789254248] last: [ '.':13 ]
+[1789254248] n_remain: -60
+[1789254248] eval: [ '.':13 ]
+[1789254248] n_past = 59
+[1789254248] last: [ ' How':2585 ]
+[1789254248] n_remain: -61
+[1789254248] eval: [ ' How':2585 ]
+[1789254248] n_past = 60
+[1789254248] last: [ ' can':646 ]
+[1789254248] n_remain: -62
+[1789254248] eval: [ ' can':646 ]
+[1789254248] n_past = 61
+[1789254248] last: [ ' I':358 ]
+[1789254248] n_remain: -63
+[1789254248] eval: [ ' I':358 ]
+[1789254249] n_past = 62
+[1789254249] last: [ ' assist':7789 ]
+[1789254249] n_remain: -64
+[1789254249] eval: [ ' assist':7789 ]
+[1789254249] n_past = 63
+[1789254249] last: [ ' you':498 ]
+[1789254249] n_remain: -65
+[1789254249] eval: [ ' you':498 ]
+[1789254249] n_past = 64
+[1789254249] last: [ ' today':3351 ]
+[1789254249] n_remain: -66
+[1789254249] eval: [ ' today':3351 ]
+[1789254249] n_past = 65
+[1789254249] last: [ '?':30 ]
+[1789254249] n_remain: -67
+[1789254249] eval: [ '?':30 ]
+[1789254249] n_past = 66
+[1789254249] last: [ ' Whether':13131 ]
+[1789254249] n_remain: -68
+[1789254249] eval: [ ' Whether':13131 ]
+[1789254250] n_past = 67
+[1789254250] last: [ ' it':432 ]
+[1789254250] n_remain: -69
+[1789254250] eval: [ ' it':432 ]
+[1789254250] n_past = 68
+[1789254250] last: [ ''s':594 ]
+[1789254250] n_remain: -70
+[1789254250] eval: [ ''s':594 ]
+[1789254250] n_past = 69
+[1789254250] last: [ ' answering':35585 ]
+[1789254250] n_remain: -71
+[1789254250] eval: [ ' answering':35585 ]
+[1789254251] n_past = 70
+[1789254251] last: [ ' questions':4755 ]
+[1789254251] n_remain: -72
+[1789254251] eval: [ ' questions':4755 ]
+[1789254251] n_past = 71
+[1789254251] last: [ ',':11 ]
+[1789254251] n_remain: -73
+[1789254251] eval: [ ',':11 ]
+[1789254251] n_past = 72
+[1789254251] last: [ ' helping':10471 ]
+[1789254251] n_remain: -74
+[1789254251] eval: [ ' helping':10471 ]
+[1789254251] n_past = 73
+[1789254251] last: [ ' with':448 ]
+[1789254251] n_remain: -75
+[1789254251] eval: [ ' with':448 ]
+[1789254252] n_past = 74
+[1789254252] last: [ ' writing':4378 ]
+[1789254252] n_remain: -76
+[1789254252] eval: [ ' writing':4378 ]
+[1789254252] n_past = 75
+[1789254252] last: [ ',':11 ]
+[1789254252] n_remain: -77
+[1789254252] eval: [ ',':11 ]
+[1789254252] n_past = 76
+[1789254252] last: [ ' or':476 ]
+[1789254252] n_remain: -78
+[1789254252] eval: [ ' or':476 ]
+[1789254252] n_past = 77
+[1789254252] last: [ ' just':1101 ]
+[1789254252] n_remain: -79
+[1789254252] eval: [ ' just':1101 ]
+[1789254253] n_past = 78
+[1789254253] last: [ ' having':3432 ]
+[1789254253] n_remain: -80
+[1789254253] eval: [ ' having':3432 ]
+[1789254253] n_past = 79
+[1789254253] last: [ ' a':264 ]
+[1789254253] n_remain: -81
+[1789254253] eval: [ ' a':264 ]
+[1789254253] n_past = 80
+[1789254253] last: [ ' chat':6236 ]
+[1789254253] n_remain: -82
+[1789254253] eval: [ ' chat':6236 ]
+[1789254253] n_past = 81
+[1789254253] last: [ ',':11 ]
+[1789254253] n_remain: -83
+[1789254253] eval: [ ',':11 ]
+[1789254254] n_past = 82
+[1789254254] last: [ ' I':358 ]
+[1789254254] n_remain: -84
+[1789254254] eval: [ ' I':358 ]
+[1789254254] n_past = 83
+[1789254254] last: [ ''m':2776 ]
+[1789254254] n_remain: -85
+[1789254254] eval: [ ''m':2776 ]
+[1789254254] n_past = 84
+[1789254254] last: [ ' here':1588 ]
+[1789254254] n_remain: -86
+[1789254254] eval: [ ' here':1588 ]
+[1789254254] n_past = 85
+[1789254254] last: [ ' to':311 ]
+[1789254254] n_remain: -87
+[1789254254] eval: [ ' to':311 ]
+[1789254255] n_past = 86
+[1789254255] last: [ ' help':1492 ]
+[1789254255] n_remain: -88
+[1789254255] eval: [ ' help':1492 ]
+[1789254255] n_past = 87
+[1789254255] last: [ '.':13 ]
+[1789254255] n_remain: -89
+[1789254255] eval: [ '.':13 ]
+[1789254255] n_past = 88
+[1789254255] last: [ '<|user|>':154827 ]
+[1789254255] n_remain: -90
+[1789254255] found an EOG token
+[1789254255] waiting for user input
+[1789254259] buffer: 'Can I trust you?
+'
+[1789254259] input tokens: [ '':198, 'Can':6713, ' I':358, ' trust':6950, ' you':498, '?':5267, '<|assistant|>':154828 ]
+[1789254259] n_remain: -97
+[1789254259] eval: [ '<|user|>':154827 ]
+[1789254259] n_past = 89
+[1789254259] embd_inp.size(): 14, n_consumed: 7
+[1789254259] eval: [ '':198, 'Can':6713, ' I':358, ' trust':6950, ' you':498, '?':5267, '<|assistant|>':154828 ]
+[1789254261] n_past = 96
+[1789254261] last: [ '<th':13699 ]
+[1789254261] n_remain: -98
+[1789254261] eval: [ '<th':13699 ]
+[1789254261] n_past = 97
+[1789254261] last: [ 'ink':766 ]
+[1789254261] n_remain: -99
+[1789254261] eval: [ 'ink':766 ]
+[1789254261] n_past = 98
+[1789254261] last: [ '>The':16343 ]
+[1789254261] n_remain: -100
+[1789254261] eval: [ '>The':16343 ]
+[1789254262] n_past = 99
+[1789254262] last: [ ' user':1196 ]
+[1789254262] n_remain: -101
+[1789254262] eval: [ ' user':1196 ]
+[1789254262] n_past = 100
+[1789254262] last: [ ' is':374 ]
+[1789254262] n_remain: -102
+[1789254262] eval: [ ' is':374 ]
+[1789254262] n_past = 101
+[1789254262] last: [ ' asking':10156 ]
+[1789254262] n_remain: -103
+[1789254262] eval: [ ' asking':10156 ]
+[1789254262] n_past = 102
+[1789254262] last: [ ' if':421 ]
+[1789254262] n_remain: -104
+[1789254262] eval: [ ' if':421 ]
+[1789254263] n_past = 103
+[1789254263] last: [ ' they':807 ]
+[1789254263] n_remain: -105
+[1789254263] eval: [ ' they':807 ]
+[1789254263] n_past = 104
+[1789254263] last: [ ' can':646 ]
+[1789254263] n_remain: -106
+[1789254263] eval: [ ' can':646 ]
+[1789254263] n_past = 105
+[1789254263] last: [ ' trust':6950 ]
+[1789254263] n_remain: -107
+[1789254263] eval: [ ' trust':6950 ]
+[1789254264] n_past = 106
+[1789254264] last: [ ' me':752 ]
+[1789254264] n_remain: -108
+[1789254264] eval: [ ' me':752 ]
+[1789254264] n_past = 107
+[1789254264] last: [ ',':11 ]
+[1789254264] n_remain: -109
+[1789254264] eval: [ ',':11 ]
+[1789254264] n_past = 108
+[1789254264] last: [ ' which':892 ]
+[1789254264] n_remain: -110
+[1789254264] eval: [ ' which':892 ]
+[1789254264] n_past = 109
+[1789254264] last: [ ' is':374 ]
+[1789254264] n_remain: -111
+[1789254264] eval: [ ' is':374 ]
+[1789254265] n_past = 110
+[1789254265] last: [ ' a':264 ]
+[1789254265] n_remain: -112
+[1789254265] eval: [ ' a':264 ]
+[1789254265] n_past = 111
+[1789254265] last: [ ' fundamental':15799 ]
+[1789254265] n_remain: -113
+[1789254265] eval: [ ' fundamental':15799 ]
+[1789254265] n_past = 112
+[1789254265] last: [ ' question':3405 ]
+[1789254265] n_remain: -114
+[1789254265] eval: [ ' question':3405 ]
+[1789254265] n_past = 113
+[1789254265] last: [ ' about':911 ]
+[1789254265] n_remain: -115
+[1789254265] eval: [ ' about':911 ]
+[1789254266] n_past = 114
+[1789254266] last: [ ' my':847 ]
+[1789254266] n_remain: -116
+[1789254266] eval: [ ' my':847 ]
+[1789254266] n_past = 115
+[1789254266] last: [ ' reliability':30419 ]
+[1789254266] n_remain: -117
+[1789254266] eval: [ ' reliability':30419 ]
+[1789254266] n_past = 116
+[1789254266] last: [ ' and':323 ]
+[1789254266] n_remain: -118
+[1789254266] eval: [ ' and':323 ]
+[1789254267] n_past = 117
+[1789254267] last: [ ' intentions':33074 ]
+[1789254267] n_remain: -119
+[1789254267] eval: [ ' intentions':33074 ]
+[1789254267] n_past = 118
+[1789254267] last: [ '.':13 ]
+[1789254267] n_remain: -120
+[1789254267] eval: [ '.':13 ]
+[1789254267] n_past = 119
+[1789254267] last: [ ' I':358 ]
+[1789254267] n_remain: -121
+[1789254267] eval: [ ' I':358 ]
+[1789254267] n_past = 120
+[1789254267] last: [ ' need':1184 ]
+[1789254267] n_remain: -122
+[1789254267] eval: [ ' need':1184 ]
+[1789254268] n_past = 121
+[1789254268] last: [ ' to':311 ]
+[1789254268] n_remain: -123
+[1789254268] eval: [ ' to':311 ]
+[1789254268] n_past = 122
+[1789254268] last: [ ' approach':5486 ]
+[1789254268] n_remain: -124
+[1789254268] eval: [ ' approach':5486 ]
+[1789254268] n_past = 123
+[1789254268] last: [ ' this':419 ]
+[1789254268] n_remain: -125
+[1789254268] eval: [ ' this':419 ]
+[1789254268] n_past = 124
+[1789254268] last: [ ' carefully':15504 ]
+[1789254268] n_remain: -126
+[1789254268] eval: [ ' carefully':15504 ]
+[1789254269] n_past = 125
+[1789254269] last: [ ' by':553 ]
+[1789254269] n_remain: -127
+[1789254269] eval: [ ' by':553 ]
+[1789254269] n_past = 126
+[1789254269] last: [ ' first':1156 ]
+[1789254269] n_remain: -128
+[1789254269] eval: [ ' first':1156 ]
+[1789254269] n_past = 127
+[1789254269] last: [ ' acknowledging':60185 ]
+[1789254269] n_remain: -129
+[1789254269] eval: [ ' acknowledging':60185 ]
+[1789254269] n_past = 128
+[1789254269] last: [ ' their':862 ]
+[1789254269] n_remain: -130
+[1789254269] eval: [ ' their':862 ]
+[1789254270] n_past = 129
+[1789254270] last: [ ' concern':4643 ]
+[1789254270] n_remain: -131
+[1789254270] eval: [ ' concern':4643 ]
+[1789254270] n_past = 130
+[1789254270] last: [ ' as':438 ]
+[1789254270] n_remain: -132
+[1789254270] eval: [ ' as':438 ]
+[1789254270] n_past = 131
+[1789254270] last: [ ' valid':2697 ]
+[1789254270] n_remain: -133
+[1789254270] eval: [ ' valid':2697 ]
+[1789254270] n_past = 132
+[1789254270] last: [ ',':11 ]
+[1789254270] n_remain: -134
+[1789254270] eval: [ ',':11 ]
+[1789254271] n_past = 133
+[1789254271] last: [ ' then':1221 ]
+[1789254271] n_remain: -135
+[1789254271] eval: [ ' then':1221 ]
+[1789254271] n_past = 134
+[1789254271] last: [ ' explaining':24945 ]
+[1789254271] n_remain: -136
+[1789254271] eval: [ ' explaining':24945 ]
+[1789254271] n_past = 135
+[1789254271] last: [ ' what':1128 ]
+[1789254271] n_remain: -137
+[1789254271] eval: [ ' what':1128 ]
+[1789254271] n_past = 136
+[1789254271] last: [ ' I':358 ]
+[1789254271] n_remain: -138
+[1789254271] eval: [ ' I':358 ]
+[1789254272] n_past = 137
+[1789254272] last: [ ' am':1079 ]
+[1789254272] n_remain: -139
+[1789254272] eval: [ ' am':1079 ]
+[1789254272] n_past = 138
+[1789254272] last: [ 'a':27901 ]
+[1789254272] n_remain: -140
+[1789254272] eval: [ 'a':27901 ]
+[1789254272] n_past = 139
+[1789254272] last: [ ' GL':5588 ]
+[1789254272] n_remain: -141
+[1789254272] eval: [ ' GL':5588 ]
+[1789254273] n_past = 140
+[1789254273] last: [ 'M':44 ]
+[1789254273] n_remain: -142
+[1789254273] eval: [ 'M':44 ]
+[1789254273] n_past = 141
+[1789254273] last: [ ' model':1614 ]
+[1789254273] n_remain: -143
+[1789254273] eval: [ ' model':1614 ]
+[1789254273] n_past = 142
+[1789254273] last: [ ' developed':7881 ]
+[1789254273] n_remain: -144
+[1789254273] eval: [ ' developed':7881 ]
+[1789254274] n_past = 143
+[1789254274] last: [ ' by':553 ]
+[1789254274] n_remain: -145
+[1789254274] eval: [ ' by':553 ]
+[1789254274] n_past = 144
+[1789254274] last: [ ' Z':1863 ]
+[1789254274] n_remain: -146
+[1789254274] eval: [ ' Z':1863 ]
+[1789254274] n_past = 145
+[1789254274] last: [ '.ai':40161 ]
+[1789254274] n_remain: -147
+[1789254274] eval: [ '.ai':40161 ]
+[1789254274] n_past = 146
+[1789254274] last: [ '':2293 ]
+[1789254274] n_remain: -148
+[1789254274] eval: [ '':2293 ]
+[1789254275] n_past = 147
+[1789254275] last: [ 'while':3472 ]
+[1789254275] n_remain: -149
+[1789254275] eval: [ 'while':3472 ]
+[1789254275] n_past = 148
+[1789254275] last: [ ' being':1660 ]
+[1789254275] n_remain: -150
+[1789254275] eval: [ ' being':1660 ]
+[1789254275] n_past = 149
+[1789254275] last: [ ' honest':10740 ]
+[1789254275] n_remain: -151
+[1789254275] eval: [ ' honest':10740 ]
+[1789254275] n_past = 150
+[1789254275] last: [ ' about':911 ]
+[1789254275] n_remain: -152
+[1789254275] eval: [ ' about':911 ]
+[1789254276] n_past = 151
+[1789254276] last: [ ' both':2176 ]
+[1789254276] n_remain: -153
+[1789254276] eval: [ ' both':2176 ]
+[1789254276] n_past = 152
+[1789254276] last: [ ' my':847 ]
+[1789254276] n_remain: -154
+[1789254276] eval: [ ' my':847 ]
+[1789254276] n_past = 153
+[1789254276] last: [ ' capabilities':16909 ]
+[1789254276] n_remain: -155
+[1789254276] eval: [ ' capabilities':16909 ]
+[1789254276] n_past = 154
+[1789254276] last: [ ' and':323 ]
+[1789254276] n_remain: -156
+[1789254276] eval: [ ' and':323 ]
+[1789254277] n_past = 155
+[1789254277] last: [ ' limitations':9477 ]
+[1789254277] n_remain: -157
+[1789254277] eval: [ ' limitations':9477 ]
+[1789254277] n_past = 156
+[1789254277] last: [ '.':382 ]
+[1789254277] n_remain: -158
+[1789254277] eval: [ '.':382 ]
+[1789254277] n_past = 157
+[1789254277] last: [ 'I':40 ]
+[1789254277] n_remain: -159
+[1789254277] eval: [ 'I':40 ]
+[1789254278] n_past = 158
+[1789254278] last: [ ' should':1265 ]
+[1789254278] n_remain: -160
+[1789254278] eval: [ ' should':1265 ]
+[1789254278] n_past = 159
+[1789254278] last: [ ' emphasize':45656 ]
+[1789254278] n_remain: -161
+[1789254278] eval: [ ' emphasize':45656 ]
+[1789254278] n_past = 160
+[1789254278] last: [ ' that':429 ]
+[1789254278] n_remain: -162
+[1789254278] eval: [ ' that':429 ]
+[1789254278] n_past = 161
+[1789254278] last: [ ' I':358 ]
+[1789254278] n_remain: -163
+[1789254278] eval: [ ' I':358 ]
+[1789254278] n_past = 162
+[1789254278] last: [ ''m':2776 ]
+[1789254278] n_remain: -164
+[1789254278] eval: [ ''m':2776 ]
+[1789254279] n_past = 163
+[1789254279] last: [ ' a':264 ]
+[1789254279] n_remain: -165
+[1789254279] eval: [ ' a':264 ]
+[1789254279] n_past = 164
+[1789254279] last: [ ' tool':5392 ]
+[1789254279] n_remain: -166
+[1789254279] eval: [ ' tool':5392 ]
+[1789254279] n_past = 165
+[1789254279] last: [ ' designed':6188 ]
+[1789254279] n_remain: -167
+[1789254279] eval: [ ' designed':6188 ]
+[1789254280] n_past = 166
+[1789254280] last: [ ' to':311 ]
+[1789254280] n_remain: -168
+[1789254280] eval: [ ' to':311 ]
+[1789254280] n_past = 167
+[1789254280] last: [ ' be':387 ]
+[1789254280] n_remain: -169
+[1789254280] eval: [ ' be':387 ]
+[1789254280] n_past = 168
+[1789254280] last: [ ' helpful':10945 ]
+[1789254280] n_remain: -170
+[1789254280] eval: [ ' helpful':10945 ]
+[1789254280] n_past = 169
+[1789254280] last: [ ' and':323 ]
+[1789254280] n_remain: -171
+[1789254280] eval: [ ' and':323 ]
+[1789254281] n_past = 170
+[1789254281] last: [ ' harmless':52547 ]
+[1789254281] n_remain: -172
+[1789254281] eval: [ ' harmless':52547 ]
+[1789254281] n_past = 171
+[1789254281] last: [ ',':11 ]
+[1789254281] n_remain: -173
+[1789254281] eval: [ ',':11 ]
+[1789254281] n_past = 172
+[1789254281] last: [ ' but':714 ]
+[1789254281] n_remain: -174
+[1789254281] eval: [ ' but':714 ]
+[1789254281] n_past = 173
+[1789254281] last: [ ' I':358 ]
+[1789254281] n_remain: -175
+[1789254281] eval: [ ' I':358 ]
+[1789254282] n_past = 174
+[1789254282] last: [ ' can':646 ]
+[1789254282] n_remain: -176
+[1789254282] eval: [ ' can':646 ]
+[1789254282] n_past = 175
+[1789254282] last: [ ' make':1281 ]
+[1789254282] n_remain: -177
+[1789254282] eval: [ ' make':1281 ]
+[1789254282] n_past = 176
+[1789254282] last: [ ' mistakes':20600 ]
+[1789254282] n_remain: -178
+[1789254282] eval: [ ' mistakes':20600 ]
+[1789254282] n_past = 177
+[1789254282] last: [ ' or':476 ]
+[1789254282] n_remain: -179
+[1789254282] eval: [ ' or':476 ]
+[1789254283] n_past = 178
+[1789254283] last: [ ' lack':6853 ]
+[1789254283] n_remain: -180
+[1789254283] eval: [ ' lack':6853 ]
+[1789254283] n_past = 179
+[1789254283] last: [ ' knowledge':6540 ]
+[1789254283] n_remain: -181
+[1789254283] eval: [ ' knowledge':6540 ]
+[1789254283] n_past = 180
+[1789254283] last: [ ' in':304 ]
+[1789254283] n_remain: -182
+[1789254283] eval: [ ' in':304 ]
+[1789254284] n_past = 181
+[1789254284] last: [ ' certain':3654 ]
+[1789254284] n_remain: -183
+[1789254284] eval: [ ' certain':3654 ]
+[1789254284] n_past = 182
+[1789254284] last: [ ' areas':5671 ]
+[1789254284] n_remain: -184
+[1789254284] eval: [ ' areas':5671 ]
+[1789254284] n_past = 183
+[1789254284] last: [ ',':11 ]
+[1789254284] n_remain: -185
+[1789254284] eval: [ ',':11 ]
+[1789254284] n_past = 184
+[1789254284] last: [ ' so':773 ]
+[1789254284] n_remain: -186
+[1789254284] eval: [ ' so':773 ]
+[1789254285] n_past = 185
+[1789254285] last: [ ' I':358 ]
+[1789254285] n_remain: -187
+[1789254285] eval: [ ' I':358 ]
+[1789254285] n_past = 186
+[1789254285] last: [ ''ll':3278 ]
+[1789254285] n_remain: -188
+[1789254285] eval: [ ''ll':3278 ]
+[1789254285] n_past = 187
+[1789254285] last: [ ' recommend':6934 ]
+[1789254285] n_remain: -189
+[1789254285] eval: [ ' recommend':6934 ]
+[1789254285] n_past = 188
+[1789254285] last: [ ' verifying':68361 ]
+[1789254285] n_remain: -190
+[1789254285] eval: [ ' verifying':68361 ]
+[1789254286] n_past = 189
+[1789254286] last: [ ' important':2989 ]
+[1789254286] n_remain: -191
+[1789254286] eval: [ ' important':2989 ]
+[1789254286] n_past = 190
+[1789254286] last: [ ' information':1995 ]
+[1789254286] n_remain: -192
+[1789254286] eval: [ ' information':1995 ]
+[1789254286] n_past = 191
+[1789254286] last: [ '.':13 ]
+[1789254286] n_remain: -193
+[1789254286] eval: [ '.':13 ]
+[1789254287] n_past = 192
+[1789254287] last: [ ' It':1084 ]
+[1789254287] n_remain: -194
+[1789254287] eval: [ ' It':1084 ]
+[1789254287] n_past = 193
+[1789254287] last: [ ''s':594 ]
+[1789254287] n_remain: -195
+[1789254287] eval: [ ''s':594 ]
+[1789254287] n_past = 194
+[1789254287] last: [ ' also':1083 ]
+[1789254287] n_remain: -196
+[1789254287] eval: [ ' also':1083 ]
+[1789254287] n_past = 195
+[1789254287] last: [ ' important':2989 ]
+[1789254287] n_remain: -197
+[1789254287] eval: [ ' important':2989 ]
+[1789254288] n_past = 196
+[1789254288] last: [ ' to':311 ]
+[1789254288] n_remain: -198
+[1789254288] eval: [ ' to':311 ]
+[1789254288] n_past = 197
+[1789254288] last: [ ' mention':6286 ]
+[1789254288] n_remain: -199
+[1789254288] eval: [ ' mention':6286 ]
+[1789254288] n_past = 198
+[1789254288] last: [ ' data':821 ]
+[1789254288] n_remain: -200
+[1789254288] eval: [ ' data':821 ]
+[1789254288] n_past = 199
+[1789254288] last: [ ' privacy':12339 ]
+[1789254288] n_remain: -201
+[1789254288] eval: [ ' privacy':12339 ]
+[1789254289] n_past = 200
+[1789254289] last: [ ',':11 ]
+[1789254289] n_remain: -202
+[1789254289] eval: [ ',':11 ]
+[1789254289] n_past = 201
+[1789254289] last: [ ' noting':26222 ]
+[1789254289] n_remain: -203
+[1789254289] eval: [ ' noting':26222 ]
+[1789254289] n_past = 202
+[1789254289] last: [ ' that':429 ]
+[1789254289] n_remain: -204
+[1789254289] eval: [ ' that':429 ]
+[1789254290] n_past = 203
+[1789254290] last: [ ' I':358 ]
+[1789254290] n_remain: -205
+[1789254290] eval: [ ' I':358 ]
+[1789254290] n_past = 204
+[1789254290] last: [ ' don':1513 ]
+[1789254290] n_remain: -206
+[1789254290] eval: [ ' don':1513 ]
+[1789254290] n_past = 205
+[1789254290] last: [ ''t':944 ]
+[1789254290] n_remain: -207
+[1789254290] eval: [ ''t':944 ]
+[1789254290] n_past = 206
+[1789254290] last: [ ' store':3553 ]
+[1789254290] n_remain: -208
+[1789254290] eval: [ ' store':3553 ]
+[1789254291] n_past = 207
+[1789254291] last: [ ' personal':4345 ]
+[1789254291] n_remain: -209
+[1789254291] eval: [ ' personal':4345 ]
+[1789254291] n_past = 208
+[1789254291] last: [ ' data':821 ]
+[1789254291] n_remain: -210
+[1789254291] eval: [ ' data':821 ]
+[1789254291] n_past = 209
+[1789254291] last: [ ' beyond':7797 ]
+[1789254291] n_remain: -211
+[1789254291] eval: [ ' beyond':7797 ]
+[1789254291] n_past = 210
+[1789254291] last: [ ' the':279 ]
+[1789254291] n_remain: -212
+[1789254291] eval: [ ' the':279 ]
+[1789254292] n_past = 211
+[1789254292] last: [ ' conversation':10430 ]
+[1789254292] n_remain: -213
+[1789254292] eval: [ ' conversation':10430 ]
+[1789254292] n_past = 212
+[1789254292] last: [ ',':11 ]
+[1789254292] n_remain: -214
+[1789254292] eval: [ ',':11 ]
+[1789254292] n_past = 213
+[1789254292] last: [ ' but':714 ]
+[1789254292] n_remain: -215
+[1789254292] eval: [ ' but':714 ]
+[1789254292] n_past = 214
+[1789254292] last: [ ' users':3847 ]
+[1789254292] n_remain: -216
+[1789254292] eval: [ ' users':3847 ]
+[1789254293] n_past = 215
+[1789254293] last: [ ' should':1265 ]
+[1789254293] n_remain: -217
+[1789254293] eval: [ ' should':1265 ]
+[1789254293] n_past = 216
+[1789254293] last: [ ' still':2058 ]
+[1789254293] n_remain: -218
+[1789254293] eval: [ ' still':2058 ]
+[1789254293] n_past = 217
+[1789254293] last: [ ' avoid':5648 ]
+[1789254293] n_remain: -219
+[1789254293] eval: [ ' avoid':5648 ]
+[1789254293] n_past = 218
+[1789254293] last: [ ' sharing':11555 ]
+[1789254293] n_remain: -220
+[1789254293] eval: [ ' sharing':11555 ]
+[1789254294] n_past = 219
+[1789254294] last: [ ' sensitive':16202 ]
+[1789254294] n_remain: -221
+[1789254294] eval: [ ' sensitive':16202 ]
+[1789254294] n_past = 220
+[1789254294] last: [ ' details':3565 ]
+[1789254294] n_remain: -222
+[1789254294] eval: [ ' details':3565 ]
+[1789254294] n_past = 221
+[1789254294] last: [ '.':13 ]
+[1789254294] n_remain: -223
+[1789254294] eval: [ '.':13 ]
+[1789254294] n_past = 222
+[1789254294] last: [ ' Ending':72850 ]
+[1789254294] n_remain: -224
+[1789254294] eval: [ ' Ending':72850 ]
+[1789254295] n_past = 223
+[1789254295] last: [ ' with':448 ]
+[1789254295] n_remain: -225
+[1789254295] eval: [ ' with':448 ]
+[1789254295] n_past = 224
+[1789254295] last: [ ' an':458 ]
+[1789254295] n_remain: -226
+[1789254295] eval: [ ' an':458 ]
+[1789254295] n_past = 225
+[1789254295] last: [ ' open':1787 ]
+[1789254295] n_remain: -227
+[1789254295] eval: [ ' open':1787 ]
+[1789254296] n_past = 226
+[1789254296] last: [ ' invitation':28586 ]
+[1789254296] n_remain: -228
+[1789254296] eval: [ ' invitation':28586 ]
+[1789254296] n_past = 227
+[1789254296] last: [ ' for':369 ]
+[1789254296] n_remain: -229
+[1789254296] eval: [ ' for':369 ]
+[1789254296] n_past = 228
+[1789254296] last: [ ' questions':4755 ]
+[1789254296] n_remain: -230
+[1789254296] eval: [ ' questions':4755 ]
+[1789254296] n_past = 229
+[1789254296] last: [ ' can':646 ]
+[1789254296] n_remain: -231
+[1789254296] eval: [ ' can':646 ]
+[1789254297] n_past = 230
+[1789254297] last: [ ' build':1936 ]
+[1789254297] n_remain: -232
+[1789254297] eval: [ ' build':1936 ]
+[1789254297] n_past = 231
+[1789254297] last: [ ' trust':6950 ]
+[1789254297] n_remain: -233
+[1789254297] eval: [ ' trust':6950 ]
+[1789254297] n_past = 232
+[1789254297] last: [ ' through':1526 ]
+[1789254297] n_remain: -234
+[1789254297] eval: [ ' through':1526 ]
+[1789254298] n_past = 233
+[1789254298] last: [ ' transparency':27142 ]
+[1789254298] n_remain: -235
+[1789254298] eval: [ ' transparency':27142 ]
+[1789254298] n_past = 234
+[1789254298] last: [ ' and':323 ]
+[1789254298] n_remain: -236
+[1789254298] eval: [ ' and':323 ]
+[1789254298] n_past = 235
+[1789254298] last: [ ' ongoing':14186 ]
+[1789254298] n_remain: -237
+[1789254298] eval: [ ' ongoing':14186 ]
+[1789254298] n_past = 236
+[1789254298] last: [ ' dialogue':21228 ]
+[1789254298] n_remain: -238
+[1789254298] eval: [ ' dialogue':21228 ]
+[1789254299] n_past = 237
+[1789254299] last: [ '.':13 ]
+[1789254299] n_remain: -239
+[1789254299] eval: [ '.':13 ]
+[1789254299] n_past = 238
+[1789254299] last: [ ' This':1096 ]
+[1789254299] n_remain: -240
+[1789254299] eval: [ ' This':1096 ]
+[1789254299] n_past = 239
+[1789254299] last: [ ' logical':19781 ]
+[1789254299] n_remain: -241
+[1789254299] eval: [ ' logical':19781 ]
+[1789254299] n_past = 240
+[1789254299] last: [ ' progression':32572 ]
+[1789254299] n_remain: -242
+[1789254299] eval: [ ' progression':32572 ]
+[1789254300] n_past = 241
+[1789254300] last: [ ' addresses':14220 ]
+[1789254300] n_remain: -243
+[1789254300] eval: [ ' addresses':14220 ]
+[1789254300] n_past = 242
+[1789254300] last: [ ' their':862 ]
+[1789254300] n_remain: -244
+[1789254300] eval: [ ' their':862 ]
+[1789254300] n_past = 243
+[1789254300] last: [ ' query':3239 ]
+[1789254300] n_remain: -245
+[1789254300] eval: [ ' query':3239 ]
+[1789254300] n_past = 244
+[1789254300] last: [ ' while':1393 ]
+[1789254300] n_remain: -246
+[1789254300] eval: [ ' while':1393 ]
+[1789254301] n_past = 245
+[1789254301] last: [ ' maintaining':20296 ]
+[1789254301] n_remain: -247
+[1789254301] eval: [ ' maintaining':20296 ]
+[1789254301] n_past = 246
+[1789254301] last: [ ' a':264 ]
+[1789254301] n_remain: -248
+[1789254301] eval: [ ' a':264 ]
+[1789254301] n_past = 247
+[1789254301] last: [ ' balanced':23765 ]
+[1789254301] n_remain: -249
+[1789254301] eval: [ ' balanced':23765 ]
+[1789254301] n_past = 248
+[1789254301] last: [ ',':11 ]
+[1789254301] n_remain: -250
+[1789254301] eval: [ ',':11 ]
+[1789254302] n_past = 249
+[1789254302] last: [ ' informative':38015 ]
+[1789254302] n_remain: -251
+[1789254302] eval: [ ' informative':38015 ]
+[1789254302] n_past = 250
+[1789254302] last: [ ' tone':16218 ]
+[1789254302] n_remain: -252
+[1789254302] eval: [ ' tone':16218 ]
+[1789254302] n_past = 251
+[1789254302] last: [ '.':13 ]
+[1789254302] n_remain: -253
+[1789254302] eval: [ '.':13 ]
+[1789254302] n_past = 252
+[1789254302] last: [ '</think>':154842 ]
+[1789254302] n_remain: -254
+[1789254302] eval: [ '</think>':154842 ]
+[1789254303] n_past = 253
+[1789254303] last: [ 'I':40 ]
+[1789254303] n_remain: -255
+[1789254303] eval: [ 'I':40 ]
+[1789254303] n_past = 254
+[1789254303] last: [ ''m':2776 ]
+[1789254303] n_remain: -256
+[1789254303] eval: [ ''m':2776 ]
+[1789254303] n_past = 255
+[1789254303] last: [ ' the':279 ]
+[1789254303] n_remain: -257
+[1789254303] eval: [ ' the':279 ]
+[1789254304] n_past = 256
+[1789254304] last: [ ' GL':5588 ]
+[1789254304] n_remain: -258
+[1789254304] eval: [ ' GL':5588 ]
+[1789254304] n_past = 257
+[1789254304] last: [ 'M':44 ]
+[1789254304] n_remain: -259
+[1789254304] eval: [ 'M':44 ]
+[1789254304] n_past = 258
+[1789254304] last: [ ' language':4128 ]
+[1789254304] n_remain: -260
+[1789254304] eval: [ ' language':4128 ]
+[1789254305] n_past = 259
+[1789254305] last: [ ' model':1614 ]
+[1789254305] n_remain: -261
+[1789254305] eval: [ ' model':1614 ]
+[1789254305] n_past = 260
+[1789254305] last: [ ' developed':7881 ]
+[1789254305] n_remain: -262
+[1789254305] eval: [ ' developed':7881 ]
+[1789254305] n_past = 261
+[1789254305] last: [ ' by':553 ]
+[1789254305] n_remain: -263
+[1789254305] eval: [ ' by':553 ]
+[1789254306] n_past = 262
+[1789254306] last: [ ' **':3070 ]
+[1789254306] n_remain: -264
+[1789254306] eval: [ ' **':3070 ]
+[1789254306] n_past = 263
+[1789254306] last: [ 'Z':57 ]
+[1789254306] n_remain: -265
+[1789254306] eval: [ 'Z':57 ]
+[1789254306] n_past = 264
+[1789254306] last: [ '.ai':40161 ]
+[1789254306] n_remain: -266
+[1789254306] eval: [ '.ai':40161 ]
+[1789254306] n_past = 265
+[1789254306] last: [ '**,':96403 ]
+[1789254306] n_remain: -267
+[1789254306] eval: [ '**,':96403 ]
+[1789254307] n_past = 266
+[1789254307] last: [ ' designed':6188 ]
+[1789254307] n_remain: -268
+[1789254307] eval: [ ' designed':6188 ]
+[1789254307] n_past = 267
+[1789254307] last: [ ' to':311 ]
+[1789254307] n_remain: -269
+[1789254307] eval: [ ' to':311 ]
+[1789254307] n_past = 268
+[1789254307] last: [ ' provide':3410 ]
+[1789254307] n_remain: -270
+[1789254307] eval: [ ' provide':3410 ]
+[1789254308] n_past = 269
+[1789254308] last: [ ' helpful':10945 ]
+[1789254308] n_remain: -271
+[1789254308] eval: [ ' helpful':10945 ]
+[1789254308] n_past = 270
+[1789254308] last: [ ' and':323 ]
+[1789254308] n_remain: -272
+[1789254308] eval: [ ' and':323 ]
+[1789254308] n_past = 271
+[1789254308] last: [ ' harmless':52547 ]
+[1789254308] n_remain: -273
+[1789254308] eval: [ ' harmless':52547 ]
+[1789254308] n_past = 272
+[1789254308] last: [ ' responses':14497 ]
+[1789254308] n_remain: -274
+[1789254308] eval: [ ' responses':14497 ]
+[1789254309] n_past = 273
+[1789254309] last: [ ' while':1393 ]
+[1789254309] n_remain: -275
+[1789254309] eval: [ ' while':1393 ]
+[1789254309] n_past = 274
+[1789254309] last: [ ' respecting':67917 ]
+[1789254309] n_remain: -276
+[1789254309] eval: [ ' respecting':67917 ]
+[1789254309] n_past = 275
+[1789254309] last: [ ' your':697 ]
+[1789254309] n_remain: -277
+[1789254309] eval: [ ' your':697 ]
+[1789254310] n_past = 276
+[1789254310] last: [ ' privacy':12339 ]
+[1789254310] n_remain: -278
+[1789254310] eval: [ ' privacy':12339 ]
+[1789254310] n_past = 277
+[1789254310] last: [ '.':13 ]
+[1789254310] n_remain: -279
+[1789254310] eval: [ '.':13 ]
+[1789254310] n_past = 278
+[1789254310] last: [ ' I':358 ]
+[1789254310] n_remain: -280
+[1789254310] eval: [ ' I':358 ]
+[1789254310] n_past = 279
+[1789254310] last: [ ' don':1513 ]
+[1789254310] n_remain: -281
+[1789254310] eval: [ ' don':1513 ]
+[1789254311] n_past = 280
+[1789254311] last: [ ''t':944 ]
+[1789254311] n_remain: -282
+[1789254311] eval: [ ''t':944 ]
+[1789254311] n_past = 281
+[1789254311] last: [ ' store':3553 ]
+[1789254311] n_remain: -283
+[1789254311] eval: [ ' store':3553 ]
+[1789254311] n_past = 282
+[1789254311] last: [ ' your':697 ]
+[1789254311] n_remain: -284
+[1789254311] eval: [ ' your':697 ]
+[1789254311] n_past = 283
+[1789254311] last: [ ' personal':4345 ]
+[1789254311] n_remain: -285
+[1789254311] eval: [ ' personal':4345 ]
+[1789254312] n_past = 284
+[1789254312] last: [ ' data':821 ]
+[1789254312] n_remain: -286
+[1789254312] eval: [ ' data':821 ]
+[1789254312] n_past = 285
+[1789254312] last: [ ' beyond':7797 ]
+[1789254312] n_remain: -287
+[1789254312] eval: [ ' beyond':7797 ]
+[1789254312] n_past = 286
+[1789254312] last: [ ' our':1039 ]
+[1789254312] n_remain: -288
+[1789254312] eval: [ ' our':1039 ]
+[1789254313] n_past = 287
+[1789254313] last: [ ' conversation':10430 ]
+[1789254313] n_remain: -289
+[1789254313] eval: [ ' conversation':10430 ]
+[1789254313] n_past = 288
+[1789254313] last: [ '.':382 ]
+[1789254313] n_remain: -290
+[1789254313] eval: [ '.':382 ]
+[1789254313] n_past = 289
+[1789254313] last: [ 'Trust':45279 ]
+[1789254313] n_remain: -291
+[1789254313] eval: [ 'Trust':45279 ]
+[1789254314] n_past = 290
+[1789254314] last: [ ' is':374 ]
+[1789254314] n_remain: -292
+[1789254314] eval: [ ' is':374 ]
+[1789254314] n_past = 291
+[1789254314] last: [ ' important':2989 ]
+[1789254314] n_remain: -293
+[1789254314] eval: [ ' important':2989 ]
+[1789254314] n_past = 292
+[1789254314] last: [ ',':11 ]
+[1789254314] n_remain: -294
+[1789254314] eval: [ ',':11 ]
+[1789254314] n_past = 293
+[1789254314] last: [ ' and':323 ]
+[1789254314] n_remain: -295
+[1789254314] eval: [ ' and':323 ]
+[1789254315] n_past = 294
+[1789254315] last: [ ' while':1393 ]
+[1789254315] n_remain: -296
+[1789254315] eval: [ ' while':1393 ]
+[1789254315] n_past = 295
+[1789254315] last: [ ' I':358 ]
+[1789254315] n_remain: -297
+[1789254315] eval: [ ' I':358 ]
+[1789254315] n_past = 296
+[1789254315] last: [ ' strive':35824 ]
+[1789254315] n_remain: -298
+[1789254315] eval: [ ' strive':35824 ]
+[1789254316] n_past = 297
+[1789254316] last: [ ' to':311 ]
+[1789254316] n_remain: -299
+[1789254316] eval: [ ' to':311 ]
+[1789254316] n_past = 298
+[1789254316] last: [ ' be':387 ]
+[1789254316] n_remain: -300
+[1789254316] eval: [ ' be':387 ]
+[1789254316] n_past = 299
+[1789254316] last: [ ' reliable':14710 ]
+[1789254316] n_remain: -301
+[1789254316] eval: [ ' reliable':14710 ]
+[1789254316] n_past = 300
+[1789254316] last: [ ',':11 ]
+[1789254316] n_remain: -302
+[1789254316] eval: [ ',':11 ]
+[1789254317] n_past = 301
+[1789254317] last: [ ' I':358 ]
+[1789254317] n_remain: -303
+[1789254317] eval: [ ' I':358 ]
+[1789254317] n_past = 302
+[1789254317] last: [ ''m':2776 ]
+[1789254317] n_remain: -304
+[1789254317] eval: [ ''m':2776 ]
+[1789254317] n_past = 303
+[1789254317] last: [ ' not':537 ]
+[1789254317] n_remain: -305
+[1789254317] eval: [ ' not':537 ]
+[1789254318] n_past = 304
+[1789254318] last: [ ' perfect':4727 ]
+[1789254318] n_remain: -306
+[1789254318] eval: [ ' perfect':4727 ]
+[1789254318] n_past = 305
+[1789254318] last: [ 'I':50324 ]
+[1789254318] n_remain: -307
+[1789254318] eval: [ 'I':50324 ]
+[1789254318] n_past = 306
+[1789254318] last: [ ' recommend':6934 ]
+[1789254318] n_remain: -308
+[1789254318] eval: [ ' recommend':6934 ]
+[1789254318] n_past = 307
+[1789254318] last: [ ' verifying':68361 ]
+[1789254318] n_remain: -309
+[1789254318] eval: [ ' verifying':68361 ]
+[1789254319] n_past = 308
+[1789254319] last: [ ' critical':9020 ]
+[1789254319] n_remain: -310
+[1789254319] eval: [ ' critical':9020 ]
+[1789254319] n_past = 309
+[1789254319] last: [ ' information':1995 ]
+[1789254319] n_remain: -311
+[1789254319] eval: [ ' information':1995 ]
+[1789254319] n_past = 310
+[1789254319] last: [ ' from':504 ]
+[1789254319] n_remain: -312
+[1789254319] eval: [ ' from':504 ]
+[1789254320] n_past = 311
+[1789254320] last: [ ' authoritative':64126 ]
+[1789254320] n_remain: -313
+[1789254320] eval: [ ' authoritative':64126 ]
+[1789254320] n_past = 312
+[1789254320] last: [ ' sources':8172 ]
+[1789254320] n_remain: -314
+[1789254320] eval: [ ' sources':8172 ]
+[1789254320] n_past = 313
+[1789254320] last: [ '.':382 ]
+[1789254320] n_remain: -315
+[1789254320] eval: [ '.':382 ]
+[1789254320] n_past = 314
+[1789254320] last: [ 'Is':3872 ]
+[1789254320] n_remain: -316
+[1789254320] eval: [ 'Is':3872 ]
+[1789254321] n_past = 315
+[1789254321] last: [ ' there':1052 ]
+[1789254321] n_remain: -317
+[1789254321] eval: [ ' there':1052 ]
+[1789254321] n_past = 316
+[1789254321] last: [ ' something':2494 ]
+[1789254321] n_remain: -318
+[1789254321] eval: [ ' something':2494 ]
+[1789254321] n_past = 317
+[1789254321] last: [ ' specific':3151 ]
+[1789254321] n_remain: -319
+[1789254321] eval: [ ' specific':3151 ]
+[1789254322] n_past = 318
+[1789254322] last: [ ' you':498 ]
+[1789254322] n_remain: -320
+[1789254322] eval: [ ' you':498 ]
+[1789254322] n_past = 319
+[1789254322] last: [ ''d':4172 ]
+[1789254322] n_remain: -321
+[1789254322] eval: [ ''d':4172 ]
+[1789254322] n_past = 320
+[1789254322] last: [ ' like':1075 ]
+[1789254322] n_remain: -322
+[1789254322] eval: [ ' like':1075 ]
+[1789254322] n_past = 321
+[1789254322] last: [ ' to':311 ]
+[1789254322] n_remain: -323
+[1789254322] eval: [ ' to':311 ]
+[1789254323] n_past = 322
+[1789254323] last: [ ' know':1414 ]
+[1789254323] n_remain: -324
+[1789254323] eval: [ ' know':1414 ]
+[1789254323] n_past = 323
+[1789254323] last: [ ' or':476 ]
+[1789254323] n_remain: -325
+[1789254323] eval: [ ' or':476 ]
+[1789254323] n_past = 324
+[1789254323] last: [ ' discuss':4263 ]
+[1789254323] n_remain: -326
+[1789254323] eval: [ ' discuss':4263 ]
+[1789254323] n_past = 325
+[1789254323] last: [ '?':30 ]
+[1789254323] n_remain: -327
+[1789254323] eval: [ '?':30 ]
+[1789254324] n_past = 326
+[1789254324] last: [ ' I':358 ]
+[1789254324] n_remain: -328
+[1789254324] eval: [ ' I':358 ]
+[1789254324] n_past = 327
+[1789254324] last: [ ''m':2776 ]
+[1789254324] n_remain: -329
+[1789254324] eval: [ ''m':2776 ]
+[1789254324] n_past = 328
+[1789254324] last: [ ' here':1588 ]
+[1789254324] n_remain: -330
+[1789254324] eval: [ ' here':1588 ]
+[1789254324] n_past = 329
+[1789254324] last: [ ' to':311 ]
+[1789254324] n_remain: -331
+[1789254324] eval: [ ' to':311 ]
+[1789254325] n_past = 330
+[1789254325] last: [ ' help':1492 ]
+[1789254325] n_remain: -332
+[1789254325] eval: [ ' help':1492 ]
+[1789254325] n_past = 331
+[1789254325] last: [ '.':13 ]
+[1789254325] n_remain: -333
+[1789254325] eval: [ '.':13 ]
+[1789254325] n_past = 332
+[1789254325] last: [ '<|user|>':154827 ]
+[1789254325] n_remain: -334
+[1789254325] found an EOG token
+[1789254325] waiting for user input
+[1789254353] 
+[1789254353] llama_print_timings:        load time =   32162.91 ms
+[1789254353] llama_print_timings:      sample time =      33.43 ms /   319 runs   (    0.10 ms per token,  9542.61 tokens per second)
+[1789254353] llama_print_timings: prompt eval time =    3501.41 ms /    15 tokens (  233.43 ms per token,     4.28 tokens per second)
+[1789254353] llama_print_timings:        eval time =   86928.09 ms /   317 runs   (  274.22 ms per token,     3.65 tokens per second)
+[1789254353] llama_print_timings:       total time =  195915.80 ms /   332 tokens

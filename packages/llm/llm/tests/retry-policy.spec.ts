@@ -12,10 +12,10 @@ describe('provider retry policy', () => {
 
     expect(policy).toEqual({
       mode: 'normal',
-      maxRetries: 2,
+      maxRetries: 12,
       retryableCodes: ['EMPTY_RESPONSE', 'CHANNEL_LEAK', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
-      initialDelayMs: 500,
-      maxDelayMs: 10_000,
+      initialDelayMs: 1_000,
+      maxDelayMs: 15_000,
       jitterRatio: 0.1,
     })
     expect(Object.isFrozen(policy)).toBe(true)
@@ -52,8 +52,8 @@ describe('provider retry policy', () => {
   it('resolves always mode with default backoff', () => {
     expect(resolveRetryPolicy({ mode: 'always' }, 'provider.retryPolicy')).toEqual({
       mode: 'always',
-      initialDelayMs: 500,
-      maxDelayMs: 10_000,
+      initialDelayMs: 1_000,
+      maxDelayMs: 15_000,
       jitterRatio: 0.1,
     })
     expect(RetryPolicySchema).toBeDefined()
