@@ -63,6 +63,15 @@ function classifyPiAiError(message: string): string {
     || /\bterminated\b|premature close/i.test(message)) {
     return 'TRANSPORT'
   }
+  // pi-ai's openai-completions mapper answers an unrecognized wire
+  // `finish_reason` with `Provider finish_reason: <reason>`. OpenRouter's
+  // canonical `error` is the transient case: the provider abandoned the
+  // response, so the attempt is retryable the way a mid-response drop is.
+  // A named policy verdict (`content_filter`) is not, and stays unclassified.
+  if (/provider\s+finish_reason\s*:/i.test(message)
+    && !/(?=.*(?:content_filter|network_error))/i.test(message)) {
+    return 'TRANSPORT'
+  }
   return 'PI_AI_ERROR'
 }
 

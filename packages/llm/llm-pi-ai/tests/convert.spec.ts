@@ -799,9 +799,22 @@ describe('mapStopReason / mapUsage', () => {
     'OpenAI Responses stream ended before a terminal response event',
     'openrouter stream ended without a terminal event',
     'Stream ended without finish_reason',
+    // OpenRouter's canonical `error` finish_reason, and any other unresolved
+    // wire value, arrive as pi-ai's own mapper wording.
+    'Provider finish_reason: error',
+    'Provider finish_reason: some_future_value',
   ])('maps pi-ai transport wording %j', (errorMessage) => {
     expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
       .toMatchObject({ kind: 'error', failure: { code: 'TRANSPORT' } })
+  })
+
+  it('keeps a named finish_reason policy verdict out of the retryable transport code', () => {
+    // The classifier's transport wording must not swallow content_filter: a
+    // verdict the provider will repeat is not a dropped response.
+    for (const errorMessage of ['Provider finish_reason: content_filter', 'Provider finish_reason: network_error']) {
+      expect(mapStopReason(assistant({ stopReason: 'error', errorMessage })))
+        .toEqual({ kind: 'error', failure: { message: errorMessage, code: 'PI_AI_ERROR' } })
+    }
   })
 
   it('uses pi-ai provider-specific overflow classification without losing rate-limit exclusions', () => {

@@ -6,15 +6,17 @@ English | [中文](2026-07-22-pi-ai-transport-truncation-classification.zh.md)
 
 ## Problem
 
-A TUI run whose model connection dropped mid-stream surfaced the single notice `terminated`, and a truncated Anthropic response surfaced `Anthropic stream ended before message_stop`. Both are transport truncations — the connection died before the provider's terminal SSE event — yet `classifyPiAiError` in `dsh-llm-pi-ai` mapped neither, falling through to the catch-all `PI_AI_ERROR`. Because `PI_AI_ERROR` is not in `llm-retry`'s `DEFAULT_RETRYABLE_CODES` (`RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`), a recoverable drop was treated as a permanent failure and never retried.
+A TUI run whose model connection dropped mid-stream surfaced the single notice `terminated`, and a truncated Anthropic response surfaced `Anthropic stream ended before message_stop`. An OpenRouter stream that stalled mid-response and ended on its canonical `error` finish reason failed the turn as `This turn failed Provider finish_reason: error` instead. All three are recoverable interruptions — the connection died before the provider's terminal SSE event, or the provider abandoned the response without a usable stop reason — yet `classifyPiAiError` in `dsh-llm-pi-ai` matched none of them, falling through to the catch-all `PI_AI_ERROR`. Because `PI_AI_ERROR` is not in `llm-retry`'s `DEFAULT_RETRYABLE_CODES` (`RATE_LIMIT`, `SERVER`, `TIMEOUT`, `TRANSPORT`), a recoverable interruption was treated as a permanent failure and never retried.
 
-The detail loss is upstream and unrecoverable in the adapter: pi-ai reduces a caught error to `error.message` (`api/anthropic-messages.js`: `errorMessage = error instanceof Error ? error.message : JSON.stringify(error)`) before pushing the terminal `error` event, discarding the original `Error` and its `cause` chain. undici carries the actionable `SocketError` on `cause` but hands the fetch wrapper a bare `terminated`; pi-ai keeps only that word. pi-ai `SimpleStreamOptions` exposes no fetch/dispatcher/client hook we could use to capture the `cause` ourselves before it is flattened.
+The detail loss is upstream and unrecoverable in the adapter: pi-ai reduces a caught error to `error.message` (`api/anthropic-messages.js`: `errorMessage = error instanceof Error ? error.message : JSON.stringify(error)`) before pushing the terminal `error` event, discarding the original `Error` and its `cause` chain. undici carries the actionable `SocketError` on `cause` but hands the fetch wrapper a bare `terminated`; pi-ai keeps only that word. pi-ai `SimpleStreamOptions` exposes no fetch/dispatcher/client hook we could use to capture the `cause` ourselves before it is flattened. An unresolved wire `finish_reason` is likewise reduced to a sentence by pi-ai's openai-completions mapper (`Provider finish_reason: <reason>`), which is the only thing the adapter can classify on.
 
 ## Decision
 
-- `classifyPiAiError` recognizes two more transport wordings and maps both to `TRANSPORT`:
+- `classifyPiAiError` recognizes three more transport wordings and maps them to `TRANSPORT`:
   - a mid-stream socket drop rendered as a bare `terminated` (undici) or `Premature close` (Node stream layer);
-  - a stream truncated before its terminal event, which each pi-ai provider throws with its own wording (`Anthropic stream ended before message_stop`, `… before a terminal response event`, `… ended without a terminal event`, `Stream ended without finish_reason`), matched on `stream ended before/without`.
+  - a stream truncated before its terminal event, which each pi-ai provider throws with its own wording (`Anthropic stream ended before message_stop`, `… before a terminal response event`, `… ended without a terminal event`, `Stream ended without finish_reason`), matched on `stream ended before/without`;
+  - pi-ai's `Provider finish_reason: <reason>` mapper sentence when `<reason>` is not a named policy verdict — OpenRouter's canonical `error` being the case that reaches it — because a response the provider abandoned without a usable stop reason is retried the way a mid-response drop is.
+- `content_filter` and `network_error` are carved out of that third pattern and stay `PI_AI_ERROR`: naming a verdict the provider will repeat is not the same event as a response that got cut off, and retrying it would spend a full backoff budget on a request that cannot succeed.
 - The classifier carries an `XXX(pi-ai upstream)` note naming the flattening site and stating the intended fix: classify on `code`/`cause` if pi-ai ever forwards the original `Error` or a hook that lets us capture the `cause`. Classification stays best-effort text matching until then.
 - `llm-pi-ai/README.md` gains a Known-Limitations bullet recording that pi-ai flattens the cause chain and that harness codes are therefore classified from message text.
 
@@ -26,10 +28,13 @@ Classification stays on message text because that is the only signal pi-ai deliv
 
 **Leave both as `PI_AI_ERROR` and widen `llm-retry`'s retryable set.** Rejected: `PI_AI_ERROR` is the catch-all for genuinely unclassified failures, including non-retryable ones (a malformed provider response, an unexpected SDK bug). Making the catch-all retryable would retry failures that will never succeed; the fix is to classify the recoverable case, not to blur the bucket.
 
+**Map only `Provider finish_reason: error` and leave every other unresolved wire value unclassified.** Rejected: the pattern is pi-ai's own mapper sentence, so matching it whole and excluding the two named verdicts costs nothing extra and covers the next unknown reason — which is the same abandoned-response event — without reaching into the catch-all.
+
 **Wrap the flattened error in an `LlmError('TRANSPORT', { cause })` in the adapter, mirroring the DeepSeek adapter.** Rejected here: the DeepSeek adapter wraps a *pre-response* `fetch` rejection whose `cause` is still intact, so chaining preserves real detail. In the pi-ai path the terminal event's `errorMessage` is already a flattened string with no `cause` to chain, so wrapping would add a layer without recovering anything; classifying the code is the only value left to add.
 
 ## Consequences
 
-- A mid-stream transport drop and a pre-terminal stream truncation now carry `TRANSPORT`, so a composed `llm-retry` policy retries them by default instead of failing the turn.
-- The notice text is unchanged (`terminated` / `Anthropic stream ended before message_stop`): the cause detail is gone before the adapter sees it, so `errorChain` has nothing more to render. Only the routed `code` improved.
+- A mid-stream transport drop, a pre-terminal stream truncation, and an abandoned response on an unresolved `finish_reason` now carry `TRANSPORT`, so a composed `llm-retry` policy retries them by default instead of failing the turn.
+- The notice text is unchanged (`terminated` / `Anthropic stream ended before message_stop` / `Provider finish_reason: error`): the cause detail is gone before the adapter sees it, so `errorChain` has nothing more to render. Only the routed `code` improved.
+- A provider that answers `content_filter` still fails the turn on the first attempt rather than burning the retry budget; the class is reserved for interrupted responses.
 - Classification remains string-matching and provider-wording-dependent: a future pi-ai release that rewords these errors would silently fall back to `PI_AI_ERROR` until the patterns are updated. The `XXX` note points at the durable fix (route on a forwarded `code`/`cause`).
