@@ -76,13 +76,27 @@ export interface AutobioMemoryEventData {
   l2: number
   l3: number
   pendingMerges: number
+  /** The bridge call that minted the recollection; absent on stats-only ticks. */
+  attempt?: number
   /** Absent when the tick changed stats without minting a recollection. */
   memory?: AutobioMemoryMint
+}
+
+/** One streamed-text flush from an in-flight memory-formation call. */
+export interface AutobioMemoryProgressEventData {
+  /** Bridge call number within the session runtime; groups one call's flushes. */
+  attempt: number
+  /** Text streamed since the previous flush; empty on the terminal flush. */
+  delta: string
+  /** Present on the call's terminal flush, success or failure. */
+  done?: boolean
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Log-only record of one memory-formation tick that formed memory. */
     'autobio/memory': AutobioMemoryEventData
+    /** Log-only live text stream of an in-flight memory-formation call. */
+    'autobio/memory-progress': AutobioMemoryProgressEventData
   }
 }

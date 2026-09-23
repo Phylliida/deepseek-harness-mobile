@@ -246,7 +246,18 @@ Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/
 'autobio/memory': AutobioMemoryEventData
 ```
 
-Source: [`packages/compaction/compaction-autobiographical/src/types.ts:86`](../packages/compaction/compaction-autobiographical/src/types.ts)
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:96`](../packages/compaction/compaction-autobiographical/src/types.ts)
+
+<a id="autobiomemory-progress--log-only"></a>
+
+#### `autobio/memory-progress` — log-only
+
+```ts persistence-catalog
+/** Log-only live text stream of an in-flight memory-formation call. */
+'autobio/memory-progress': AutobioMemoryProgressEventData
+```
+
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:98`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 ### `command/*`
 

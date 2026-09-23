@@ -44,7 +44,12 @@ interface RuntimeEntry {
   runtime: SessionRuntime
   /** Serialized background compression chain; one strategy tick in flight per session. */
   tickChain: Promise<void>
+  /** Live-stream bookkeeping: the next call's attempt number and unflushed text. */
+  progress: { attempt: number; buffer: string }
 }
+
+/** Buffered progress text flushes at this size, or when the call ends. */
+const PROGRESS_FLUSH_CHARS = 1000
 
 /**
  * Default ceiling for the compile budget when the adapter reports a larger
@@ -168,6 +173,16 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       cwd === undefined ? resolve(this.config.storeRoot) : resolve(cwd, this.config.storeRoot),
       session.id,
     )
+    // Per-session bookkeeping for the bridge's streamed text tap (see onText).
+    // The attempt counter is seeded past every attempt the log already holds,
+    // so a restarted runtime never reuses a row identity.
+    const priorAttempts = session.events
+      .filter(event => event.type === 'autobio/memory-progress')
+      .map(event => event.data.attempt)
+    const progress = {
+      attempt: priorAttempts.length === 0 ? 1 : Math.max(...priorAttempts) + 1,
+      buffer: '',
+    }
     const opening = openSessionRuntime(
       storePath,
       this.config,
@@ -183,9 +198,29 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
           this.ctx.logger.warn(message)
           console.warn(`[compaction-autobiographical] ${message}`)
         },
+        onText: (delta, done) => {
+          // Live memory-formation text for the chat's per-call rows. A flush
+          // appends one log-only event; bookkeeping must never kill the
+          // compression call, so a session that closed mid-call swallows it.
+          progress.buffer += delta
+          if (!done && progress.buffer.length < PROGRESS_FLUSH_CHARS) return
+          try {
+            session.append('autobio/memory-progress', {
+              attempt: progress.attempt,
+              delta: progress.buffer,
+              ...done ? { done: true } : {},
+            })
+          } catch {
+            progress.buffer = ''
+            if (done) progress.attempt += 1
+            return
+          }
+          progress.buffer = ''
+          if (done) progress.attempt += 1
+        },
       }),
       route.model,
-    ).then(runtime => ({ runtime, tickChain: Promise.resolve() }))
+    ).then(runtime => ({ runtime, tickChain: Promise.resolve(), progress }))
     this.runtimes.set(session.id, opening)
     // A failed open (locked store, corrupt archive) must not poison the cache:
     // drop the rejected entry so the next pass retries.
@@ -224,6 +259,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       session.append('autobio/memory', {
         ...stats,
         ...minted === undefined ? {} : {
+          // The mint came from the call that just ended; its attempt was
+          // already spent by the done flush.
+          attempt: entry.progress.attempt - 1,
           memory: { id: minted.id, level: minted.level, content: minted.content, tokens: minted.tokens },
         },
       })
