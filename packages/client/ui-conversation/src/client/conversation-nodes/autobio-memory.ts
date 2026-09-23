@@ -30,6 +30,8 @@ export interface AutobioMemoryNode {
   readonly pendingMerges: number
   /** The recollection the newest tick minted, when it minted one. */
   readonly memory?: AutobioMemoryMint
+  /** Live text of an in-flight memory-formation call, while one streams. */
+  readonly streaming?: string
 }
 
 /** The recollection a tick minted, disclosed by the row on click. */
@@ -48,7 +50,24 @@ interface AutobioMemoryEventData {
   readonly l2: number
   readonly l3: number
   readonly pendingMerges: number
+  readonly attempt?: number
   readonly memory?: AutobioMemoryMint
+}
+
+/** Structural mirror of the engine's progress payload. */
+interface AutobioMemoryProgressData {
+  readonly attempt: number
+  readonly delta: string
+  readonly done?: boolean
+}
+
+/** Read one streamed-text flush, refusing malformed records. */
+function progressOf(data: unknown): AutobioMemoryProgressData | undefined {
+  if (typeof data !== 'object' || data === null) return undefined
+  const record = data as Record<string, unknown>
+  if (typeof record.attempt !== 'number' || typeof record.delta !== 'string') return undefined
+  if (record.done !== undefined && record.done !== true) return undefined
+  return record as unknown as AutobioMemoryProgressData
 }
 
 /** Read the tick payload, refusing records without numeric stats. */
@@ -57,6 +76,7 @@ function memoryOf(data: unknown): AutobioMemoryEventData | undefined {
   const record = data as Record<string, unknown>
   const fields = ['chunksTotal', 'chunksCompressed', 'l1', 'l2', 'l3', 'pendingMerges'] as const
   if (!fields.every(field => typeof record[field] === 'number')) return undefined
+  if (record.attempt !== undefined && typeof record.attempt !== 'number') return undefined
   const mint = mintOf(record.memory)
   return {
     chunksTotal: record.chunksTotal as number,
@@ -65,6 +85,7 @@ function memoryOf(data: unknown): AutobioMemoryEventData | undefined {
     l2: record.l2 as number,
     l3: record.l3 as number,
     pendingMerges: record.pendingMerges as number,
+    ...record.attempt === undefined ? {} : { attempt: record.attempt as number },
     ...mint === undefined ? {} : { memory: mint },
   }
 }
@@ -85,26 +106,79 @@ export const autobioMemoryDefinition: ConversationNodeDefinition<AutobioMemorySt
   kind: 'autobio-memory',
   target: 'chat',
   match: (event) => {
-    // The event type is engine-owned; the loose comparison matches
-    // compactSource's treatment of plugin-owned source fields.
-    if ((event.type as string) !== 'autobio/memory') return null
-    return memoryOf(event.data) === undefined ? null : { id: 'autobio-memory', role: 'update' }
+    // The event types are engine-owned; the loose comparison matches
+    // compactSource's treatment of plugin-owned source fields. One row per
+    // memory-formation call: the call's streamed flushes and the recollection
+    // it mints share the attempt-keyed identity.
+    const type = event.type as string
+    if (type === 'autobio/memory') {
+      const stats = memoryOf(event.data)
+      if (stats === undefined) return null
+      const id = stats.attempt === undefined
+        ? `autobio-memory-tick-${event.seq}`
+        : `autobio-memory-attempt-${stats.attempt}`
+      return { id, role: 'update' }
+    }
+    if (type === 'autobio/memory-progress') {
+      const progress = progressOf(event.data)
+      return progress === undefined ? null : { id: `autobio-memory-attempt-${progress.attempt}`, role: 'update' }
+    }
+    return null
   },
   start: () => ({}),
   update: context => context.state,
   buildViewNode: (context) => {
-    // State carries nothing: the newest loaded tick record wins, whether it
+    // State carries nothing: the newest loaded records win, whether they
     // arrived live, in the initial window, or inside a prepended page. Every
-    // accepted match passed memoryOf, so the payload re-read cannot fail.
+    // accepted match passed its validator, so the payload re-reads cannot fail.
     // oxlint-disable-next-line typescript/no-non-null-assertion -- a context exists only once matched
-    const match = context.matches[context.matches.length - 1]!
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- match() accepted this record through memoryOf
-    const stats = memoryOf(match.event.data)!
-    return chatNode(context, 'autobio-memory', match.event.seq, {
+    const last = context.matches[context.matches.length - 1]!
+
+    // A live stream shows while the newest record is a non-terminal flush:
+    // concatenate the trailing run of flushes from the same bridge call.
+    let streaming: string | undefined
+    if ((last.event.type as string) === 'autobio/memory-progress') {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- match() accepted this record through progressOf
+      const lastProgress = progressOf(last.event.data)!
+      if (lastProgress.done !== true) {
+        const deltas: string[] = []
+        for (let index = context.matches.length - 1; index >= 0; index--) {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded by the loop condition
+          const match = context.matches[index]!
+          // Matches share the attempt-keyed identity, so the run can only end
+          // at the call's own mint record.
+          if ((match.event.type as string) !== 'autobio/memory-progress') break
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- match() accepted this record through progressOf
+          deltas.unshift(progressOf(match.event.data)!.delta)
+        }
+        streaming = deltas.join('')
+      }
+    }
+
+    // Stats and the minted recollection come from the newest tick record; a
+    // stream's first flushes can precede the first completed tick.
+    let stats: AutobioMemoryEventData | undefined
+    for (let index = context.matches.length - 1; index >= 0; index--) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded by the loop condition
+      const match = context.matches[index]!
+      if ((match.event.type as string) !== 'autobio/memory') continue
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- match() accepted this record through memoryOf
+      stats = memoryOf(match.event.data)!
+      break
+    }
+
+    return chatNode(context, 'autobio-memory', last.event.seq, {
       kind: 'autobio-memory',
-      seq: match.event.seq,
-      time: match.event.time,
-      ...stats,
+      seq: last.event.seq,
+      time: last.event.time,
+      chunksTotal: stats?.chunksTotal ?? 0,
+      chunksCompressed: stats?.chunksCompressed ?? 0,
+      l1: stats?.l1 ?? 0,
+      l2: stats?.l2 ?? 0,
+      l3: stats?.l3 ?? 0,
+      pendingMerges: stats?.pendingMerges ?? 0,
+      ...stats?.memory === undefined ? {} : { memory: stats.memory },
+      ...streaming === undefined ? {} : { streaming },
     })
   },
 }

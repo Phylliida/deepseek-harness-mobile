@@ -80,15 +80,21 @@ describe('MembraneBridge.complete', () => {
       ],
     }))
 
-    const [agent, user, named, prefixed] = calls[0]!.messages
+    const [agentResult1, agentResult2, agent, user, named, prefixed] = calls[0]!.messages
+    // A message mixing tool results with other content splits so every result
+    // rides its own message ahead of the remainder.
+    expect(agentResult1!.content).toEqual([
+      { type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'plain result' }], isError: true },
+    ])
+    expect(agentResult2!.content).toEqual([
+      { type: 'tool-result', toolCallId: 'call-2', content: [{ type: 'text', text: 'part one\npart two' }] },
+    ])
     expect(agent!.role).toBe('assistant')
     expect(agent!.source).toEqual({ kind: 'model', provider: 'test', model: 'test-model' })
     expect(agent!.content).toEqual([
       { type: 'text', text: 'recall this' },
       { type: 'reasoning', text: 'pondering' },
       { type: 'tool-call', id: 'call-1', name: 'echo', arguments: '{"a":1}' },
-      { type: 'tool-result', toolCallId: 'call-1', content: [{ type: 'text', text: 'plain result' }], isError: true },
-      { type: 'tool-result', toolCallId: 'call-2', content: [{ type: 'text', text: 'part one\npart two' }] },
       { type: 'text', text: '[image omitted from memory-formation transcript]' },
     ])
     expect(user!.role).toBe('user')
@@ -99,6 +105,84 @@ describe('MembraneBridge.complete', () => {
     ])
     expect(prefixed!.content).toEqual([{ type: 'text', text: 'Zulip Bot: hello' }])
     expect(result.rawAssistantText).toBe('')
+  })
+
+  it('splits a mixed user message so tool results precede its text on the wire', async () => {
+    // The DeepSeek serializer emits a mixed user message's text before its
+    // role:'tool' entries, orphaning them from the assistant tool_calls.
+    const { llm, calls } = scriptedLlm([STOP])
+    await bridge(llm).complete(request({
+      messages: [
+        {
+          participant: AGENT,
+          content: [{ type: 'tool_use', id: 'call-1', name: 'echo', input: {} }],
+        },
+        {
+          participant: 'user',
+          content: [
+            { type: 'tool_result', toolUseId: 'call-1', content: 'first' },
+            { type: 'text', text: 'between the calls' },
+            { type: 'tool_result', toolUseId: 'call-2', content: 'second' },
+          ],
+        },
+        {
+          participant: 'user',
+          // A message of nothing but tool results stays one message.
+          content: [
+            { type: 'tool_result', toolUseId: 'call-3', content: 'third' },
+            { type: 'tool_result', toolUseId: 'call-4', content: 'fourth' },
+          ],
+        },
+      ],
+    }))
+
+    const shapes = calls[0]!.messages.map(message => message.content.map(block => block.type))
+    expect(shapes).toEqual([
+      ['tool-call'],
+      ['tool-result'],
+      ['tool-result'],
+      ['text'],
+      ['tool-result', 'tool-result'],
+    ])
+  })
+
+  it('taps streamed text deltas per attempt, with a terminal flush', async () => {
+    const { llm } = scriptedLlm([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: 'thinking stays untapped' },
+      { type: 'block-end', index: 0, block: { type: 'reasoning', text: 'thinking stays untapped' } },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: 'I recall ' },
+      { type: 'text-delta', index: 1, text: 'the exchange.' },
+      { type: 'block-end', index: 1, block: { type: 'text', text: 'I recall the exchange.' } },
+      STOP,
+    ])
+    const taps: [string, boolean][] = []
+    const instance = bridge(llm, { onText: (delta, done) => { taps.push([delta, done]) } })
+    await instance.complete(request())
+    await instance.complete(request())
+    expect(taps).toEqual([
+      ['I recall ', false],
+      ['the exchange.', false],
+      ['', true],
+      ['I recall ', false],
+      ['the exchange.', false],
+      ['', true],
+    ])
+  })
+
+  it('flushes the terminal tap when the stream throws', async () => {
+    const llm = {
+      stream: async function* (): AsyncGenerator<StreamChunk> {
+        yield { type: 'text-delta', index: 0, text: 'partial' }
+        throw new Error('transport closed')
+      },
+      listProviders: () => [],
+    } as unknown as LlmRuntime
+    const taps: [string, boolean][] = []
+    const instance = bridge(llm, { onText: (delta, done) => { taps.push([delta, done]) } })
+    await expect(instance.complete(request())).rejects.toThrow('transport closed')
+    expect(taps).toEqual([['partial', false], ['', true]])
   })
 
   it('reassembles streamed blocks, keeping unparseable tool arguments verbatim', async () => {

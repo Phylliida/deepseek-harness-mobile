@@ -21,7 +21,10 @@ const ENTER: PreStepDecision = { kind: 'enter', messages: [] }
 class MemoryAdapter extends LlmAdapter {
   calls = 0
 
-  constructor(private readonly endsInError = false) {
+  constructor(
+    private readonly endsInError = false,
+    public text = 'I recall the earlier exchange about lorem ipsum.',
+  ) {
     super()
   }
 
@@ -43,7 +46,7 @@ class MemoryAdapter extends LlmAdapter {
       }
       return
     }
-    const text = 'I recall the earlier exchange about lorem ipsum.'
+    const text = this.text
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text }
     yield { type: 'block-end', index: 0, block: { type: 'text', text } }
@@ -593,6 +596,42 @@ describe('AutobiographicalCompactionEngine wiring', () => {
     const aborted = AbortSignal.abort()
     await expect(engine.compactIfNeeded(agent, 'pressure', aborted)).resolves.toBeNull()
     expect(session.events.some(event => event.type === 'compaction/start')).toBe(false)
+  })
+
+  it('streams live memory-formation text as throttled progress events', async () => {
+    const { engine, adapter } = setup({ contextWindowTokens: 40, reserveTokens: 39 })
+    adapter.text = 'x'.repeat(1500)
+    const session = conversation(12)
+    const agent = { session, options: ROUTE } as Agent
+
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    const progress = session.events.filter(event => event.type === 'autobio/memory-progress')
+    expect(progress.length).toBeGreaterThanOrEqual(2)
+    // The oversized delta crosses the flush threshold on its own...
+    expect(progress[0]?.data).toMatchObject({ attempt: 1, delta: 'x'.repeat(1500) })
+    expect(progress[0]?.data.done).toBeUndefined()
+    // ...and the call's end always lands a terminal flush.
+    expect(progress.at(-1)?.data).toMatchObject({ done: true })
+  })
+
+  it('keeps compressing when the progress row cannot be logged', async () => {
+    const { engine, adapter, warnings } = setup({ contextWindowTokens: 40, reserveTokens: 39 })
+    // An intermediate flush (done=false) and the terminal flush (done=true)
+    // both throw and are both swallowed.
+    adapter.text = 'x'.repeat(1500)
+    const session = conversation(12)
+    const agent = { session, options: ROUTE } as Agent
+    // A session closing mid-call must not let the status row kill the call.
+    const realAppend = session.append.bind(session)
+    session.append = ((type: string, ...rest: unknown[]) => {
+      if (type === 'autobio/memory-progress') throw new Error('session closed')
+      return (realAppend as (t: string, ...r: unknown[]) => unknown)(type, ...rest)
+    }) as Session['append']
+
+    await expect(engine.compactIfNeeded(agent, 'pressure', SIGNAL)).resolves.toBeNull()
+    expect(warnings.some(message => message.startsWith(
+      'autobiographical frontier planning found no layout that fits: ',
+    ))).toBe(true)
   })
 
   it('logs a stats-only memory event when a tick changes stats without minting', async () => {

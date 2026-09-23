@@ -106,6 +106,9 @@ describe('AutobiographicalCompactionEngine', () => {
     const minted = memoryEvents.find(event => event.data.memory !== undefined)
     expect(minted?.data.memory?.id).toMatch(/^L1-\d+$/)
     expect(minted?.data.memory?.content.length).toBeGreaterThan(0)
+    // The mint is stamped with the call attempt that produced it, so the chat
+    // folds the call's streamed text and its recollection into one row.
+    expect(minted?.data.attempt).toBeGreaterThanOrEqual(1)
 
     const surfaceTexts = session.deriveMessages()
       .flatMap(message => message.content)

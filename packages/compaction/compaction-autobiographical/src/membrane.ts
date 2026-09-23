@@ -20,6 +20,13 @@ export interface MembraneBridgeOptions {
   agentParticipant: string
   /** Diagnostic sink for failed compression calls; defaults to console.warn. */
   warn?: (message: string) => void
+  /**
+   * Text-delta tap for the chat's live memory-formation row: the bridge
+   * reports each streamed text delta and one final zero-length delta
+   * (`done: true`) when the call ends, however it ends. Call boundaries are
+   * exactly the done flushes; the engine owns attempt numbering.
+   */
+  onText?: (delta: string, done: boolean) => void
 }
 
 /**
@@ -72,6 +79,7 @@ export class MembraneBridge {
   private readonly maxTokens: number | undefined
   private readonly agentParticipant: string
   private readonly warn: (message: string) => void
+  private readonly onText: ((delta: string, done: boolean) => void) | undefined
 
   constructor(options: MembraneBridgeOptions) {
     this.llm = options.llm
@@ -82,6 +90,7 @@ export class MembraneBridge {
     this.warn = options.warn ?? ((message: string) => {
       console.warn(`[compaction-autobiographical] ${message}`)
     })
+    this.onText = options.onText
   }
 
   /** Run one non-streaming completion; the response shape matches membrane's contract. */
@@ -95,7 +104,7 @@ export class MembraneBridge {
     details: Record<string, never>
     raw: Record<string, never>
   }> {
-    const messages: Message[] = request.messages.map((message) => {
+    const mapped: Message[] = request.messages.map((message) => {
       const role = message.participant === this.agentParticipant ? 'assistant' : 'user'
       const named = message.participant !== 'user' && role === 'user'
       const blocks = message.content
@@ -117,6 +126,24 @@ export class MembraneBridge {
       })
     })
 
+    // The CM transcript packs text and tool results into one message, but the
+    // DeepSeek wire serializer emits a mixed user message's text BEFORE its
+    // role:'tool' entries — orphaning them from the assistant tool_calls, and
+    // the provider rejects the request. Split so every tool result rides its
+    // own message, restoring the serializer's documented invariant.
+    const messages: Message[] = mapped.flatMap((message) => {
+      const results = message.content.filter(block => block.type === 'tool-result')
+      if (results.length === 0 || results.length === message.content.length) return [message]
+      return [
+        ...results.map(result => createMessage({ role: message.role, content: [result], source: message.source })),
+        createMessage({
+          role: message.role,
+          content: message.content.filter(block => block.type !== 'tool-result'),
+          source: message.source,
+        }),
+      ]
+    })
+
     const assembler = new BlockAssembler()
     // The configured cap pins the generation budget: the library clamps the
     // strategy's request down to it (compressionMaxTokens), and the bridge
@@ -136,6 +163,7 @@ export class MembraneBridge {
         ...request.config.temperature === undefined ? {} : { temperature: request.config.temperature },
         purpose: 'compaction',
       })) {
+        if (chunk.type === 'text-delta') this.onText?.(chunk.text, false)
         assembler.push(chunk)
       }
     } catch (error: unknown) {
@@ -144,6 +172,8 @@ export class MembraneBridge {
       const message = error instanceof Error ? error.message : String(error)
       this.warn(`compression call threw: ${message}`)
       throw error
+    } finally {
+      this.onText?.('', true)
     }
 
     const blocks = assembler.blocks()

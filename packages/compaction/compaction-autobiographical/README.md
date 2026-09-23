@@ -114,7 +114,7 @@ Write the memory of events since the most recent memory system notification. Spe
 
 #### Token effect
 
-Each recollection costs one inference capped by `maxTokens` — one per compressed chunk, plus one per merge into a coarser level — and its input is the mirrored history plus the framing above. Compression runs one chunk per serialized tick; each tick that forms memory appends an `autobio/memory` event carrying the minted recollection, which the chat renders as one updating status row that discloses the newest memory on click. Ticks trickle in the background while the surface fits its budget, but when the picker finds no fitting layout the turn waits: catch-up ticks run on the inference thread until a layout fits, and only a tick that forms nothing new (nothing left to compress) releases the pass to leave the surface unchanged.
+Each recollection costs one inference capped by `maxTokens` — one per compressed chunk, plus one per merge into a coarser level — and its input is the mirrored history plus the framing above. Compression runs one chunk per serialized tick; each tick that forms memory appends an `autobio/memory` event carrying the minted recollection, which the chat renders as one status row per memory-formation call: the row streams the in-flight call's text (`autobio/memory-progress` flushes), then settles into the minted recollection, disclosed on click. Ticks trickle in the background while the surface fits its budget, but when the picker finds no fitting layout the turn waits: catch-up ticks run on the inference thread until a layout fits, and only a tick that forms nothing new (nothing left to compress) releases the pass to leave the surface unchanged.
 
 #### KV Cache effect
 

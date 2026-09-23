@@ -765,8 +765,8 @@ describe('built-in conversation node Definitions', () => {
     expect(node(snapshot(plain), 'compaction')).toBeUndefined()
   })
 
-  it('keeps one memory-formation row at the newest tick record', () => {
-    const tick = (seq: number, l1: number) => at(seq, 'autobio/memory', {
+  it('keeps one memory-formation row per call', () => {
+    const tick = (seq: number, attempt: number, l1: number) => at(seq, 'autobio/memory', {
       chunksTotal: 12,
       chunksCompressed: l1,
       compressionCount: l1,
@@ -774,21 +774,24 @@ describe('built-in conversation node Definitions', () => {
       l2: 0,
       l3: 0,
       pendingMerges: 0,
+      attempt,
     })
     const value = assembler([
       at(3, 'user/message', textMessage('u1', 'hello'), { surfaceOp: 'append' }),
-      tick(10, 1),
-      tick(20, 2),
+      tick(10, 1, 1),
+      tick(20, 2, 2),
     ])
     const nodes = [...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory')
-    expect(nodes).toHaveLength(1)
-    expect(nodes[0]?.data).toMatchObject({ seq: 20, l1: 2, chunksTotal: 12 })
+    expect(nodes).toHaveLength(2)
+    expect(nodes[0]?.data).toMatchObject({ seq: 10, l1: 1, chunksTotal: 12 })
+    expect(nodes[1]?.data).toMatchObject({ seq: 20, l1: 2, chunksTotal: 12 })
 
-    // A malformed record neither matches nor disturbs the row.
+    // A malformed record neither matches nor disturbs the rows.
     value.append(at(21, 'autobio/memory', { note: 'not a stats record' }))
     value.append(at(22, 'autobio/memory', 'not even an object'))
     value.flush()
-    expect(snapshot(value).nodes.get(nodes[0]!.key)?.data).toMatchObject({ seq: 20, l1: 2 })
+    expect([...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory'))
+      .toHaveLength(2)
   })
 
   it.each([
@@ -813,6 +816,50 @@ describe('built-in conversation node Definitions', () => {
     const carried = (row?.data as { memory?: unknown }).memory
     if (expected === undefined) expect(carried).toBeUndefined()
     else expect(carried).toMatchObject(expected)
+  })
+
+  it('shows live memory-formation text while a call streams', () => {
+    const tick = (attempt: number, id: string) => ({
+      chunksTotal: 12, chunksCompressed: 1, compressionCount: 1,
+      l1: 1, l2: 0, l3: 0, pendingMerges: 0,
+      attempt,
+      memory: { id, level: 1, content: `memory ${id}`, tokens: 5 },
+    })
+    const flush = (seq: number, attempt: number, delta: string, done?: true) => at(seq, 'autobio/memory-progress', {
+      attempt, delta, ...done === undefined ? {} : { done },
+    })
+
+    // Two calls, interleaved in the log as they really arrive: each streams
+    // under its own row and settles into its own mint.
+    const value = assembler([
+      at(3, 'user/message', textMessage('u1', 'hello'), { surfaceOp: 'append' }),
+      flush(4, 1, 'I recall '),
+      flush(5, 1, 'the work.', true),
+      at(6, 'autobio/memory', tick(1, 'L1-0')),
+      flush(7, 2, 'second call '),
+    ])
+    const rows = [...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.data).toMatchObject({ seq: 6, l1: 1 })
+    expect((rows[0]?.data as { streaming?: string }).streaming).toBeUndefined()
+    expect(rows[1]?.data).toMatchObject({ streaming: 'second call ', chunksTotal: 0, l1: 0 })
+
+    // The second call's mint settles its row; the first row is untouched.
+    value.append(at(8, 'autobio/memory', tick(2, 'L1-1')))
+    value.flush()
+    const settled = [...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory')
+    expect(settled).toHaveLength(2)
+    expect(settled[1]?.data).toMatchObject({ seq: 8, l1: 1 })
+    expect((settled[1]?.data as { streaming?: string }).streaming).toBeUndefined()
+
+    // Malformed progress records never match.
+    value.append(at(9, 'autobio/memory-progress', { attempt: 'one', delta: 'x' }))
+    value.append(at(10, 'autobio/memory-progress', { attempt: 3, delta: 5 }))
+    value.append(at(11, 'autobio/memory-progress', 'junk'))
+    value.append(at(12, 'autobio/memory-progress', { attempt: 3, delta: 'x', done: false }))
+    value.flush()
+    expect([...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory'))
+      .toHaveLength(2)
   })
 
   it('ignores legacy retry and code-dispatch events without correlation ids', () => {
