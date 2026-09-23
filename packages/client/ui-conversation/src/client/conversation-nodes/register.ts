@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { registerAssistantConversationNode } from './assistant.ts'
+import { registerAutobioMemoryConversationNode } from './autobio-memory.ts'
 import { registerChatConversationView } from './chat-snapshot-builder.ts'
 import { registerCommandConversationNode } from './command.ts'
 import { registerCompactionConversationNode } from './compaction.ts'
@@ -23,6 +24,7 @@ export function registerConversationNodes(ctx: Context): void {
   registerToolConversationNode(ctx)
   registerCommandConversationNode(ctx)
   registerCompactionConversationNode(ctx)
+  registerAutobioMemoryConversationNode(ctx)
   registerRetryConversationNode(ctx)
   registerTurnErrorConversationNode(ctx)
   registerTurnMaxTokensConversationNode(ctx)

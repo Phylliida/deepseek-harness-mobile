@@ -88,6 +88,31 @@ function assistantMessage(id: string, text: string) {
 }
 
 describe('Trajectory conversation Definitions', () => {
+  it('ignores compaction fold replacements stamped with a step identity', () => {
+    // Fold nodes land at pre-step time carrying the upcoming step's turn/step;
+    // consuming one as a step update fed the group an update before its
+    // step/start, which the assembler rejects (history paging crashed).
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'assistant/message', {
+        turn: 1,
+        step: 1,
+        message: assistantMessage('recall-1', '[Recall L1-0] I recall the earlier exchange.'),
+      }, { surfaceOp: { op: 'replace', start: 10, end: 12 } }),
+    ])
+    expect(snapshot(value).requests.filter(request => request.purpose === 'assistant')).toEqual([])
+
+    // The step itself still starts and streams normally afterwards.
+    value.append(at(3, 'step/start', { turn: 1, step: 1 }))
+    value.append(at(4, 'assistant/chunk', {
+      turn: 1,
+      step: 1,
+      chunk: { type: 'text-delta', index: 0, text: 'live step' },
+    }))
+    value.flush()
+    expect(snapshot(value).partial?.blocks).toEqual([{ kind: 'text', text: 'live step' }])
+  })
+
   it('assembles streaming usage, preserves retry facts, and materializes interruption', () => {
     const value = assembler([
       at(1, 'turn/start', { turn: 1 }),

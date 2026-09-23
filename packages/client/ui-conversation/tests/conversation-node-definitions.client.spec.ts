@@ -7,6 +7,7 @@ import { ConversationNodeAssembler } from '@deepseek-ai/dsh-client-runtime/clien
 import { assistantDefinition } from '../src/client/conversation-nodes/assistant.ts'
 import { chatViewDefinition } from '../src/client/conversation-nodes/chat-snapshot-builder.ts'
 import { commandDefinition } from '../src/client/conversation-nodes/command.ts'
+import { autobioMemoryDefinition } from '../src/client/conversation-nodes/autobio-memory.ts'
 import { compactionDefinition } from '../src/client/conversation-nodes/compaction.ts'
 import { unknownFallbackDefinition } from '../src/client/conversation-nodes/fallback.ts'
 import { nextStepInboxDefinition, nextTurnInboxDefinition } from '../src/client/conversation-nodes/inbox.ts'
@@ -28,6 +29,7 @@ const DEFINITIONS: readonly ConversationNodeDefinition[] = [
   toolDefinition,
   commandDefinition,
   compactionDefinition,
+  autobioMemoryDefinition,
   retryDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
@@ -718,6 +720,99 @@ describe('built-in conversation node Definitions', () => {
     ], true)
 
     expect(node(snapshot(value), 'compaction')).toBeUndefined()
+  })
+
+  it('renders an autobiographical recollection fold as a compaction marker', () => {
+    const value = assembler([
+      at(20, 'compaction/start', { compactionId: 'autobio-1', turn: 3 }),
+      at(21, 'compaction/summary', {
+        compactionId: 'autobio-1',
+        summary: [{ type: 'text', text: '[Recall L1-0] I recall the earlier exchange.' }],
+        shadowedSeqs: [3, 4, 5],
+        shadowedTokenCount: 87,
+      }),
+      at(22, 'assistant/message', {
+        turn: 3,
+        step: 1,
+        message: {
+          ...assistantMessage('recall-1', '[Recall L1-0] I recall the earlier exchange.'),
+          source: {
+            kind: 'model',
+            provider: 'fake',
+            model: 'fake',
+            compactionId: 'autobio-1',
+          },
+        },
+      }, { surfaceOp: { op: 'replace', start: 3, end: 5 } }),
+      at(23, 'compaction/end', { compactionId: 'autobio-1', turn: 3 }),
+    ], true)
+
+    const marker = node(snapshot(value), 'compaction')
+    expect(marker?.data).toMatchObject({
+      summary: '[Recall L1-0] I recall the earlier exchange.',
+      summaryEventSeq: 21,
+      shadowedItemCount: 3,
+      shadowedTokenCount: 87,
+    })
+    // A plain assistant replacement without a compactionId stays invisible.
+    const plain = assembler([
+      at(22, 'assistant/message', {
+        turn: 3,
+        step: 1,
+        message: assistantMessage('recall-plain', '[Recall L1-0] plain'),
+      }, { surfaceOp: { op: 'replace', start: 3, end: 5 } }),
+    ], true)
+    expect(node(snapshot(plain), 'compaction')).toBeUndefined()
+  })
+
+  it('keeps one memory-formation row at the newest tick record', () => {
+    const tick = (seq: number, l1: number) => at(seq, 'autobio/memory', {
+      chunksTotal: 12,
+      chunksCompressed: l1,
+      compressionCount: l1,
+      l1,
+      l2: 0,
+      l3: 0,
+      pendingMerges: 0,
+    })
+    const value = assembler([
+      at(3, 'user/message', textMessage('u1', 'hello'), { surfaceOp: 'append' }),
+      tick(10, 1),
+      tick(20, 2),
+    ])
+    const nodes = [...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory')
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.data).toMatchObject({ seq: 20, l1: 2, chunksTotal: 12 })
+
+    // A malformed record neither matches nor disturbs the row.
+    value.append(at(21, 'autobio/memory', { note: 'not a stats record' }))
+    value.append(at(22, 'autobio/memory', 'not even an object'))
+    value.flush()
+    expect(snapshot(value).nodes.get(nodes[0]!.key)?.data).toMatchObject({ seq: 20, l1: 2 })
+  })
+
+  it.each([
+    ['a minted recollection', { id: 'L1-4', level: 1, content: 'I remember it.', tokens: 40 }, { id: 'L1-4', content: 'I remember it.' }],
+    ['a non-object memory', 'garbage', undefined],
+    ['a null memory', null, undefined],
+    ['a memory without an id', { id: 4, level: 1, content: 'x', tokens: 1 }, undefined],
+    ['a memory without content', { id: 'L1-4', level: 1, content: 4, tokens: 1 }, undefined],
+    ['a memory without a level', { id: 'L1-4', level: '1', content: 'x', tokens: 1 }, undefined],
+    ['a memory without tokens', { id: 'L1-4', level: 1, content: 'x', tokens: '1' }, undefined],
+  ])('carries %s on the row', (_label, memory, expected) => {
+    const tick = {
+      chunksTotal: 12, chunksCompressed: 1, compressionCount: 1,
+      l1: 1, l2: 0, l3: 0, pendingMerges: 0, memory,
+    }
+    const value = assembler([
+      at(3, 'user/message', textMessage('u1', 'hello'), { surfaceOp: 'append' }),
+      at(10, 'autobio/memory', tick),
+    ])
+    const row = [...snapshot(value).nodes.values()].find(candidate => candidate.kind === 'autobio-memory')
+    expect(row?.data).toMatchObject({ seq: 10 })
+    const carried = (row?.data as { memory?: unknown }).memory
+    if (expected === undefined) expect(carried).toBeUndefined()
+    else expect(carried).toMatchObject(expected)
   })
 
   it('ignores legacy retry and code-dispatch events without correlation ids', () => {

@@ -465,6 +465,69 @@ export interface Config {
 
 Source: [`packages/code-runtime/code-runtime-worker-thread/src/index.ts:25`](../packages/code-runtime/code-runtime-worker-thread/src/index.ts)
 
+<a id="deepseek-aidsh-coding-activity"></a>
+
+## `@deepseek-ai/dsh-coding-activity`
+
+```ts config-catalog
+/** Plugin configuration: document location, mirroring the settings provider's. */
+export interface Config {
+  /** Activity document path; defaults to `coding-activity.json` under the harness home. */
+  path?: string
+  /** Harness home used when `path` is omitted; defaults to `$DSH_HOME` or `~/.dsh`. */
+  dshHome?: string
+}
+```
+
+Source: [`packages/coding/coding-activity/src/index.ts:44`](../packages/coding/coding-activity/src/index.ts)
+
+<a id="deepseek-aidsh-compaction-autobiographical"></a>
+
+## `@deepseek-ai/dsh-compaction-autobiographical`
+
+Requires: `llm` · `sessions`
+
+```ts config-catalog
+/** Knobs accepted by the plugin config; every field is optional. */
+export interface AutobiographicalCompactionConfig {
+  /**
+   * Directory root for the per-session Chronicle stores. Relative values
+   * resolve against the session's project directory.
+   */
+  storeRoot?: string
+  /**
+   * Compile budget ceiling, overriding the adapter-reported context window
+   * when set. Without it (and before the first routed request) the pass
+   * skips until a routed window is known.
+   */
+  contextWindowTokens?: number
+  /** Tokens reserved for the model's response inside the compile budget. */
+  reserveTokens?: number
+  /** Verbatim recent tail kept before anything folds; default 30000. */
+  recentWindowTokens?: number
+  /** Verbatim head pinned at the start of the session; default 4000. */
+  headWindowTokens?: number
+  /** Token ceiling for one mirrored message before the library splits it; default 10000. */
+  maxMessageTokens?: number
+  /** Approximate size of one L1 recollection chunk. */
+  targetChunkTokens?: number
+  /** How many same-level summaries merge into the next level. */
+  mergeThreshold?: number
+  /**
+   * Generation budget pinned on every memory-formation call; unset leaves
+   * the strategy's own request size. Raise it for long-reasoning models —
+   * thinking shares this budget with the recollection text.
+   */
+  maxTokens?: number
+  /** Frontier planning policy; `kv-stable` minimizes prompt-cache perturbation (default). */
+  foldingStrategy?: 'kv-stable' | 'flat-profile' | 'oldest-first'
+  /** Register the step-boundary folding listener. */
+  auto?: boolean
+}
+```
+
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:8`](../packages/compaction/compaction-autobiographical/src/types.ts)
+
 <a id="deepseek-aidsh-compaction-basic"></a>
 
 ## `@deepseek-ai/dsh-compaction-basic`
@@ -492,7 +555,7 @@ export interface CompactionPolicyConfig {
   summarizationProvider?: string
   /** Summary model; set together with `summarizationProvider`, or inherit the conversation target. */
   summarizationModel?: string
-  /** Provider generation cap for summarization. Defaults to `8192`. */
+  /** Provider generation cap for summarization. Defaults to `8192`; `0` omits the cap so the provider applies the model's own maximum. */
   maxTokens?: number
   /** Extra attempts after the first compaction when pressure remains above threshold. Defaults to `1`. */
   compactionRetries?: number
@@ -3176,6 +3239,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
+- `@deepseek-ai/dsh-command-autobio` — requires `commands` · `compaction` ([`packages/compaction/command-autobio/src/index.ts`](../packages/compaction/command-autobio/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))
 - `@deepseek-ai/dsh-command-feedback` — requires `commands` ([`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts))
 - `@deepseek-ai/dsh-command-goal` — requires `commands` · `goals` ([`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts))
