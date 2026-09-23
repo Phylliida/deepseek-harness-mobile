@@ -73,6 +73,11 @@ function commandFromDone(match: ConversationMatch, previous?: CommandNode): Comm
 
 /**
  * Read correlation identity from a compaction replacement checkpoint.
+ *
+ * Two producers stamp one: the `/compact` backend writes a `user/message`
+ * checkpoint sourced from its plugin, and the autobiographical backend writes
+ * its recollection fold as an `assistant/message` replacement whose model
+ * source carries the compactionId alongside the voice provenance.
  * @param event - candidate Session event.
  * @returns correlated compaction and optional command identity.
  */
@@ -80,14 +85,19 @@ function compactSource(event: Parameters<ConversationNodeDefinition['match']>[0]
   compactionId: string
   sourceCommandId?: CommandId
 } | undefined {
-  if (event.type !== 'user/message' || !isReplacementSurfaceEvent(event)) return undefined
-  const source = event.data.source as unknown as {
+  if (event.type !== 'user/message' && event.type !== 'assistant/message') return undefined
+  if (!isReplacementSurfaceEvent(event)) return undefined
+  const message = event.type === 'user/message' ? event.data : event.data.message
+  const source = message.source as unknown as {
     kind?: unknown
     plugin?: unknown
     compactionId?: unknown
     sourceCommandId?: CommandId
   }
-  if (source.kind !== 'plugin' || source.plugin !== COMPACT_PLUGIN || typeof source.compactionId !== 'string') return undefined
+  if (typeof source.compactionId !== 'string') return undefined
+  const recognized = source.kind === 'plugin' && source.plugin === COMPACT_PLUGIN
+    || event.type === 'assistant/message' && source.kind === 'model'
+  if (!recognized) return undefined
   return {
     compactionId: source.compactionId,
     ...source.sourceCommandId === undefined ? {} : { sourceCommandId: source.sourceCommandId },

@@ -4,8 +4,8 @@ import type {
   ConversationNodeContext, ConversationNodeDefinition, PartialAssistant, RequestView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import {
-  displayFailureMessage, emptyAssistantBlock, isTokenDelta, toAssistantBlock,
-  toAssistantBlocks,
+  displayFailureMessage, emptyAssistantBlock, isAppendSurfaceEvent, isTokenDelta,
+  toAssistantBlock, toAssistantBlocks,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { trajectoryNode } from './trajectory-definition-common.ts'
 
@@ -283,7 +283,11 @@ const trajectoryAssistantDefinition: ConversationNodeDefinition<AssistantState> 
       return { id: `${event.data.turn}:${event.data.step}`, role: 'start' }
     }
     if (event.type === 'assistant/chunk'
-      || event.type === 'assistant/message'
+      // Compaction fold nodes are assistant/message replacements stamped with
+      // the upcoming step's turn/step; consuming one as a step update would
+      // overwrite the step's blocks and feed the group an update before its
+      // step/start, which the assembler rejects. Appends only.
+      || (event.type === 'assistant/message' && isAppendSurfaceEvent(event))
       || event.type === 'llm/retry'
       || event.type === 'step/end') {
       return { id: `${event.data.turn}:${event.data.step}`, role: 'update' }

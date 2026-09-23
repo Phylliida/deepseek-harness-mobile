@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/proposed/feature/2026-03-02-autobiographical-compaction-backend.md
+2026-03-02-autobiographical-compaction-backend.md: 3fd996f7f376e0da9c721c963e6a96d8e1f300ae
+2026-03-02-autobiographical-compaction-backend.zh.md: 46962a3c8d08dcff0f103c0375c1e9815e3c59da

@@ -13,6 +13,7 @@ import type { ChatNodeViewProps, ChatViewSlotProps } from '../contract/slots.ts'
 import { ImageGallery, type ImageLoader } from '@deepseek-ai/dsh-client-ui-attachment'
 import { messageImageLabels } from '../image-labels.ts'
 import { CompactionItem } from './CompactionItem.tsx'
+import { AutobioMemoryItem } from './AutobioMemoryItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
@@ -274,6 +275,11 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
 /** Automatic compaction keyed Chat renderer. */
 export const CompactionNodeView = memo(function CompactionNodeView({ node, t }: ChatNodeViewProps<'compaction'>) {
   return <CompactionItem node={node.data} t={t} />
+})
+
+/** Memory-formation status row keyed Chat renderer. */
+export const AutobioMemoryNodeView = memo(function AutobioMemoryNodeView({ node, t }: ChatNodeViewProps<'autobio-memory'>) {
+  return <AutobioMemoryItem node={node.data} t={t} />
 })
 
 /** Correlated retry-chain keyed Chat renderer. */

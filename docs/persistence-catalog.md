@@ -235,6 +235,19 @@ Types: [TokenUsage](subsystems/llm-streaming.md)
 
 Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/types.ts)
 
+### `autobio/*`
+
+<a id="autobiomemory--log-only"></a>
+
+#### `autobio/memory` — log-only
+
+```ts persistence-catalog
+/** Log-only record of one memory-formation tick that formed memory. */
+'autobio/memory': AutobioMemoryEventData
+```
+
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:86`](../packages/compaction/compaction-autobiographical/src/types.ts)
+
 ### `command/*`
 
 <a id="commanddone--log-only"></a>

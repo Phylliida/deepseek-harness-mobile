@@ -71,6 +71,8 @@ minimumReleaseAgeExclude:
   - node-addon-require-builtin-win32-ia32-msvc@0.1.4
   - node-addon-require-builtin-win32-x64-msvc@0.1.4
   - node-addon-require-builtin@0.1.4
+  - '@animalabs/context-manager@0.10.1'
+  - '@animalabs/membrane@0.5.86'
 
 patchedDependencies:
   '@earendil-works/pi-ai@0.82.1': patches/@earendil-works__pi-ai@0.82.1.patch
