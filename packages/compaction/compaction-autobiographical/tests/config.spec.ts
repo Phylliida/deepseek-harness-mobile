@@ -23,6 +23,7 @@ describe('autobiographical compaction config', () => {
     expect(resolveConfig({
       storeRoot: 'custom-store',
       contextWindowTokens: 1000,
+      contextWindowTokensByModel: { 'test-model': 90000 },
       reserveTokens: 1,
       recentWindowTokens: 2,
       headWindowTokens: 3,
@@ -35,6 +36,7 @@ describe('autobiographical compaction config', () => {
     })).toEqual({
       storeRoot: 'custom-store',
       contextWindowTokens: 1000,
+      contextWindowTokensByModel: { 'test-model': 90000 },
       reserveTokens: 1,
       recentWindowTokens: 2,
       headWindowTokens: 3,
@@ -62,10 +64,12 @@ describe('autobiographical compaction config', () => {
       foldingStrategy: 'oldest-first',
       auto: true,
     } as const
-    expect(Config(accepted)).toEqual(accepted)
+    expect(Config(accepted)).toEqual({ ...accepted, contextWindowTokensByModel: {} })
     expect(() => Config({ mergeThreshold: 1 })).toThrow(/mergeThreshold/)
     expect(() => Config({ recentWindowTokens: 0 })).toThrow(/recentWindowTokens/)
     expect(() => Config({ maxMessageTokens: 0 })).toThrow(/maxMessageTokens/)
+    expect(() => Config({ contextWindowTokensByModel: { 'test-model': 'big' as unknown as number } }))
+      .toThrow(/contextWindowTokensByModel/)
     // The strategy union is closed, so an undocumented strategy fails the parse.
     expect(() => Config({ foldingStrategy: 'newest-first' as never })).toThrow(/foldingStrategy/)
   })

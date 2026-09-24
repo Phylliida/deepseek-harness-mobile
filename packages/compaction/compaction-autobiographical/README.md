@@ -29,6 +29,7 @@ Every setting is optional; the window sizes default to the values connectome-hos
 |---|---|---|
 | `storeRoot` | no (default `.dsh/autobio`) | Directory root for the per-session Chronicle stores. |
 | `contextWindowTokens` | no (default: the routed request's window, capped at 65536) | Compile-budget ceiling overriding the adapter-reported context window; also the lever for exercising folding against a small deliberate budget. Without it, and before the first routed request, a pass skips. The default cap keeps the operating point near ~64k — models degrade well before their advertised window — while a smaller routed window always wins. |
+| `contextWindowTokensByModel` | no (default: empty) | Per-model operating ceilings keyed by the session's routed model; beats the 65536 default cap, loses to a configured `contextWindowTokens`. |
 | `reserveTokens` | no (default `8192`) | Tokens reserved for the model's response inside the compile budget. |
 | `recentWindowTokens` | no (default `30000`) | Verbatim recent tail kept before anything folds. |
 | `headWindowTokens` | no (default `4000`) | Verbatim head pinned at the start of the session. |
@@ -114,7 +115,7 @@ Write the memory of events since the most recent memory system notification. Spe
 
 #### Token effect
 
-Each recollection costs one inference capped by `maxTokens` — one per compressed chunk, plus one per merge into a coarser level — and its input is the mirrored history plus the framing above. Compression runs one chunk per serialized tick; each tick that forms memory appends an `autobio/memory` event carrying the minted recollection, which the chat renders as one status row per memory-formation call: the row streams the in-flight call's text (`autobio/memory-progress` flushes), then settles into the minted recollection, disclosed on click. Ticks trickle in the background while the surface fits its budget, but when the picker finds no fitting layout the turn waits: catch-up ticks run on the inference thread until a layout fits, and only a tick that forms nothing new (nothing left to compress) releases the pass to leave the surface unchanged.
+Each recollection costs one inference capped by `maxTokens` — one per compressed chunk, plus one per merge into a coarser level — and its input is the mirrored history plus the framing above. Compression runs one chunk per serialized tick; each tick that forms memory appends an `autobio/memory` event carrying the minted recollection, which the chat renders as one status row per memory-formation call: the row streams the in-flight call's text (`autobio/memory-progress` flushes), then settles into the minted recollection, disclosed on click. Ticks trickle in the background while the surface fits its budget, but when the picker finds no fitting layout the turn waits: catch-up ticks run on the inference thread until a layout fits, and a tick that forms nothing new (nothing left to compress) ends the wait. Even then the fully-folded floor can exceed the budget while the pyramid is mid-formation — shallow layers awaiting merge packs — so the pass retries once at the measured floor and lands the best layout there rather than stranding the session raw; only when even that yields no layout does the pass leave the surface unchanged.
 
 #### KV Cache effect
 

@@ -69,6 +69,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   static Config: z<AutobiographicalCompactionConfig> = z.object({
     storeRoot: z.string(),
     contextWindowTokens: z.number().step(1).min(0),
+    contextWindowTokensByModel: z.dict(z.number().step(1).min(0)),
     reserveTokens: z.number().step(1).min(0),
     recentWindowTokens: z.number().step(1).min(1),
     headWindowTokens: z.number().step(1).min(0),
@@ -304,11 +305,18 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // Default operating point: fold toward ~64k rather than the model's full
     // window — models degrade long before their advertised context. A
     // configured `contextWindowTokens` overrides outright (also the lever for
-    // evaluating folding against a small deliberate budget); without it (and
-    // before the first routed request) the pass skips until a route is known.
-    const routedWindow = session.requestContext()?.contextWindow
+    // evaluating folding against a small deliberate budget), and
+    // `contextWindowTokensByModel` overrides per routed model; without either
+    // (and before the first routed request) the pass skips until a route is known.
+    const routed = session.requestContext()
+    const perModel = routed === undefined
+      ? undefined
+      : this.config.contextWindowTokensByModel?.[routed.model]
     const contextWindow = this.config.contextWindowTokens
-      ?? (routedWindow === undefined ? undefined : Math.min(routedWindow, DEFAULT_OPERATING_WINDOW_TOKENS))
+      ?? perModel
+      ?? (routed?.contextWindow === undefined
+        ? undefined
+        : Math.min(routed.contextWindow, DEFAULT_OPERATING_WINDOW_TOKENS))
     if (contextWindow === undefined) return null
     const budget = { maxTokens: contextWindow, reserveForResponse: this.config.reserveTokens }
 
@@ -318,18 +326,47 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // time, until a layout fits or a tick forms no new memory (nothing left
     // to compress, so waiting longer cannot help).
     let lastError: string | null = null
+    let floorTokens: number | undefined
     let preview: ReturnType<SessionRuntime['manager']['previewContext']> | null
     for (;;) {
       try {
         preview = await this.tryPreview(entry, budget)
       } catch (error: unknown) {
         lastError = error instanceof Error ? error.message : String(error)
+        // OverBudgetError carries the picker's measured floor; keep the
+        // latest — the converged measurement after the catch-up drains.
+        const actual = (error as { actual?: unknown }).actual
+        if (typeof actual === 'number') floorTokens = actual
         preview = null
       }
       if (preview !== null && preview.entries !== undefined) break
+      if (preview !== null && !preview.fits) floorTokens = preview.finalTokens
       if (signal.aborted) return null
       const progressed = await this.runTick(session, entry)
       if (!progressed) break
+    }
+    let foldedAtFloor: number | undefined
+    if ((preview === null || preview.entries === undefined)
+      && floorTokens !== undefined && floorTokens > budget.maxTokens) {
+      // The fully-folded surface can exceed the configured budget while the
+      // pyramid is mid-formation (shallow layers awaiting merge packs).
+      // Refusing every fold until merges catch up strands the session raw,
+      // so land the picker's best layout at its own measured floor instead.
+      try {
+        // The floor is measured against the budget AFTER the response
+        // reserve (and the library's emission grace), so the raised budget
+        // must hand the reserve back on top.
+        const raised = await this.tryPreview(entry, {
+          maxTokens: floorTokens + budget.reserveForResponse,
+          reserveForResponse: budget.reserveForResponse,
+        })
+        if (raised !== null && raised.entries !== undefined) {
+          foldedAtFloor = floorTokens
+          preview = raised
+        }
+      } catch {
+        // Fall through to the unchanged-surface warning below.
+      }
     }
     if (preview === null || preview.entries === undefined) {
       // Nothing foldable remains and still no layout fits; the turn proceeds
@@ -348,6 +385,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 
     const ops = planFolds(session, entry.runtime, preview.entries)
     if (ops === null || ops.length === 0) return null
+    if (foldedAtFloor !== undefined) {
+      this.warn(`autobiographical frontier floor (${foldedAtFloor} tokens) exceeds the ${budget.maxTokens}-token budget; folding at the floor until merges deepen the pyramid`)
+    }
     return this.executeFolds(session, ops, turn, step)
   }
 
