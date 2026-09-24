@@ -116,6 +116,12 @@ export async function openSessionRuntime(
     ...config.targetChunkTokens === undefined ? {} : { targetChunkTokens: config.targetChunkTokens },
     ...config.mergeThreshold === undefined ? {} : { mergeThreshold: config.mergeThreshold },
     foldingStrategy: config.foldingStrategy,
+    // The bridge strips reasoning carriers from emitted folds whenever the
+    // strip is smaller, so pairs that DO retain carriers (small-thinking
+    // summaries) must be priced at the stripped render too — under the
+    // library default ('full') they price at the stored thinking, which
+    // overstates every such pair the planner weighs against a raw chunk.
+    carrierPolicy: 'live-strip',
   })
   const manager = await ContextManager.open({
     path: storePath,

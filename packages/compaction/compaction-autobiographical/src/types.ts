@@ -17,6 +17,8 @@ export interface AutobiographicalCompactionConfig {
    * skips until a routed window is known.
    */
   contextWindowTokens?: number
+  /** Per-model operating ceilings, keyed by the session's routed model; beats the ~64k default. */
+  contextWindowTokensByModel?: Record<string, number>
   /** Tokens reserved for the model's response inside the compile budget. */
   reserveTokens?: number
   /** Verbatim recent tail kept before anything folds; default 30000. */
@@ -48,6 +50,8 @@ export interface AutobiographicalCompactionConfig {
 export interface ResolvedAutobiographicalConfig {
   storeRoot: string
   contextWindowTokens?: number
+  /** Per-model operating ceilings, keyed by the session's routed model; beats the ~64k default. */
+  contextWindowTokensByModel?: Record<string, number>
   reserveTokens: number
   recentWindowTokens: number
   headWindowTokens: number

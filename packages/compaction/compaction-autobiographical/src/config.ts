@@ -27,6 +27,9 @@ export function resolveConfig(
     ...config.contextWindowTokens === undefined
       ? {}
       : { contextWindowTokens: config.contextWindowTokens },
+    ...config.contextWindowTokensByModel === undefined
+      ? {}
+      : { contextWindowTokensByModel: config.contextWindowTokensByModel },
     reserveTokens: config.reserveTokens ?? 8192,
     recentWindowTokens: config.recentWindowTokens ?? 30_000,
     headWindowTokens: config.headWindowTokens ?? 4000,

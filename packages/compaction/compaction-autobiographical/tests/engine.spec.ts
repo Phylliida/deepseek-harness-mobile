@@ -20,6 +20,8 @@ const ENTER: PreStepDecision = { kind: 'enter', messages: [] }
 /** Adapter answering every memory-formation call with a fixed recollection. */
 class MemoryAdapter extends LlmAdapter {
   calls = 0
+  /** Reasoning characters to emit ahead of the text (0 = thinking-free). */
+  thinking = 0
 
   constructor(
     private readonly endsInError = false,
@@ -47,10 +49,20 @@ class MemoryAdapter extends LlmAdapter {
       return
     }
     const text = this.text
-    yield { type: 'block-start', index: 0, blockType: 'text' }
-    yield { type: 'text-delta', index: 0, text }
-    yield { type: 'block-end', index: 0, block: { type: 'text', text } }
-    yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } }
+    const reasoning = 'thinking '.repeat(Math.ceil(this.thinking / 9)).slice(0, this.thinking)
+    const blocks = reasoning.length === 0 ? 1 : 2
+    if (reasoning.length > 0) {
+      yield { type: 'block-start', index: 0, blockType: 'reasoning' }
+      yield { type: 'reasoning-delta', index: 0, text: reasoning }
+      yield { type: 'block-end', index: 0, block: { type: 'reasoning', text: reasoning } }
+    }
+    yield { type: 'block-start', index: blocks - 1, blockType: 'text' }
+    yield { type: 'text-delta', index: blocks - 1, text }
+    yield { type: 'block-end', index: blocks - 1, block: { type: 'text', text } }
+    yield {
+      type: 'usage',
+      usage: { inputTokens: 10, outputTokens: Math.ceil((reasoning.length + text.length) / 4) },
+    }
     yield { type: 'finish', reason: { kind: 'stop' } }
   }
 }
@@ -379,16 +391,118 @@ describe('AutobiographicalCompactionEngine wiring', () => {
     expect(session.events.some(event => event.type === 'compaction/start')).toBe(false)
   })
 
-  it('skips the pass when the frontier cannot fit the compile budget', async () => {
+  it('folds at the pyramid floor when the configured budget is unreachable', async () => {
+    // The picker refuses at the configured budget and reports its measured
+    // floor; the pass retries once at that floor (plus the response reserve)
+    // and lands the best layout instead of stranding the session raw until
+    // merges deepen the pyramid.
+    const { engine, warnings } = setup({ contextWindowTokens: 300, reserveTokens: 20 })
+    const session = conversation(12)
+    const agent = { session, options: ROUTE } as Agent
+    const pass = engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    // Patch before the pass's first compile: every attempt at the configured
+    // budget refuses, so the pass drains the queue and retries at the floor.
+    const entry = await openEntry(engine, session)
+    const original = entry.runtime.manager.compile.bind(entry.runtime.manager)
+    patchManager(entry, {
+      compile: (budget: { maxTokens: number; reserveForResponse: number }) => (
+        budget.maxTokens === 300
+          ? Promise.reject(Object.assign(new Error('picker exhausted'), { actual: 600 }))
+          : original(budget)
+      ),
+    })
+
+    await expect(pass).resolves.not.toBeNull()
+    expect(session.events.some(event => event.type === 'compaction/start')).toBe(true)
+    expect(warnings.some(message => message.includes('folding at the floor until merges deepen'))).toBe(true)
+  })
+
+  it.each([5000, 10])(
+    'warns and lands nothing when the picker never yields a layout (floor=%s)',
+    async (actual) => {
+      const { engine, warnings } = setup({ contextWindowTokens: 40, reserveTokens: 39 })
+      const session = conversation(12)
+      const agent = { session, options: ROUTE } as Agent
+      await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+      // The picker refuses at the configured budget and — for the 5000 floor —
+      // again at the floor retry; a floor at/below the budget skips the retry.
+      patchManager(await openEntry(engine, session), {
+        compile: () => Promise.reject(Object.assign(new Error('picker exhausted'), { actual })),
+      })
+
+      const foldsBefore = session.events.filter(event => event.type === 'compaction/start').length
+      await expect(engine.compactIfNeeded(agent, 'pressure', SIGNAL)).resolves.toBeNull()
+      expect(session.events.filter(event => event.type === 'compaction/start')).toHaveLength(foldsBefore)
+      expect(warnings.some(message => message.startsWith(
+        'autobiographical frontier planning found no layout that fits: ',
+      ))).toBe(true)
+    },
+  )
+
+  it('warns and lands nothing when the floor retry still previews no layout', async () => {
     const { engine, warnings } = setup({ contextWindowTokens: 40, reserveTokens: 39 })
     const session = conversation(12)
     const agent = { session, options: ROUTE } as Agent
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    // The configured-budget preview reports its floor without entries; the
+    // raised-budget retry then answers no preview at all.
+    let previews = 0
+    patchManager(await openEntry(engine, session), {
+      compile: () => Promise.resolve(),
+      previewContext: () => {
+        previews += 1
+        return previews === 1
+          ? {
+            finalTokens: 5000,
+            budgetTokens: 40,
+            fits: false,
+            exhausted: true,
+            headTokens: 0,
+            tailTokens: 30,
+            middleTokens: 4970,
+            middleChunkCount: 3,
+            deepestLevel: 1,
+          }
+          : null
+      },
+    })
 
     await expect(engine.compactIfNeeded(agent, 'pressure', SIGNAL)).resolves.toBeNull()
+    expect(session.events.some(event => event.type === 'compaction/start')).toBe(false)
     expect(warnings.some(message => message.startsWith(
       'autobiographical frontier planning found no layout that fits: ',
     ))).toBe(true)
-    expect(session.events.some(event => event.type === 'compaction/start')).toBe(false)
+  })
+
+  it('prices recall pairs at the stripped render so thinking-heavy summaries still fold', async () => {
+    // The bridge strips reasoning from emitted folds when the strip is
+    // smaller; the planner must price pairs the same way (carrierPolicy
+    // 'live-strip'). Under the library default a pair prices at the stored
+    // provider count — here ~10x the stripped text — so on a thinking-heavy
+    // route folding looks cost-increasing and the picker wedges.
+    const { engine, adapter } = setup({ contextWindowTokens: 400, reserveTokens: 100 })
+    // Small enough to stay under the bridge's strip threshold, so the stored
+    // response keeps its carriers — the one shape where the planner's pair
+    // pricing diverges between the library default ('full': the stored
+    // provider count, thinking included) and the stripped render our folds
+    // actually emit ('live-strip').
+    adapter.thinking = 100
+    const session = conversation(12)
+    const agent = { session, options: ROUTE } as Agent
+
+    // The pass may or may not fold at this toy scale; memory formation runs
+    // regardless, and the pair pricing is what this test pins.
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+
+    const entry = await openEntry(engine, session)
+    const summaries = entry.runtime.manager.getSummariesInRange({})
+    expect(summaries.length).toBeGreaterThan(0)
+    const priced = summaries.map(summary => (entry.runtime.strategy as unknown as {
+      recallPairCost: (entry: unknown) => number
+    }).recallPairCost(summary))
+    // Stripped: label + ~12 tokens of recollection text. Priced 'full', the
+    // stored thinking lifts every pair to ~46.
+    expect(Math.max(...priced)).toBeLessThan(40)
   })
 
   it('skips the pass when the strategy previews no layout', async () => {
@@ -596,6 +710,53 @@ describe('AutobiographicalCompactionEngine wiring', () => {
     const aborted = AbortSignal.abort()
     await expect(engine.compactIfNeeded(agent, 'pressure', aborted)).resolves.toBeNull()
     expect(session.events.some(event => event.type === 'compaction/start')).toBe(false)
+  })
+
+  it('prefers the global ceiling, then the per-model ceiling, then the model window', async () => {
+    async function budgetSeen(
+      overrides: AutobiographicalCompactionConfig,
+      options: { omitContextWindow?: boolean },
+      windowless = false,
+    ): Promise<number | undefined> {
+      const { engine } = setup(overrides, options)
+      const session = conversation(2, { routedContext: !windowless })
+      if (windowless) session.append('request/context', { provider: ROUTE.provider, model: ROUTE.model })
+      const agent = { session, options: ROUTE } as Agent
+      await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+      const budgets: number[] = []
+      const entry = await openEntry(engine, session)
+      const original = entry.runtime.manager.compile.bind(entry.runtime.manager)
+      patchManager(entry, {
+        compile: (budget: { maxTokens: number; reserveForResponse: number }) => {
+          budgets.push(budget.maxTokens)
+          return original(budget)
+        },
+      })
+      await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+      return budgets[0]
+    }
+
+    // Global override wins over the per-model map...
+    await expect(budgetSeen(
+      { contextWindowTokensByModel: { 'test-model': 300 } },
+      {},
+    )).resolves.toBe(400)
+    // ...the map wins over the routed window when the model matches...
+    await expect(budgetSeen(
+      { contextWindowTokensByModel: { 'test-model': 300 } },
+      { omitContextWindow: true },
+    )).resolves.toBe(300)
+    // ...a non-matching map entry falls back to the routed window...
+    await expect(budgetSeen(
+      { contextWindowTokensByModel: { 'other-model': 300 } },
+      { omitContextWindow: true },
+    )).resolves.toBe(600)
+    // ...and no window anywhere still skips the pass.
+    await expect(budgetSeen(
+      { contextWindowTokensByModel: { 'other-model': 300 } },
+      { omitContextWindow: true },
+      true,
+    )).resolves.toBeUndefined()
   })
 
   it('streams live memory-formation text as throttled progress events', async () => {
