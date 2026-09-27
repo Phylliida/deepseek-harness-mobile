@@ -94,6 +94,25 @@ const usageOf = (event: SessionEvent): TokenUsage | undefined =>
       ? event.data.usage
       : undefined
 
+const isTokenUsage = (usage: unknown): usage is TokenUsage =>
+  typeof usage === 'object' && usage !== null
+  && typeof (usage as TokenUsage).inputTokens === 'number'
+  && typeof (usage as TokenUsage).outputTokens === 'number'
+
+/**
+ * The usage an autobiographical memory-formation call reports on its terminal
+ * progress flush, if any. The event type belongs to
+ * dsh-compaction-autobiographical; token-meter reads it structurally so the
+ * packages stay decoupled. These calls pay tokens outside any turn/step, so
+ * the projection folds them in additively below.
+ */
+const memoryUsageOf = (event: SessionEvent): TokenUsage | undefined => {
+  if ((event.type as string) !== 'autobio/memory-progress') return undefined
+  const data = event.data as { done?: unknown; usage?: unknown }
+  if (data.done !== true || !isTokenUsage(data.usage)) return undefined
+  return data.usage
+}
+
 /**
  * Context-occupancy state: the two independent last-wins records plus the
  * O(1) running surface total needed to carry the newest sample forward.
@@ -136,6 +155,20 @@ ProjectionDefinition<'tokenUsage', TokenUsageState> = {
     last: null,
   }),
   apply: (state, event) => {
+    // Memory-formation calls: one terminal flush per call, never keyed to a
+    // turn/step, so they add without the replace dedup a retry would need.
+    const memoryUsage = memoryUsageOf(event)
+    if (memoryUsage !== undefined) {
+      const buckets = bucketsFrom(memoryUsage)
+      const unrated = memoryUsage.costUsd === undefined ? buckets : zeroBuckets()
+      return {
+        ...state,
+        totals: addReplacing(state.totals, undefined, buckets),
+        unratedTotals: addReplacing(state.unratedTotals, undefined, unrated),
+        reportedCostUsd: state.reportedCostUsd + (memoryUsage.costUsd ?? 0),
+        hasCostedSample: state.hasCostedSample || memoryUsage.costUsd !== undefined,
+      }
+    }
     let turn: number
     let step: number
     let usage: TokenUsage

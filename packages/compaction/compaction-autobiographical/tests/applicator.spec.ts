@@ -568,13 +568,40 @@ describe('planFolds', () => {
   })
 
   it('refuses a fold whose result answers no adjacent call', () => {
-    // r1 answers a call that is not the raw node before the span; the
-    // adjacency invariant does not hold, so the pass plans nothing.
-    const { session, seqs } = toolConversation()
+    // r1's call is not the raw node right before the span — a text note sits
+    // between them — so the adjacency invariant does not hold and the pass
+    // plans nothing.
+    const session = Session.create(SessionId('applicator-nonadjacent'))
+    const seqs: Record<string, number> = {}
+    seqs['q1'] = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'q1' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    seqs['a1'] = session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+        source: { kind: 'model', provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    seqs['x1'] = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'note' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    seqs['r1'] = session.append('user/message', createUserMessage({
+      content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'done' }] }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const mirror = runtime({
+      messages: Object.fromEntries(Object.entries(seqs).map(([id, seq]) => [id, { metadata: { dshSeq: seq } }])),
+      summaries: { F: { id: 'F', level: 1, first: 'r1', last: 'r1' } },
+    })
     expect(planFolds(
       session,
-      toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'r1', last: 'r1' } }),
-      [raw(['a1']), ...recall('F'), raw(['q2'])],
+      mirror,
+      [raw(['q1']), raw(['a1']), raw(['x1']), ...recall('F')],
     )).toBeNull()
   })
 
