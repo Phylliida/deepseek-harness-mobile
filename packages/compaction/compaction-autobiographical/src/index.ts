@@ -199,7 +199,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
           this.ctx.logger.warn(message)
           console.warn(`[compaction-autobiographical] ${message}`)
         },
-        onText: (delta, done) => {
+        onText: (delta, done, usage) => {
           // Live memory-formation text for the chat's per-call rows. A flush
           // appends one log-only event; bookkeeping must never kill the
           // compression call, so a session that closed mid-call swallows it.
@@ -210,6 +210,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
               attempt: progress.attempt,
               delta: progress.buffer,
               ...done ? { done: true } : {},
+              ...usage === undefined ? {} : { usage },
             })
           } catch {
             progress.buffer = ''

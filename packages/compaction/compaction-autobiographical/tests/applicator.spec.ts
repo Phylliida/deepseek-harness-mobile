@@ -140,6 +140,43 @@ function stubFold(seq: number, summaryId: string, sources: readonly number[]): S
   } as unknown as SessionEvent
 }
 
+
+/** A raw turn with a tool call (`a1`) answered by `r1`, then plain text. */
+function toolConversation(): { session: Session; seqs: Record<string, number> } {
+  const session = Session.create(SessionId('applicator-tools'))
+  const seqs: Record<string, number> = {}
+  seqs['q1'] = session.append('user/message', createUserMessage({
+    content: [{ type: 'text', text: 'q1' }],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' }).seq
+  seqs['a1'] = session.append('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: createMessage({
+      role: 'assistant',
+      content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+      source: { kind: 'model', provider: 'test', model: 'test-model' },
+    }),
+  }, { surfaceOp: 'append' }).seq
+  seqs['r1'] = session.append('user/message', createUserMessage({
+    content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'done' }] }],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' }).seq
+  seqs['q2'] = session.append('user/message', createUserMessage({
+    content: [{ type: 'text', text: 'q2' }],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' }).seq
+  return { session, seqs }
+}
+
+/** A mirror/runtime table for the tool conversation's message ids. */
+function toolRuntime(seqs: Record<string, number>, summaries: StubOptions['summaries'] = {}): SessionRuntime {
+  return runtime({
+    messages: Object.fromEntries(Object.entries(seqs).map(([id, seq]) => [id, { metadata: { dshSeq: seq } }])),
+    summaries,
+  })
+}
+
 describe('planFolds', () => {
   it('returns no ops when the surface already matches the selected layout', () => {
     const { session } = conversation()
@@ -419,4 +456,144 @@ describe('planFolds', () => {
     } as unknown as SessionEvent
     expect(planFolds(stubSession([headerless], [5]), runtime(), [raw(['anything'])])).toBeNull()
   })
+  it('widens a fold past the tool result its last node calls', () => {
+    // The span [a1] ends with the call; its result r1 sits raw immediately
+    // after. Folding only a1 would orphan r1 — every later request 400s — so
+    // the plan absorbs r1 into the fold and its raw entry stands down.
+    const { session, seqs } = toolConversation()
+    const plan = planFolds(
+      session,
+      toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'a1', last: 'a1' } }),
+      [raw(['q1']), ...recall('F'), raw(['r1']), raw(['q2'])],
+    )
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'F',
+      startSeq: seqs['a1'],
+      endSeq: seqs['r1'],
+      shadowedSeqs: [seqs['a1'], seqs['r1']],
+    })])
+  })
+
+  it('refuses a fold whose called tool result does not follow', () => {
+    // The span ends with the call, but the next raw node is plain text: the
+    // pair cannot be made whole, so the pass plans nothing.
+    const session = Session.create(SessionId('applicator-no-result'))
+    const q = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'q1' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const a = session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+        source: { kind: 'model', provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    const q2 = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'q2' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const mirror = runtime({
+      messages: {
+        q1: { metadata: { dshSeq: q } },
+        a1: { metadata: { dshSeq: a } },
+        q2: { metadata: { dshSeq: q2 } },
+      },
+      summaries: { F: { id: 'F', level: 1, first: 'a1', last: 'a1' } },
+    })
+    expect(planFolds(session, mirror, [raw(['q1']), ...recall('F'), raw(['q2'])])).toBeNull()
+  })
+
+  it('accepts a fold whose call ends the surface', () => {
+    // The span ends the surface: the result is absent (an in-flight call
+    // lives in the pinned tail in practice), so nothing orphans.
+    const session = Session.create(SessionId('applicator-inflight'))
+    const q = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'q1' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const a = session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+        source: { kind: 'model', provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    const mirror = runtime({
+      messages: { q1: { metadata: { dshSeq: q } }, a1: { metadata: { dshSeq: a } } },
+      summaries: { F: { id: 'F', level: 1, first: 'a1', last: 'a1' } },
+    })
+    expect(planFolds(session, mirror, [raw(['q1']), ...recall('F')])).toEqual([
+      expect.objectContaining({ summaryId: 'F', shadowedSeqs: [a] }),
+    ])
+  })
+
+  it('accepts a fold whose called result is already folded away', () => {
+    // r1 is folded into an existing node; a new fold over a1 leaves no
+    // visible orphan behind.
+    const { session, seqs } = toolConversation()
+    appendFold(session, 'G', seqs['r1'], seqs['r1'])
+    const plan = planFolds(
+      session,
+      toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'a1', last: 'a1' }, G: { id: 'G', level: 1, first: 'r1', last: 'r1' } }),
+      [raw(['q1']), ...recall('F'), ...recall('G'), raw(['q2'])],
+    )
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'F',
+      startSeq: seqs['a1'],
+      endSeq: seqs['a1'],
+      shadowedSeqs: [seqs['a1']],
+    })])
+  })
+
+  it('widens a fold back over the raw call its first node answers', () => {
+    // The span starts with r1, whose call sits raw immediately before it:
+    // shadowing r1 alone would dangle the call, so the plan pulls a1 in.
+    const { session, seqs } = toolConversation()
+    const plan = planFolds(
+      session,
+      toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'r1', last: 'q2' } }),
+      [raw(['q1']), raw(['a1']), ...recall('F')],
+    )
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'F',
+      startSeq: seqs['a1'],
+      endSeq: seqs['q2'],
+      shadowedSeqs: [seqs['a1'], seqs['r1'], seqs['q2']],
+    })])
+  })
+
+  it('refuses a fold whose result answers no adjacent call', () => {
+    // r1 answers a call that is not the raw node before the span; the
+    // adjacency invariant does not hold, so the pass plans nothing.
+    const { session, seqs } = toolConversation()
+    expect(planFolds(
+      session,
+      toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'r1', last: 'r1' } }),
+      [raw(['a1']), ...recall('F'), raw(['q2'])],
+    )).toBeNull()
+  })
+
+  it('folds a result whose call is already folded away', () => {
+    // The call is inside the existing fold G, so shadowing r1 leaves no
+    // visible half behind.
+    const { session, seqs } = toolConversation()
+    appendFold(session, 'G', seqs['a1'], seqs['a1'])
+    const plan = planFolds(
+      session,
+      toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'r1', last: 'r1' }, G: { id: 'G', level: 1, first: 'a1', last: 'a1' } }),
+      [raw(['q1']), ...recall('G'), ...recall('F'), raw(['q2'])],
+    )
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'F',
+      startSeq: seqs['r1'],
+      endSeq: seqs['r1'],
+      shadowedSeqs: [seqs['r1']],
+    })])
+  })
+
 })

@@ -15,7 +15,7 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical/applicator
  */
 
-import { isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+import { deriveEventMessage, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ContextEntry } from '@animalabs/context-manager'
 import { messageSeq } from './mirror.ts'
@@ -49,6 +49,10 @@ interface SurfaceAnno {
   readonly seq: number
   readonly foldId: string | undefined
   readonly covers: readonly number[]
+  /** Tool-call ids this node's message declares (assistant messages). */
+  readonly calls: readonly string[]
+  /** Tool-call ids this node's message answers (tool-result blocks). */
+  readonly results: readonly string[]
 }
 
 const RECALL_HEADER = /^\[Recall (\S+)\]/
@@ -92,10 +96,19 @@ function annotateSurface(session: Session): SurfaceAnno[] {
 
   return session.surface.nodes.map((seq) => {
     const event = bySeq.get(seq)
+    const calls: string[] = []
+    const results: string[] = []
+    const message = event === undefined ? null : deriveEventMessage(event)
+    for (const block of message?.content ?? []) {
+      if (block.type === 'tool-call') calls.push(block.id)
+      if (block.type === 'tool-result') results.push(block.toolCallId)
+    }
     return {
       seq,
       foldId: event === undefined ? undefined : foldNodeSummaryId(event),
       covers: coverageOf(seq, new Set()),
+      calls,
+      results,
     }
   })
 }
@@ -167,11 +180,17 @@ export function planFolds(
   const surface = annotateSurface(session)
 
   const ops: FoldOp[] = []
+  // Surface seqs a fold span absorbed beyond its planned range to keep a
+  // tool call and its result on the same side of the fold.
+  const absorbed = new Set<number>()
   let at = 0
   for (const item of desired) {
     const current = surface[at]
     if (current === undefined) return null
     if (item.kind === 'raw') {
+      // A node absorbed into a preceding fold's pair repair is consumed
+      // already; its raw entry stands down.
+      if (absorbed.has(item.seq)) continue
       if (current.foldId === undefined && current.seq === item.seq) {
         at++
         continue
@@ -212,6 +231,36 @@ export function planFolds(
     if (span.length === 1 && only !== undefined && only.foldId === item.summaryId) {
       at = cursor
       continue
+    }
+    // Tool-pair repair: a fold may not shadow exactly one half of a tool
+    // call/result pair — the wire demands the result follow its call, so a
+    // straddling fold orphans the visible half and every later request 400s.
+    // Widen the span to shadow both halves; the pair's exchange rides the
+    // fold's recollection instead of the raw record. (Shrinking is not an
+    // option: the walk consumes the surface contiguously.)
+    // oxlint-disable-next-line typescript/no-non-null-assertion -- span is non-empty past the guards above
+    const first = span[0]!
+    const prev = at > 0 ? surface[at - 1] : undefined
+    if (first.results.length > 0 && prev !== undefined && prev.foldId === undefined) {
+      // The result's call sits raw immediately before the span: pull it in,
+      // or refuse when the adjacency invariant does not hold at all.
+      if (!first.results.every(id => prev.calls.includes(id))) return null
+      span.unshift(prev)
+    }
+    let inside = new Set(span.flatMap(node => node.calls))
+    for (;;) {
+      // oxlint-disable-next-line typescript/no-non-null-assertion -- span is non-empty past the guards above
+      const last = span[span.length - 1]!
+      if (last.calls.length === 0) break
+      const next: SurfaceAnno | undefined = surface[cursor]
+      // No neighbor, or a folded one: the result is absent or already
+      // invisible, so nothing orphans.
+      if (next === undefined || next.foldId !== undefined) break
+      if (next.results.length === 0 || !next.results.every(id => inside.has(id))) return null
+      span.push(next)
+      absorbed.add(next.seq)
+      cursor++
+      inside = new Set(span.flatMap(node => node.calls))
     }
     // oxlint-disable-next-line typescript/no-non-null-assertion -- span is non-empty past the guards above
     const firstSeq = span[0]!.seq

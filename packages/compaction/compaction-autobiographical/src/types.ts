@@ -4,6 +4,8 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical/types
  */
 
+import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+
 /** Knobs accepted by the plugin config; every field is optional. */
 export interface AutobiographicalCompactionConfig {
   /**
@@ -94,6 +96,12 @@ export interface AutobioMemoryProgressEventData {
   delta: string
   /** Present on the call's terminal flush, success or failure. */
   done?: boolean
+  /**
+   * The call's provider-reported usage on the terminal flush. Memory
+   * formation pays real tokens outside any turn, so the tokenUsage
+   * projection folds these records into the session's cost accounting.
+   */
+  usage?: TokenUsage
 }
 
 declare module '@deepseek-ai/dsh-session/types' {

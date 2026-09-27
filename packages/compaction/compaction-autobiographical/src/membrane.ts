@@ -7,7 +7,7 @@
  */
 
 import { BlockAssembler, CallId, createMessage } from '@deepseek-ai/dsh-llm'
-import type { LlmRuntime, Message } from '@deepseek-ai/dsh-llm'
+import type { LlmRuntime, Message, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock as MembraneBlock, NormalizedRequest } from '@animalabs/membrane'
 
 /** Route and voice the bridge binds compression calls to. */
@@ -24,9 +24,11 @@ export interface MembraneBridgeOptions {
    * Text-delta tap for the chat's live memory-formation row: the bridge
    * reports each streamed text delta and one final zero-length delta
    * (`done: true`) when the call ends, however it ends. Call boundaries are
-   * exactly the done flushes; the engine owns attempt numbering.
+   * exactly the done flushes; the engine owns attempt numbering. The terminal
+   * flush carries the call's usage so memory formation joins the session's
+   * cost accounting.
    */
-  onText?: (delta: string, done: boolean) => void
+  onText?: (delta: string, done: boolean, usage?: TokenUsage) => void
 }
 
 /**
@@ -79,7 +81,7 @@ export class MembraneBridge {
   private readonly maxTokens: number | undefined
   private readonly agentParticipant: string
   private readonly warn: (message: string) => void
-  private readonly onText: ((delta: string, done: boolean) => void) | undefined
+  private readonly onText: ((delta: string, done: boolean, usage?: TokenUsage) => void) | undefined
 
   constructor(options: MembraneBridgeOptions) {
     this.llm = options.llm
@@ -173,7 +175,7 @@ export class MembraneBridge {
       this.warn(`compression call threw: ${message}`)
       throw error
     } finally {
-      this.onText?.('', true)
+      this.onText?.('', true, assembler.usage)
     }
 
     const blocks = assembler.blocks()
