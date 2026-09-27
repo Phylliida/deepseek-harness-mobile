@@ -242,6 +242,37 @@ describe('tokenUsage session projection', () => {
       cacheWriteTokens: 0,
     })
   })
+
+  it('folds memory-formation calls into the totals additively', async () => {
+    // Each call's terminal flush is one paid request outside any turn/step:
+    // two calls add, a mid-call flush and a malformed record count nothing.
+    const { ctx, session } = await harness()
+    const append = session.append.bind(session) as (type: string, data: unknown) => unknown
+    append('autobio/memory-progress', { attempt: 1, delta: '', done: true, usage: { inputTokens: 6000, outputTokens: 500 } })
+    append('autobio/memory-progress', { attempt: 2, delta: '', done: true, usage: { inputTokens: 6000, outputTokens: 500, cacheReadTokens: 100 } })
+    append('autobio/memory-progress', { attempt: 2, delta: 'partial' })
+    append('autobio/memory-progress', { attempt: 3, delta: '', done: true, usage: 'oops' })
+    expect(projected(ctx, session)).toEqual({
+      uncachedInputTokens: 12000,
+      outputTokens: 1000,
+      cacheReadTokens: 100,
+      cacheWriteTokens: 0,
+    })
+  })
+
+  it('splits a provider-billed memory call out of the unrated set', async () => {
+    const { ctx, session } = await harness()
+    const append = session.append.bind(session) as (type: string, data: unknown) => unknown
+    append('autobio/memory-progress', { attempt: 1, delta: '', done: true, usage: { inputTokens: 6000, outputTokens: 500, costUsd: 0.03 } })
+    expect(projected(ctx, session)).toEqual({
+      uncachedInputTokens: 6000,
+      outputTokens: 500,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      reportedCostUsd: 0.03,
+      unratedTokens: { uncachedInputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })
+  })
 })
 
 describe('tokenUsage provider-reported cost', () => {
