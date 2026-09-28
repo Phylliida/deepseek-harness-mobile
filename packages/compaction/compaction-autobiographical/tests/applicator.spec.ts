@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { CallId, createAssistantMessage, createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ContextEntry, SourceRelation } from '@animalabs/context-manager'
@@ -152,14 +152,13 @@ function toolConversation(): { session: Session; seqs: Record<string, number> } 
   seqs['a1'] = session.append('assistant/message', {
     turn: 1,
     step: 1,
-    message: createMessage({
-      role: 'assistant',
-      content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
-      source: { kind: 'model', provider: 'test', model: 'test-model' },
+    message: createAssistantMessage({
+      content: [{ type: 'tool-call', id: CallId('c1'), name: 'probe', arguments: '{}' }],
+      source: { provider: 'test', model: 'test-model' },
     }),
   }, { surfaceOp: 'append' }).seq
   seqs['r1'] = session.append('user/message', createUserMessage({
-    content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'done' }] }],
+    content: [{ type: 'tool-result', toolCallId: CallId('c1'), content: [{ type: 'text', text: 'done' }] }],
     source: { kind: 'user' },
   }), { surfaceOp: 'append' }).seq
   seqs['q2'] = session.append('user/message', createUserMessage({
@@ -487,7 +486,7 @@ describe('planFolds', () => {
       step: 1,
       message: createMessage({
         role: 'assistant',
-        content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+        content: [{ type: 'tool-call', id: CallId('c1'), name: 'probe', arguments: '{}' }],
         source: { kind: 'model', provider: 'test', model: 'test-model' },
       }),
     }, { surfaceOp: 'append' }).seq
@@ -519,7 +518,7 @@ describe('planFolds', () => {
       step: 1,
       message: createMessage({
         role: 'assistant',
-        content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+        content: [{ type: 'tool-call', id: CallId('c1'), name: 'probe', arguments: '{}' }],
         source: { kind: 'model', provider: 'test', model: 'test-model' },
       }),
     }, { surfaceOp: 'append' }).seq
@@ -536,7 +535,7 @@ describe('planFolds', () => {
     // r1 is folded into an existing node; a new fold over a1 leaves no
     // visible orphan behind.
     const { session, seqs } = toolConversation()
-    appendFold(session, 'G', seqs['r1'], seqs['r1'])
+    appendFold(session, 'G', seqs['r1']!, seqs['r1']!)
     const plan = planFolds(
       session,
       toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'a1', last: 'a1' }, G: { id: 'G', level: 1, first: 'r1', last: 'r1' } }),
@@ -547,6 +546,84 @@ describe('planFolds', () => {
       startSeq: seqs['a1'],
       endSeq: seqs['a1'],
       shadowedSeqs: [seqs['a1']],
+    })])
+  })
+
+
+  it('widens a fold across every result of a parallel call fan-out', () => {
+    // One assistant message calls three tools; each result rides its own
+    // message. The absorb loop must close the whole pending set, not stop
+    // after the first answer (the live 0aad8a1f orphan).
+    const session = Session.create(SessionId('applicator-fanout'))
+    const seqs: Record<string, number> = {}
+    seqs['q1'] = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'q1' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    seqs['a1'] = session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createAssistantMessage({
+        content: ['c1', 'c2', 'c3'].map(id => ({ type: 'tool-call', id: CallId(id), name: 'probe', arguments: '{}' })),
+        source: { provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    for (const id of ['c1', 'c2', 'c3']) {
+      seqs[id] = session.append('user/message', createUserMessage({
+        content: [{ type: 'tool-result', toolCallId: CallId(id), content: [{ type: 'text', text: 'done' }] }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' }).seq
+    }
+    seqs['q2'] = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'q2' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const mirror = runtime({
+      messages: Object.fromEntries(Object.entries(seqs).map(([id, seq]) => [id, { metadata: { dshSeq: seq } }])),
+      summaries: { F: { id: 'F', level: 1, first: 'a1', last: 'a1' } },
+    })
+    const plan = planFolds(session, mirror, [raw(['q1']), ...recall('F'), raw(['c1']), raw(['c2']), raw(['c3']), raw(['q2'])])
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'F',
+      startSeq: seqs['a1'],
+      endSeq: seqs['c3'],
+      shadowedSeqs: [seqs['a1'], seqs['c1'], seqs['c2'], seqs['c3']],
+    })])
+  })
+
+
+  it('keeps absorbing when an absorbed node declares a fresh call', () => {
+    // A mixed node answers c1 and declares c4: absorbing it must extend the
+    // pending set, not close early.
+    const session = Session.create(SessionId('applicator-mixed'))
+    const seqs: Record<string, number> = {}
+    seqs['a1'] = session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createAssistantMessage({
+        content: [{ type: 'tool-call', id: CallId('c1'), name: 'probe', arguments: '{}' }],
+        source: { provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    seqs['r1'] = session.append('user/message', createUserMessage({
+      content: [
+        { type: 'tool-result', toolCallId: CallId('c1'), content: [{ type: 'text', text: 'done' }] },
+        { type: 'tool-call', id: CallId('c4'), name: 'probe', arguments: '{}' },
+      ],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    seqs['r4'] = session.append('user/message', createUserMessage({
+      content: [{ type: 'tool-result', toolCallId: CallId('c4'), content: [{ type: 'text', text: 'done' }] }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const mirror = runtime({
+      messages: Object.fromEntries(Object.entries(seqs).map(([id, seq]) => [id, { metadata: { dshSeq: seq } }])),
+      summaries: { F: { id: 'F', level: 1, first: 'a1', last: 'a1' } },
+    })
+    const plan = planFolds(session, mirror, [...recall('F'), raw(['r1']), raw(['r4'])])
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'F',
+      shadowedSeqs: [seqs['a1'], seqs['r1'], seqs['r4']],
     })])
   })
 
@@ -582,7 +659,7 @@ describe('planFolds', () => {
       step: 1,
       message: createMessage({
         role: 'assistant',
-        content: [{ type: 'tool-call', id: 'c1', name: 'probe', arguments: '{}' }],
+        content: [{ type: 'tool-call', id: CallId('c1'), name: 'probe', arguments: '{}' }],
         source: { kind: 'model', provider: 'test', model: 'test-model' },
       }),
     }, { surfaceOp: 'append' }).seq
@@ -591,7 +668,7 @@ describe('planFolds', () => {
       source: { kind: 'user' },
     }), { surfaceOp: 'append' }).seq
     seqs['r1'] = session.append('user/message', createUserMessage({
-      content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'done' }] }],
+      content: [{ type: 'tool-result', toolCallId: CallId('c1'), content: [{ type: 'text', text: 'done' }] }],
       source: { kind: 'user' },
     }), { surfaceOp: 'append' }).seq
     const mirror = runtime({
@@ -609,7 +686,7 @@ describe('planFolds', () => {
     // The call is inside the existing fold G, so shadowing r1 leaves no
     // visible half behind.
     const { session, seqs } = toolConversation()
-    appendFold(session, 'G', seqs['a1'], seqs['a1'])
+    appendFold(session, 'G', seqs['a1']!, seqs['a1']!)
     const plan = planFolds(
       session,
       toolRuntime(seqs, { F: { id: 'F', level: 1, first: 'r1', last: 'r1' }, G: { id: 'G', level: 1, first: 'a1', last: 'a1' } }),

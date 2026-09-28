@@ -185,12 +185,13 @@ export function planFolds(
   const absorbed = new Set<number>()
   let at = 0
   for (const item of desired) {
+    // A node absorbed into a preceding fold's pair repair is consumed
+    // already; its raw entry stands down (checked before the surface guard:
+    // trailing absorbed nodes leave no surface node behind to compare).
+    if (item.kind === 'raw' && absorbed.has(item.seq)) continue
     const current = surface[at]
     if (current === undefined) return null
     if (item.kind === 'raw') {
-      // A node absorbed into a preceding fold's pair repair is consumed
-      // already; its raw entry stands down.
-      if (absorbed.has(item.seq)) continue
       if (current.foldId === undefined && current.seq === item.seq) {
         at++
         continue
@@ -247,20 +248,23 @@ export function planFolds(
       if (!first.results.every(id => prev.calls.includes(id))) return null
       span.unshift(prev)
     }
-    let inside = new Set(span.flatMap(node => node.calls))
+    // Calls inside the span still awaiting a visible result. One assistant
+    // message can fan out several parallel calls, each answered by its own
+    // result message — absorb until the set closes, not after one answer.
+    const pending = new Set(span.flatMap(node => node.calls))
+    for (const node of span) for (const id of node.results) pending.delete(id)
     for (;;) {
-      // oxlint-disable-next-line typescript/no-non-null-assertion -- span is non-empty past the guards above
-      const last = span[span.length - 1]!
-      if (last.calls.length === 0) break
+      if (pending.size === 0) break
       const next: SurfaceAnno | undefined = surface[cursor]
       // No neighbor, or a folded one: the result is absent or already
       // invisible, so nothing orphans.
       if (next === undefined || next.foldId !== undefined) break
-      if (next.results.length === 0 || !next.results.every(id => inside.has(id))) return null
+      if (next.results.length === 0 || !next.results.every(id => pending.has(id))) return null
       span.push(next)
       absorbed.add(next.seq)
       cursor++
-      inside = new Set(span.flatMap(node => node.calls))
+      for (const id of next.results) pending.delete(id)
+      for (const id of next.calls) pending.add(id)
     }
     // oxlint-disable-next-line typescript/no-non-null-assertion -- span is non-empty past the guards above
     const firstSeq = span[0]!.seq

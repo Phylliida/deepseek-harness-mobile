@@ -771,8 +771,12 @@ describe('AutobiographicalCompactionEngine wiring', () => {
     // The oversized delta crosses the flush threshold on its own...
     expect(progress[0]?.data).toMatchObject({ attempt: 1, delta: 'x'.repeat(1500) })
     expect(progress[0]?.data.done).toBeUndefined()
-    // ...and the call's end always lands a terminal flush.
-    expect(progress.at(-1)?.data).toMatchObject({ done: true })
+    // ...and the call's end always lands a terminal flush, carrying the
+    // call's usage for the session's cost accounting.
+    expect(progress.at(-1)?.data).toMatchObject({
+      done: true,
+      usage: { inputTokens: 10, outputTokens: progress.at(-1)?.data.usage?.outputTokens },
+    })
   })
 
   it('keeps compressing when the progress row cannot be logged', async () => {
