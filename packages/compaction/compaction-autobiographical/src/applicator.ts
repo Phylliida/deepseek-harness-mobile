@@ -189,17 +189,27 @@ export function planFolds(
     // already; its raw entry stands down (checked before the surface guard:
     // trailing absorbed nodes leave no surface node behind to compare).
     if (item.kind === 'raw' && absorbed.has(item.seq)) continue
-    const current = surface[at]
+    // Stale coarser leftovers: a fold node whose coverage lies entirely
+    // before this entry's range is content the layout has moved past. Leave
+    // the node (a coarser fold only shrinks the context) and advance the
+    // surface cursor only.
+    let current = surface[at]
+    while (current?.foldId !== undefined) {
+      const maxCover = Math.max(...current.covers)
+      const startsAfter = item.kind === 'raw' ? item.seq > maxCover : item.firstSeq > maxCover
+      if (!startsAfter) break
+      at++
+      current = surface[at]
+    }
     if (current === undefined) return null
     if (item.kind === 'raw') {
-      if (current.foldId === undefined && current.seq === item.seq) {
-        at++
-        continue
-      }
-      // Refinement the single-node replace cannot express: the surface shows a
-      // fold over this raw seq. Keep the coarser node (the archive retains
-      // every level; the raw record is never deleted).
-      if (current.foldId !== undefined && current.covers.includes(item.seq)) {
+      // Surface coarser than the layout: the node holding this raw seq is a
+      // fold the picker has since resolved finer (budget growth, pyramid
+      // deepening). Keeping the fold only shrinks the context below plan, so
+      // the raw entry stands down rather than stalling the pass.
+      if (current.foldId !== undefined) {
+        if (current.covers.includes(item.seq)) continue
+      } else if (current.seq === item.seq) {
         at++
         continue
       }
@@ -219,15 +229,17 @@ export function planFolds(
       span.push(node)
       cursor++
     }
-    if (span.length === 0) {
-      // The range is already inside a coarser fold node (refinement): clamp.
-      if (current.foldId !== undefined
-        && item.firstSeq >= Math.min(...current.covers)
-        && item.lastSeq <= Math.max(...current.covers)) {
-        continue
-      }
-      return null
+    if (span.length === 0 && current.foldId !== undefined) {
+      // The range intersects a fold node the picker no longer selects at
+      // this granularity. Fully contained ranges are already covered by the
+      // node; straddling ones keep it too — a coarser fold only ever shrinks
+      // the context below the plan. Either way the entry stands down.
+      const minCover = Math.min(...current.covers)
+      const maxCover = Math.max(...current.covers)
+      if (item.firstSeq >= minCover && item.lastSeq <= maxCover) continue
+      if (item.firstSeq <= maxCover && item.lastSeq >= minCover) continue
     }
+    if (span.length === 0) return null
     const [only] = span
     if (span.length === 1 && only !== undefined && only.foldId === item.summaryId) {
       at = cursor

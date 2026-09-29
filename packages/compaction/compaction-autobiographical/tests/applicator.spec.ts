@@ -321,7 +321,9 @@ describe('planFolds', () => {
     expect(plan).toEqual([])
   })
 
-  it('abandons the pass when a raw selection falls outside the fold covering it', () => {
+  it('leaves a coarser fold whose coverage the layout has moved past', () => {
+    // The layout names only q2; the L1-0 fold ahead is stale-coarser
+    // leftover, so the walk leaves it and matches q2 without ops.
     const { session, seqs } = conversation()
     appendFold(session, 'L1-0', seqs['q1']!, seqs['a1']!)
     const plan = planFolds(
@@ -329,7 +331,7 @@ describe('planFolds', () => {
       runtime({ messages: { q2: { metadata: { dshSeq: seqs['q2'] } } } }),
       [raw(['q2'])],
     )
-    expect(plan).toBeNull()
+    expect(plan).toEqual([])
   })
 
   it('abandons the pass when the selection is longer than the surface', () => {
@@ -374,7 +376,7 @@ describe('planFolds', () => {
   })
 
   it.each([
-    ['the range starts before the fold', [1, 2], { first: 0, last: 1 }],
+    ['the range does not intersect the fold', [10, 20], { first: 0, last: 1 }],
     ['the range ends past the fold coverage', [1], { first: 2, last: 3 }],
     ['the node ahead is not a fold at all', null, { first: 1, last: 2 }],
   ] as Array<[string, readonly number[] | null, { first: number; last: number }]>)(
@@ -455,6 +457,72 @@ describe('planFolds', () => {
     } as unknown as SessionEvent
     expect(planFolds(stubSession([headerless], [5]), runtime(), [raw(['anything'])])).toBeNull()
   })
+
+  it('keeps a coarser surface fold when the layout resolves finer', () => {
+    // The surface carries L3-42 over q1..q2, but the picker now wants raw
+    // copies and a finer L2 fold inside that coverage (budget growth, or a
+    // deepened pyramid). The fold only shrinks the context below plan, so
+    // the finer entries stand down instead of stalling the pass.
+    const { session, seqs } = conversation()
+    appendFold(session, 'L3-42', seqs['q1']!, seqs['q2']!)
+    const mirror = runtime({
+      messages: {
+        q1: { metadata: { dshSeq: seqs['q1'] } },
+        a1: { metadata: { dshSeq: seqs['a1'] } },
+        q2: { metadata: { dshSeq: seqs['q2'] } },
+      },
+      summaries: { 'L2-109': { id: 'L2-109', level: 2, first: 'a1', last: 'a1' } },
+    })
+    expect(planFolds(
+      session,
+      mirror,
+      [raw(['q1']), ...recall('L2-109'), raw(['q2'])],
+    )).toEqual([])
+  })
+
+  it('keeps a coarser surface fold when a finer fold straddles it', () => {
+    // L2-109's range starts inside L3-42's coverage and ends past it; the
+    // pass must not subdivide the existing node, so the entry stands down
+    // and the plan folds the tail it can own.
+    const session = Session.create(SessionId('applicator-straddle'))
+    const seqs: Record<string, number> = {}
+    for (const id of ['q1', 'q2', 'q3']) {
+      seqs[id] = session.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: id }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' }).seq
+    }
+    appendFold(session, 'L3-42', seqs['q1']!, seqs['q2']!)
+    const mirror = runtime({
+      messages: Object.fromEntries(Object.entries(seqs).map(([id, seq]) => [id, { metadata: { dshSeq: seq } }])),
+      summaries: {
+        'L2-109': { id: 'L2-109', level: 2, first: 'q2', last: 'q3' },
+        'L2-110': { id: 'L2-110', level: 2, first: 'q3', last: 'q3' },
+      },
+    })
+    // L2-109 [q2..q3] straddles L3-42 [q1..q2]; L2-110 [q3] lands on the tail.
+    const plan = planFolds(session, mirror, [...recall('L2-109'), ...recall('L2-110')])
+    expect(plan).toEqual([expect.objectContaining({
+      summaryId: 'L2-110',
+      shadowedSeqs: [seqs['q3']],
+    })])
+  })
+
+  it('abandons the pass when a fold range misses the surface entirely', () => {
+    // The fold node ahead covers [100, 200]; the entry's range [1..2]
+    // neither intersects nor lies past it — a genuine planner/surface
+    // divergence, not a coarser surface.
+    const plan = planFolds(
+      stubSession([stubFold(7, 'L1-0', [100, 200])], [7]),
+      runtime({
+        messages: { first: { metadata: { dshSeq: 1 } }, last: { metadata: { dshSeq: 2 } } },
+        summaries: { 'L1-0': { id: 'L1-0', level: 1, first: 'first', last: 'last' } },
+      }),
+      recall('L1-0'),
+    )
+    expect(plan).toBeNull()
+  })
+
   it('widens a fold past the tool result its last node calls', () => {
     // The span [a1] ends with the call; its result r1 sits raw immediately
     // after. Folding only a1 would orphan r1 — every later request 400s — so
