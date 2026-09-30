@@ -14,6 +14,7 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical
  */
 
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { CompactionEngine, CompactionId, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
@@ -24,6 +25,7 @@ import type {
 } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import { createMessage } from '@deepseek-ai/dsh-llm'
+import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import z from '@deepseek-ai/schemastery'
@@ -31,7 +33,7 @@ import { resolveConfig } from './config.ts'
 import { MembraneBridge } from './membrane.ts'
 import { AGENT_PARTICIPANT, openSessionRuntime, syncSessionMirror, syncToolDefinitions } from './mirror.ts'
 import type { SessionRuntime } from './mirror.ts'
-import { planFolds } from './applicator.ts'
+import { assertFoldOpsApply, planFolds } from './applicator.ts'
 import type { FoldOp } from './applicator.ts'
 import type { AutobiographicalCompactionConfig, ResolvedAutobiographicalConfig } from './types.ts'
 
@@ -46,10 +48,18 @@ interface RuntimeEntry {
   tickChain: Promise<void>
   /** Live-stream bookkeeping: the next call's attempt number and unflushed text. */
   progress: { attempt: number; buffer: string }
+  /** The route the runtime was opened with — the provenance stamped on fold messages. */
+  route: { provider: string; model: string }
 }
+
+/** Never copied into a fork: the parent's advisory lock. */
+const LOCK_FILE = 'LOCK'
 
 /** Buffered progress text flushes at this size, or when the call ends. */
 const PROGRESS_FLUSH_CHARS = 1000
+
+/** Preview budget large enough that the picker plans no fold (see promptOverhead). */
+const UNBOUNDED_PREVIEW_TOKENS = 1_000_000_000
 
 /**
  * Default ceiling for the compile budget when the adapter reports a larger
@@ -111,6 +121,25 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         }).catch(() => {})
       }
     })
+    // Fiber disposal is the process-shutdown path (SIGINT/SIGTERM dispose the
+    // root fiber): close every open archive so Chronicle checkpoints its
+    // state. Without this a restart replays an empty store and regenerates
+    // every memory. A hard kill can never run this; bounded loss there is
+    // the store's own WAL story, not ours.
+    ctx.effect(function* (this: AutobiographicalCompactionEngine) {
+      yield () => this.closeRuntimes()
+    }.bind(this), 'compaction-autobiographical.closeRuntimes()')
+  }
+
+  /** Close every open archive; the stores checkpoint on close. */
+  private async closeRuntimes(): Promise<void> {
+    const openings = [...this.runtimes.values()]
+    this.runtimes.clear()
+    await Promise.all(openings.map(opening =>
+      opening.then((entry) => {
+        entry.runtime.manager.close()
+      }).catch(() => {}),
+    ))
   }
 
   /** Whether automatic step-boundary folding is currently active. */
@@ -184,7 +213,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       attempt: priorAttempts.length === 0 ? 1 : Math.max(...priorAttempts) + 1,
       buffer: '',
     }
-    const opening = openSessionRuntime(
+    const opening = this.inheritForkArchive(session, storePath).then(() => openSessionRuntime(
       storePath,
       this.config,
       new MembraneBridge({
@@ -222,7 +251,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         },
       }),
       route.model,
-    ).then(runtime => ({ runtime, tickChain: Promise.resolve(), progress }))
+    )).then(runtime => ({ runtime, tickChain: Promise.resolve(), progress, route }))
     this.runtimes.set(session.id, opening)
     // A failed open (locked store, corrupt archive) must not poison the cache:
     // drop the rejected entry so the next pass retries.
@@ -230,6 +259,51 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       if (this.runtimes.get(session.id) === opening) this.runtimes.delete(session.id)
     })
     return opening
+  }
+
+  /**
+   * Seed a forked session's archive from its parent's: the child starts with
+   * every summary and resolution the parent had instead of regenerating
+   * them. No-op when the session is not a fork, already has an archive, or
+   * the parent never checkpointed.
+   */
+  private async inheritForkArchive(session: CompactionAgentContext['session'], storePath: string): Promise<void> {
+    const parent = session.header.parentSession
+    if (parent === undefined) return
+    if (existsSync(storePath)) return
+    const base = session.header.cwd === undefined
+      ? resolve(this.config.storeRoot)
+      : resolve(session.header.cwd, this.config.storeRoot)
+    const parentPath = join(base, parent)
+    // A live parent's checkpoint lags its state (close is the only
+    // checkpoint), so close its runtime first: the copy then sees every
+    // formed memory, and the parent reopens lazily on its next pass.
+    const parentOpening = this.runtimes.get(parent)
+    if (parentOpening !== undefined) {
+      this.runtimes.delete(parent)
+      try {
+        const entry = await parentOpening
+        // Background failures are already logged; a tick still in flight
+        // must finish before the close or its writes land on a closed store.
+        await entry.tickChain.catch(() => {})
+        entry.runtime.manager.close()
+      } catch {
+        // The parent's open failed; fall through to whatever is on disk.
+      }
+    }
+    // No checkpoint means nothing durable to inherit: the child starts fresh.
+    if (!existsSync(join(parentPath, 'state.bin'))) return
+    // state.bin references records.log offsets, so the whole directory goes
+    // (minus the lock). The copy is consistent by construction: the parent's
+    // runtime was closed above, or the archive belongs to a dead process.
+    mkdirSync(storePath, { recursive: true })
+    for (const entry of readdirSync(parentPath, { withFileTypes: true })) {
+      if (entry.name === LOCK_FILE) continue
+      const from = join(parentPath, entry.name)
+      const to = join(storePath, entry.name)
+      if (entry.isDirectory()) cpSync(from, to, { recursive: true })
+      else copyFileSync(from, to)
+    }
   }
 
   /**
@@ -249,6 +323,40 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * tick that changed the strategy's stats appends one `autobio/memory`
    * event so the chat can show memory formation as it happens.
    */
+  /**
+   * The prompt tokens the picker cannot see: the newest provider-reported
+   * prompt size minus the mirror's own price for the current surface.
+   * Returns 0 before the first usage sample, when the mirror overstates the
+   * wire, or when the mirror cannot price itself.
+   */
+  private promptOverhead(session: CompactionAgentContext['session'], entry: RuntimeEntry): number {
+    const events = session.events
+    let prompt: number | undefined
+    for (let index = events.length - 1; index >= 0; index--) {
+      const event = events[index]
+      if (event?.type !== 'assistant/message') continue
+      const usage = (event.data as { usage?: TokenUsage }).usage
+      if (usage === undefined) continue
+      // pi-ai usage convention: the cache buckets are disjoint from input.
+      prompt = usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
+      break
+    }
+    if (prompt === undefined) return 0
+    let mirrored: number | undefined
+    try {
+      // An unbounded preview folds nothing, so its total is the mirror's
+      // price for the surface exactly as the wire would carry it.
+      mirrored = entry.runtime.manager.previewContext(
+        { maxTokens: UNBOUNDED_PREVIEW_TOKENS, reserveForResponse: 0 },
+        undefined,
+      )?.finalTokens
+    } catch {
+      mirrored = undefined
+    }
+    if (mirrored === undefined) return 0
+    return Math.max(0, prompt - mirrored)
+  }
+
   private runTick(session: CompactionAgentContext['session'], entry: RuntimeEntry): Promise<boolean> {
     const tick: Promise<boolean> = entry.tickChain.then(async () => {
       const manager = entry.runtime.manager
@@ -319,7 +427,22 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         ? undefined
         : Math.min(routed.contextWindow, DEFAULT_OPERATING_WINDOW_TOKENS))
     if (contextWindow === undefined) return null
-    const budget = { maxTokens: contextWindow, reserveForResponse: this.config.reserveTokens }
+    // The mirror prices only what it stores: no system prompt, no tool
+    // schemas, and — under the thinking-strip mirror — none of the signed
+    // reasoning the live request replays. Calibrate against the newest
+    // provider-reported prompt size, or a reasoning-heavy route silently
+    // outgrows its ceiling while the picker reports fits (observed: 60k
+    // mirrored where the wire carried 146k on kimi-coding/k3-256k).
+    const overhead = this.promptOverhead(session, entry)
+    // Clamp at the irreducible live set; past it the picker can only land
+    // the floor, which the infeasible path already does. The clamp never
+    // raises the budget above the configured window: a deliberately tiny
+    // window stays tiny.
+    const maxTokens = Math.max(
+      contextWindow - overhead,
+      Math.min(contextWindow, this.config.recentWindowTokens + this.config.reserveTokens),
+    )
+    const budget = { maxTokens, reserveForResponse: this.config.reserveTokens }
 
     // The picker can refuse in two ways — throw OverBudgetError, or answer a
     // preview whose diagnostics report no fitting layout. Either way the turn
@@ -385,11 +508,15 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     signal.throwIfAborted()
 
     const ops = planFolds(session, entry.runtime, preview.entries)
-    if (ops === null || ops.length === 0) return null
+    if (ops === null) {
+      this.warn(`autobiographical fold plan diverged from the live surface (${preview.entries.length} layout entries); skipping this pass`)
+      return null
+    }
+    if (ops.length === 0) return null
     if (foldedAtFloor !== undefined) {
       this.warn(`autobiographical frontier floor (${foldedAtFloor} tokens) exceeds the ${budget.maxTokens}-token budget; folding at the floor until merges deepen the pyramid`)
     }
-    return this.executeFolds(session, ops, turn, step)
+    return this.executeFolds(session, ops, turn, step, entry)
   }
 
   /** Land the planned folds as one bracketed, metered transaction. */
@@ -398,12 +525,15 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     ops: readonly FoldOp[],
     turn: number | null,
     step: number,
+    entry: RuntimeEntry,
   ): CompactionResult {
     // The caller guarantees at least one op, so the folded range is the first
-    // op's start through the last op's end.
-    const route = this.summarizationRoute({ session, options: {} })
-    const provider = route?.provider ?? ''
-    const model = route?.model ?? ''
+    // op's start through the last op's end. Provenance comes from the route
+    // the runtime was opened with: re-resolving here would fabricate an empty
+    // options bag and write '' into the fold message's model source, which
+    // session seed validation (fork, replay) rejects.
+    const { provider, model } = entry.route
+    assertFoldOpsApply(session.surface.nodes, ops)
     const compactionId = CompactionId(`autobio-${session.id}-${++this.compactionCounter}`)
     const startSeq = session.append('compaction/start', { compactionId, turn }).seq
 
@@ -416,7 +546,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 
     for (const [opIndex, op] of ops.entries()) {
       const blocks: import('@deepseek-ai/dsh-llm').ContentBlock[] = [{ type: 'text', text: op.text }]
-      const shadowedTokens = Math.ceil(op.text.length / 4)
+      const shadowedTokens = op.shadowedTokens
       summarySeq = session.append('compaction/summary', {
         compactionId,
         summary: blocks,

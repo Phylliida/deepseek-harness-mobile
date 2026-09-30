@@ -237,6 +237,30 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/core/session/src/types.ts:273`](../packages/core/session/src/types.ts)
 
+### `autobio/*`
+
+<a id="autobiomemory--log-only"></a>
+
+#### `autobio/memory` — log-only
+
+```ts persistence-catalog
+/** Log-only record of one memory-formation tick that formed memory. */
+'autobio/memory': AutobioMemoryEventData
+```
+
+来源：[`packages/compaction/compaction-autobiographical/src/types.ts:110`](../packages/compaction/compaction-autobiographical/src/types.ts)
+
+<a id="autobiomemory-progress--log-only"></a>
+
+#### `autobio/memory-progress` — log-only
+
+```ts persistence-catalog
+/** Log-only live text stream of an in-flight memory-formation call. */
+'autobio/memory-progress': AutobioMemoryProgressEventData
+```
+
+来源：[`packages/compaction/compaction-autobiographical/src/types.ts:112`](../packages/compaction/compaction-autobiographical/src/types.ts)
+
 ### `command/*`
 
 <a id="commanddone--log-only"></a>

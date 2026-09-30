@@ -28,6 +28,8 @@ export interface FoldOp {
   readonly startSeq: number
   readonly endSeq: number
   readonly shadowedSeqs: readonly number[]
+  /** Estimated tokens the shadowed surface nodes occupy (what the fold reclaims). */
+  readonly shadowedTokens: number
   /** Rendered recollection text, recall header included. */
   readonly text: string
 }
@@ -53,6 +55,8 @@ interface SurfaceAnno {
   readonly calls: readonly string[]
   /** Tool-call ids this node's message answers (tool-result blocks). */
   readonly results: readonly string[]
+  /** Estimated tokens the node's message occupies (the mirror's estimator). */
+  readonly tokens: number
 }
 
 const RECALL_HEADER = /^\[Recall (\S+)\]/
@@ -66,6 +70,23 @@ function foldNodeSummaryId(event: SessionEvent): string | undefined {
   const first = event.data.message.content[0]
   if (first?.type !== 'text') return undefined
   return RECALL_HEADER.exec(first.text)?.[1]
+}
+
+/**
+ * Pre-flight every planned op against the live surface: a replace append
+ * throws on uncited shadowed nodes, and executeFolds opens its bracket
+ * BEFORE the appends — a mid-transaction provenance failure would strand an
+ * open compaction and brick turn boundaries. The append layer validates
+ * again; catching a bad plan here keeps the bracket from ever opening.
+ */
+export function assertFoldOpsApply(surfaceSeqs: readonly number[], ops: readonly FoldOp[]): void {
+  for (const op of ops) {
+    const shadowed = new Set(op.shadowedSeqs)
+    const missing = surfaceSeqs.filter(seq => seq >= op.startSeq && seq <= op.endSeq && !shadowed.has(seq))
+    if (missing.length > 0) {
+      throw new Error(`fold ${op.summaryId} would shadow seqs ${missing.join(', ')} without citing them`)
+    }
+  }
 }
 
 /**
@@ -99,9 +120,11 @@ function annotateSurface(session: Session): SurfaceAnno[] {
     const calls: string[] = []
     const results: string[] = []
     const message = event === undefined ? null : deriveEventMessage(event)
+    let chars = 0
     for (const block of message?.content ?? []) {
       if (block.type === 'tool-call') calls.push(block.id)
       if (block.type === 'tool-result') results.push(block.toolCallId)
+      if (block.type === 'text') chars += block.text.length
     }
     return {
       seq,
@@ -109,6 +132,7 @@ function annotateSurface(session: Session): SurfaceAnno[] {
       covers: coverageOf(seq, new Set()),
       calls,
       results,
+      tokens: Math.ceil(chars / 4),
     }
   })
 }
@@ -222,10 +246,29 @@ export function planFolds(
     while (cursor < surface.length) {
       // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded by the loop condition
       const node = surface[cursor]!
-      const inside = node.foldId === undefined
-        ? node.seq >= item.firstSeq && node.seq <= item.lastSeq
-        : node.covers.length > 0 && node.covers.every(seq => seq >= item.firstSeq && seq <= item.lastSeq)
-      if (!inside) break
+      if (node.foldId === undefined) {
+        if (node.seq < item.firstSeq || node.seq > item.lastSeq) break
+      } else {
+        const contained = node.covers.length > 0
+          && node.covers.every(seq => seq >= item.firstSeq && seq <= item.lastSeq)
+        if (!contained) {
+          // Head-edge straddle: an earlier pass folded this node's coverage
+          // and the layout now wants a fold whose range merely starts inside
+          // it. The node keeps the head (coarser only shrinks the context);
+          // this fold shadows from the next node on. A replace op spans a
+          // contiguous surface range, so only a leading node can be folded
+          // around this way.
+          if (span.length === 0 && node.covers.length > 0) {
+            const minCover = Math.min(...node.covers)
+            const maxCover = Math.max(...node.covers)
+            if (item.firstSeq >= minCover && item.firstSeq <= maxCover && item.lastSeq > maxCover) {
+              cursor++
+              continue
+            }
+          }
+          break
+        }
+      }
       span.push(node)
       cursor++
     }
@@ -251,14 +294,34 @@ export function planFolds(
     // Widen the span to shadow both halves; the pair's exchange rides the
     // fold's recollection instead of the raw record. (Shrinking is not an
     // option: the walk consumes the surface contiguously.)
-    // oxlint-disable-next-line typescript/no-non-null-assertion -- span is non-empty past the guards above
-    const first = span[0]!
-    const prev = at > 0 ? surface[at - 1] : undefined
-    if (first.results.length > 0 && prev !== undefined && prev.foldId === undefined) {
-      // The result's call sits raw immediately before the span: pull it in,
-      // or refuse when the adjacency invariant does not hold at all.
-      if (!first.results.every(id => prev.calls.includes(id))) return null
+    //
+    // Backward direction: every result the span shadows whose call is NOT
+    // also shadowed needs its call pulled in from the raw nodes before the
+    // span — chained, since a pulled-in node may itself carry results whose
+    // calls sit further upstream. When the span starts right after a fold
+    // node, pull nothing: a needed call raw further upstream means the fold
+    // would orphan it, so the pass refuses instead.
+    const spanCalls = new Set(span.flatMap(node => node.calls))
+    const needed = new Set(span.flatMap(node => node.results).filter(id => !spanCalls.has(id)))
+    while (needed.size > 0) {
+      // The span is contiguous on the surface, so its head sits at
+      // cursor - span.length regardless of any fold-around skip at collect
+      // time (indexing from `at` here would misread a folded-around node).
+      const headIndex = cursor - span.length
+      const prev = headIndex > 0 ? surface[headIndex - 1] : undefined
+      if (prev === undefined) break
+      if (prev.foldId !== undefined) {
+        for (let i = headIndex - 2; i >= 0; i--) {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded by the loop condition
+          const earlier = surface[i]!
+          if (earlier.foldId === undefined && earlier.calls.some(id => needed.has(id))) return null
+        }
+        break
+      }
+      if (!prev.calls.some(id => needed.has(id))) return null
       span.unshift(prev)
+      for (const id of prev.calls) needed.delete(id)
+      for (const id of prev.results) needed.add(id)
     }
     // Calls inside the span still awaiting a visible result. One assistant
     // message can fan out several parallel calls, each answered by its own
@@ -268,10 +331,21 @@ export function planFolds(
     for (;;) {
       if (pending.size === 0) break
       const next: SurfaceAnno | undefined = surface[cursor]
-      // No neighbor, or a folded one: the result is absent or already
-      // invisible, so nothing orphans.
-      if (next === undefined || next.foldId !== undefined) break
-      if (next.results.length === 0 || !next.results.every(id => pending.has(id))) return null
+      // No neighbor: the result never reached the surface, so nothing orphans.
+      if (next === undefined) break
+      if (next.foldId !== undefined) {
+        // The result may still be RAW past the fold node — visible exactly
+        // where its call is about to vanish. Refuse rather than orphan it.
+        for (let i = cursor + 1; i < surface.length; i++) {
+          // oxlint-disable-next-line typescript/no-non-null-assertion -- bounded by the loop condition
+          const later = surface[i]!
+          if (later.foldId === undefined && later.results.some(id => pending.has(id))) return null
+        }
+        break
+      }
+      // A result answering a call OUTSIDE the span would orphan that call;
+      // anything else (in-step results, pair-free splices) absorbs safely.
+      if (!next.results.every(id => pending.has(id))) return null
       span.push(next)
       absorbed.add(next.seq)
       cursor++
@@ -288,6 +362,7 @@ export function planFolds(
       startSeq: firstSeq,
       endSeq: lastSeq,
       shadowedSeqs: span.map(node => node.seq),
+      shadowedTokens: span.reduce((total, node) => total + node.tokens, 0),
       text: item.text,
     })
     at = cursor

@@ -503,6 +503,8 @@ export interface AutobiographicalCompactionConfig {
    * skips until a routed window is known.
    */
   contextWindowTokens?: number
+  /** Per-model operating ceilings, keyed by the session's routed model; beats the ~64k default. */
+  contextWindowTokensByModel?: Record<string, number>
   /** Tokens reserved for the model's response inside the compile budget. */
   reserveTokens?: number
   /** Verbatim recent tail kept before anything folds; default 30000. */
@@ -515,7 +517,11 @@ export interface AutobiographicalCompactionConfig {
   targetChunkTokens?: number
   /** How many same-level summaries merge into the next level. */
   mergeThreshold?: number
-  /** Generation cap for one memory-formation call. */
+  /**
+   * Generation budget pinned on every memory-formation call; unset leaves
+   * the strategy's own request size. Raise it for long-reasoning models —
+   * thinking shares this budget with the recollection text.
+   */
   maxTokens?: number
   /** Frontier planning policy; `kv-stable` minimizes prompt-cache perturbation (default). */
   foldingStrategy?: 'kv-stable' | 'flat-profile' | 'oldest-first'
@@ -524,7 +530,7 @@ export interface AutobiographicalCompactionConfig {
 }
 ```
 
-来源：[`packages/compaction/compaction-autobiographical/src/types.ts:8`](../packages/compaction/compaction-autobiographical/src/types.ts)
+来源：[`packages/compaction/compaction-autobiographical/src/types.ts:10`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 <a id="deepseek-aidsh-compaction-basic"></a>
 

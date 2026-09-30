@@ -6,11 +6,13 @@ import { Context } from '@deepseek-ai/cordis'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import AutobiographicalCompactionEngine from '@deepseek-ai/dsh-compaction-autobiographical'
+import { resolveConfig } from '../src/config.ts'
+import { openSessionRuntime } from '../src/mirror.ts'
 import type { AutobiographicalCompactionConfig } from '@deepseek-ai/dsh-compaction-autobiographical'
 import type { CompactionAgentContext, ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
 import LlmRuntime, { createMessage, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import { deriveEventMessage, SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionRuntime } from '../src/mirror.ts'
 
 const SIGNAL = new AbortController().signal
@@ -115,6 +117,7 @@ function internals(engine: AutobiographicalCompactionEngine): { runtimes: Map<Se
   return engine as unknown as { runtimes: Map<SessionId, Promise<EngineEntry>> }
 }
 
+
 function openEntry(engine: AutobiographicalCompactionEngine, session: Session): Promise<EngineEntry> {
   const opening = internals(engine).runtimes.get(session.id)
   if (opening === undefined) throw new Error('the engine never opened this session archive')
@@ -169,6 +172,22 @@ function conversation(turns: number, options: ConversationOptions = {}): Session
     if (markers) session.append('turn/end', { turn, reason: { kind: 'completed' } })
   }
   return session
+}
+
+/** A fork child of `source` at `boundary` (default: the log tip), built the way SessionStore.fork builds it. */
+function forkOf(source: Session, childId: string, boundary?: number): Session {
+  const events = source.events
+  const last = events.at(-1)
+  const cut = boundary ?? (last === undefined ? -1 : last.seq)
+  const id = SessionId(childId)
+  return Session.create(id, events.slice(0, cut + 1), {
+    version: SESSION_FORMAT_VERSION,
+    id,
+    createdAt: Date.now(),
+    ...source.header.cwd === undefined ? {} : { cwd: source.header.cwd },
+    parentSession: source.id,
+    seedLength: cut + 1,
+  })
 }
 
 describe('AutobiographicalCompactionEngine wiring', () => {
@@ -375,11 +394,63 @@ describe('AutobiographicalCompactionEngine wiring', () => {
 
     await expect(foldUntilLanded(engine, agent)).resolves.not.toBeNull()
     expect(adapter.calls).toBeGreaterThan(0)
-    // The pass runs on the agent's route; the landed fold records the backend's
-    // own configured pair, which is empty here.
+    // The landed fold records the route the runtime was opened with; an empty
+    // pair here would fail session seed validation on fork/replay.
     const summary = session.events.find(event => event.type === 'compaction/summary')
-    expect(summary?.data).toMatchObject({ provider: '', model: '' })
+    expect(summary?.data).toMatchObject(ROUTE)
   }, 30_000)
+
+  it('warns when the fold plan diverges from the live surface', async () => {
+    const { engine, warnings } = setup()
+    const session = conversation(12)
+    const agent = { session, options: ROUTE } as Agent
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    patchManager(await openEntry(engine, session), {
+      compile: () => Promise.resolve(),
+      previewContext: () => ({
+        finalTokens: 90,
+        budgetTokens: 40,
+        fits: false,
+        exhausted: false,
+        headTokens: 0,
+        tailTokens: 30,
+        middleTokens: 60,
+        middleChunkCount: 3,
+        deepestLevel: 2,
+        resolutions: {},
+        moves: 0,
+        producedCount: 0,
+        // A copy entry naming a message the mirror never saw: planFolds
+        // cannot reconcile the layout and abandons the pass.
+        entries: [{ sourceRelation: 'copy', sourceMessageId: 'ghost' }],
+      }),
+    })
+    await expect(engine.compactIfNeeded(agent, 'pressure', SIGNAL)).resolves.toBeNull()
+    expect(warnings).toContain(
+      'autobiographical fold plan diverged from the live surface (1 layout entries); skipping this pass',
+    )
+  })
+
+  it('prices a fold\'s shadowed span by the shadowed content, not the recollection', async () => {
+    const { engine } = setup()
+    const session = conversation(12)
+    await foldUntilLanded(engine, { session, options: ROUTE } as Agent)
+    const summary = session.events.find(event => event.type === 'compaction/summary')
+    expect(summary).toBeDefined()
+    const shadowed = new Set(summary!.data.shadowedSeqs)
+    const expected = session.events
+      .filter(event => shadowed.has(event.seq))
+      .map((event) => {
+        const chars = (deriveEventMessage(event)?.content ?? [])
+          .filter(block => block.type === 'text')
+          .reduce((total, block) => total + (block.type === 'text' ? block.text.length : 0), 0)
+        return Math.ceil(chars / 4)
+      })
+      .reduce((total, tokens) => total + tokens, 0)
+    expect(summary!.data.shadowedTokenCount).toBe(expected)
+    // The recollection is one short sentence; the shadowed filler is much larger.
+    expect(summary!.data.shadowedTokenCount).toBeGreaterThan(100)
+  })
 
   it('skips the pass until a compile budget is known', async () => {
     const { engine } = setup({}, { omitContextWindow: true })
@@ -821,7 +892,303 @@ describe('AutobiographicalCompactionEngine wiring', () => {
     expect(added[0]?.data.memory).toBeUndefined()
   })
 
+
+  it('shrinks the picker budget by the provider-measured prompt overhead', async () => {
+    // The mirror cannot price the system prompt, tool schemas, or replayed
+    // reasoning; the newest usage sample says the wire carried 2000 tokens
+    // where the mirror prices ~1.4k, so the pass must budget the difference.
+    const { engine } = setup({ contextWindowTokens: 1000 })
+    const session = conversation(12)
+    session.append('assistant/message', {
+      turn: 13,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'an answer with accounting' }],
+        source: { kind: 'model', provider: 'test', model: 'test-model' },
+      }),
+      usage: { inputTokens: 2000, outputTokens: 10 },
+    }, { surfaceOp: 'append' })
+    const agent = { session, options: ROUTE } as Agent
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+
+    const budgets: number[] = []
+    let mirrored = 0
+    const entry = await openEntry(engine, session)
+    const realPreview = entry.runtime.manager.previewContext.bind(entry.runtime.manager)
+    patchManager(entry, {
+      previewContext: (budget: { maxTokens: number }, ...rest: unknown[]) => {
+        budgets.push(budget.maxTokens)
+        const result = realPreview(budget as never, ...(rest as []))
+        if (budget.maxTokens > 1000) mirrored = (result as { finalTokens: number }).finalTokens
+        return result
+      },
+    })
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    // First the unbounded calibration probe, then the shrunken real budget.
+    expect(budgets.length).toBeGreaterThanOrEqual(2)
+    expect(budgets[1]).toBe(Math.max(1000 - (2000 - mirrored), 100 + 120))
+    expect(budgets[1]).toBeLessThan(1000)
+  })
+
+  it('ignores a provider measurement below the mirror price', async () => {
+    // Overhead is a gap, never a bonus: a wire smaller than the mirror's own
+    // estimate leaves the budget untouched.
+    const { engine } = setup({ contextWindowTokens: 1000 })
+    const session = conversation(12)
+    session.append('assistant/message', {
+      turn: 13,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'an answer with accounting' }],
+        source: { kind: 'model', provider: 'test', model: 'test-model' },
+      }),
+      usage: { inputTokens: 10, outputTokens: 5 },
+    }, { surfaceOp: 'append' })
+    const agent = { session, options: ROUTE } as Agent
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+
+    const budgets: number[] = []
+    const entry = await openEntry(engine, session)
+    const realPreview = entry.runtime.manager.previewContext.bind(entry.runtime.manager)
+    patchManager(entry, {
+      previewContext: (budget: { maxTokens: number }, ...rest: unknown[]) => {
+        budgets.push(budget.maxTokens)
+        return realPreview(budget as never, ...(rest as []))
+      },
+    })
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    expect(budgets.length).toBeGreaterThanOrEqual(2)
+    expect(budgets[1]).toBe(1000)
+  })
+
+  it.each([
+    ['throws', () => { throw new Error('store closed') }],
+    ['answers no layout', () => null],
+  ])('treats an unpriceable mirror as zero overhead when the probe %s', async (_label, probe) => {
+    const { engine, warnings } = setup({ contextWindowTokens: 1000 })
+    const session = conversation(12)
+    session.append('assistant/message', {
+      turn: 13,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'an answer with accounting' }],
+        source: { kind: 'model', provider: 'test', model: 'test-model' },
+      }),
+      usage: { inputTokens: 2000, outputTokens: 10 },
+    }, { surfaceOp: 'append' })
+    const agent = { session, options: ROUTE } as Agent
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    patchManager(await openEntry(engine, session), { previewContext: probe })
+
+    await expect(engine.compactIfNeeded(agent, 'pressure', SIGNAL)).resolves.toBeNull()
+    expect(warnings.some(message => message.startsWith(
+      'autobiographical frontier planning found no layout that fits: ',
+    ))).toBe(true)
+  })
+
+
+  it('a fork of a live parent inherits its memories instead of regenerating', async () => {
+    const { engine, adapter, root } = setup()
+    const parent = conversation(12, { cwd: root })
+    const parentAgent = { session: parent, options: ROUTE } as Agent
+    await foldUntilLanded(engine, parentAgent)
+    const formed = adapter.calls
+    expect(formed).toBeGreaterThan(0)
+
+    // Forking a session whose runtime is live checkpoints the parent first,
+    // so the child inherits every formed memory; the parent's runtime cache
+    // entry is dropped and its next pass reopens from the checkpoint.
+    const child = forkOf(parent, 'autobio-fork-live')
+    await engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    expect(internals(engine).runtimes.has(parent.id)).toBe(false)
+    const childEntry = await openEntry(engine, child)
+    expect(childEntry.runtime.manager.getSummariesInRange({}).length).toBeGreaterThan(0)
+    expect(adapter.calls - formed).toBeLessThanOrEqual(1)
+    // The child owns an independent archive, not a pointer into the parent's.
+    expect(existsSync(join(root, child.id, 'MANIFEST'))).toBe(true)
+
+    // The parent keeps working afterwards, rehydrated from its checkpoint.
+    await engine.compactIfNeeded(parentAgent, 'pressure', SIGNAL)
+    expect(internals(engine).runtimes.has(parent.id)).toBe(true)
+  })
+
+  it('a fork at an earlier boundary still inherits the checkpointed memories', async () => {
+    const { engine, adapter } = setup()
+    const parent = conversation(12)
+    await foldUntilLanded(engine, { session: parent, options: ROUTE } as Agent)
+    const formed = adapter.calls
+    // Copy semantics inherit the checkpoint (everything formed up to the
+    // fork), not a time-travel cut at the boundary.
+    const boundary = parent.events.find(event => event.type === 'turn/start' && event.data.turn === 6)?.seq
+    expect(boundary).toBeDefined()
+    const child = forkOf(parent, 'autobio-fork-mid', boundary)
+    await engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    const childEntry = await openEntry(engine, child)
+    expect(childEntry.runtime.manager.getSummariesInRange({}).length).toBeGreaterThan(0)
+    expect(adapter.calls - formed).toBeLessThanOrEqual(1)
+  })
+
+  it('a fork of a parent that never checkpointed starts fresh', async () => {
+    const { engine, adapter, root } = setup()
+    // The parent never ran a pass: no runtime, no archive on disk.
+    const parent = conversation(12)
+    const child = forkOf(parent, 'autobio-fork-uncheckpointed')
+    expect(existsSync(join(root, parent.id))).toBe(false)
+    await foldUntilLanded(engine, { session: child, options: ROUTE } as Agent)
+    expect(adapter.calls).toBeGreaterThan(0)
+  })
+
+  it('a fork-of-fork inherits through the intermediate checkpoint', async () => {
+    const { engine, adapter } = setup()
+    const parent = conversation(12)
+    await foldUntilLanded(engine, { session: parent, options: ROUTE } as Agent)
+    const child = forkOf(parent, 'autobio-fork-gen2')
+    await engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL)
+    const beforeGrandchild = adapter.calls
+    const grandchild = forkOf(child, 'autobio-fork-gen3')
+    await engine.compactIfNeeded({ session: grandchild, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    const entry = await openEntry(engine, grandchild)
+    expect(entry.runtime.manager.getSummariesInRange({}).length).toBeGreaterThan(0)
+    expect(adapter.calls - beforeGrandchild).toBeLessThanOrEqual(1)
+  })
+
+  it('a fork whose archive exists opens it without touching the parent', async () => {
+    const { engine, adapter, root } = setup()
+    const parent = conversation(12)
+    await foldUntilLanded(engine, { session: parent, options: ROUTE } as Agent)
+    const child = forkOf(parent, 'autobio-fork-reopen')
+    await engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    const summaries = (await openEntry(engine, child)).runtime.manager.getSummariesInRange({}).length
+    expect(summaries).toBeGreaterThan(0)
+    const formed = adapter.calls
+
+    // Simulate a restart: drop the cached runtime and reopen over the
+    // child's own (now independently written) archive. The parent is gone
+    // entirely — no inheritance step runs.
+    const entry = await openEntry(engine, child)
+    entry.runtime.manager.close()
+    internals(engine).runtimes.delete(child.id)
+    rmSync(join(root, parent.id), { recursive: true, force: true })
+    await engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    expect((await openEntry(engine, child)).runtime.manager.getSummariesInRange({}).length)
+      .toBeGreaterThanOrEqual(summaries)
+    expect(adapter.calls - formed).toBeLessThanOrEqual(1)
+  })
+
+  it('still forks when the parent runtime entry is a rejected open', async () => {
+    const { engine, root } = setup()
+    const parent = conversation(12)
+    // A parent whose open failed left no checkpoint: the child starts fresh.
+    internals(engine).runtimes.set(parent.id, Promise.reject(new Error('locked store')))
+    const child = forkOf(parent, 'autobio-fork-rejected')
+    await engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    expect(existsSync(join(root, child.id, 'MANIFEST'))).toBe(true)
+
+    // A resolved entry whose background tick rejected: the failure is
+    // already logged, so inheritance swallows it and closes the manager.
+    const ticking = conversation(12)
+    const tickChain = Promise.reject(new Error('tick failed'))
+    tickChain.catch(() => {})
+    internals(engine).runtimes.set(ticking.id, Promise.resolve({
+      runtime: { manager: { close: () => undefined } },
+      tickChain,
+      progress: { attempt: 1, buffer: '' },
+      route: ROUTE,
+    } as unknown as EngineEntry))
+    const tickChild = forkOf(ticking, 'autobio-fork-tick-failed')
+    await engine.compactIfNeeded({ session: tickChild, options: ROUTE }, 'pressure', SIGNAL)
+    await sleep(10)
+    expect(existsSync(join(root, tickChild.id, 'MANIFEST'))).toBe(true)
+  })
+
+  it('inherits a partial checkpoint set, skipping files the parent lacks', async () => {
+    const { engine, root } = setup()
+    const parent = conversation(12)
+    // Hand-built parent archive: only state.bin (no indexes, no branches, no
+    // blobs). The copy must take what exists and skip the rest.
+    mkdirSync(join(root, parent.id), { recursive: true })
+    writeFileSync(join(root, parent.id, 'state.bin'), 'partial')
+    const child = forkOf(parent, 'autobio-fork-partial')
+    // The inherited 'state.bin' is not a real checkpoint, so the open fails
+    // loudly — but the copy itself must not throw on the missing siblings.
+    await expect(
+      engine.compactIfNeeded({ session: child, options: ROUTE }, 'pressure', SIGNAL),
+    ).rejects.toThrow()
+    expect(existsSync(join(root, child.id, 'state.bin'))).toBe(true)
+    expect(existsSync(join(root, child.id, 'branches.bin'))).toBe(false)
+  })
+
+  it('checkpoints open archives on fiber dispose so a restart keeps its memories', async () => {
+    // Without the dispose close, Chronicle never writes state.bin and the
+    // next process replays an empty store — the regeneration the user saw.
+    const root = mkdtempSync(join(tmpdir(), 'autobio-engine-'))
+    roots.push(root)
+    const ctx = new Context()
+    const llm = new LlmRuntime(ctx)
+    ctx.llm.registerAdapter(['test'], new MemoryAdapter(false))
+    void llm
+    ctx.logger.warn = (() => undefined) as typeof ctx.logger.warn
+    let engine!: AutobiographicalCompactionEngine
+    const fiber = await ctx.plugin((pluginCtx: Context) => {
+      engine = new AutobiographicalCompactionEngine(pluginCtx, {
+        storeRoot: root,
+        contextWindowTokens: 400,
+        reserveTokens: 100,
+        recentWindowTokens: 120,
+        headWindowTokens: 0,
+        targetChunkTokens: 60,
+        mergeThreshold: 2,
+        maxTokens: 8192,
+        auto: false,
+      })
+    })
+    const session = conversation(12)
+    await engine.compactIfNeeded({ session, options: ROUTE }, 'pressure', SIGNAL)
+
+    await fiber.dispose()
+
+    const stubBridge = { complete: () => { throw new Error('no calls expected') } }
+    const reopened = await openSessionRuntime(
+      join(root, session.id),
+      resolveConfig({}),
+      stubBridge as never,
+      'test-model',
+    )
+    expect(reopened.manager.getSummariesInRange({}).length).toBeGreaterThan(0)
+    reopened.manager.close()
+  })
+
+  it('tolerates a rejected runtime open during shutdown close', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'autobio-engine-'))
+    roots.push(root)
+    const ctx = new Context()
+    const llm = new LlmRuntime(ctx)
+    void llm
+    ctx.logger.warn = (() => undefined) as typeof ctx.logger.warn
+    let engine!: AutobiographicalCompactionEngine
+    const fiber = await ctx.plugin((pluginCtx: Context) => {
+      engine = new AutobiographicalCompactionEngine(pluginCtx, {
+        storeRoot: root,
+        contextWindowTokens: 400,
+        auto: false,
+      })
+    })
+    internals(engine).runtimes.set(SessionId('ghost'), Promise.reject(new Error('store locked')))
+    // The rejected open must not take the shutdown down with it.
+    await fiber.dispose()
+    expect(internals(engine).runtimes.size).toBe(0)
+  })
 })
+
 
 describe('automatic folding runtime toggle', () => {
   const roots: string[] = []

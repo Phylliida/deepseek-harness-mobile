@@ -3,7 +3,7 @@ import { CallId, createAssistantMessage, createMessage, createUserMessage } from
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ContextEntry, SourceRelation } from '@animalabs/context-manager'
-import { planFolds } from '../src/applicator.ts'
+import { assertFoldOpsApply, planFolds } from '../src/applicator.ts'
 import type { SessionRuntime } from '../src/mirror.ts'
 
 /** One mirrored message: only the stamped seq participates in planning. */
@@ -73,6 +73,9 @@ function recall(cacheLayoutKey: string | undefined, text = 'I remember the excha
 }
 
 const SUMMARY = { id: 'L1-0', level: 1, first: 'q1', last: 'a1' }
+
+/** The applicator's message price: ceil over text characters. */
+const tok = (text: string): number => Math.ceil(text.length / 4)
 
 /** A session whose raw turns are the mirrored ids `q1`/`a1` (and `q2`). */
 function conversation(): { session: Session; seqs: Record<string, number> } {
@@ -176,6 +179,75 @@ function toolRuntime(seqs: Record<string, number>, summaries: StubOptions['summa
   })
 }
 
+/** A plain text node on the surface. */
+function appendPlain(session: Session, text: string): number {
+  return session.append('user/message', createUserMessage({
+    content: [{ type: 'text', text }],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' }).seq
+}
+
+/** An assistant node declaring the given tool calls. */
+function appendCalls(session: Session, ...ids: string[]): number {
+  return session.append('assistant/message', {
+    turn: 1,
+    step: 1,
+    message: createAssistantMessage({
+      content: ids.map(id => ({ type: 'tool-call' as const, id: CallId(id), name: 'probe', arguments: '{}' })),
+      source: { provider: 'test', model: 'test-model' },
+    }),
+  }, { surfaceOp: 'append' }).seq
+}
+
+/** A tool node answering the given calls (and optionally declaring new ones). */
+function appendResults(session: Session, ids: readonly string[], calls: readonly string[] = []): number {
+  return session.append('user/message', createUserMessage({
+    content: [
+      ...ids.map(id => ({ type: 'tool-result' as const, toolCallId: CallId(id), content: [{ type: 'text' as const, text: 'done' }] })),
+      ...calls.map(id => ({ type: 'tool-call' as const, id: CallId(id), name: 'probe', arguments: '{}' })),
+    ],
+    source: { kind: 'user' },
+  }), { surfaceOp: 'append' }).seq
+}
+
+/** A runtime stub: seqs as m0..mN, plus one summary over seqs[first]..seqs[last]. */
+function rt(seqs: readonly number[], summaryId: string, first: number, last: number): SessionRuntime {
+  return runtime({
+    messages: Object.fromEntries(seqs.map((seq, i) => [`m${i}`, { metadata: { dshSeq: seq } }])),
+    summaries: { [summaryId]: { id: summaryId, level: 1, first: `m${first}`, last: `m${last}` } },
+  })
+}
+
+describe('assertFoldOpsApply', () => {
+  it('accepts ops that cite every surface node in their range', () => {
+    expect(() => {
+      assertFoldOpsApply([0, 1, 2], [{
+        summaryId: 'L1-0',
+        level: 1,
+        startSeq: 0,
+        endSeq: 1,
+        shadowedSeqs: [0, 1],
+        shadowedTokens: 2,
+        text: '[Recall L1-0]',
+      }])
+    }).not.toThrow()
+  })
+
+  it('throws before the bracket opens when an op skips a surface node', () => {
+    expect(() => {
+      assertFoldOpsApply([0, 1, 2], [{
+        summaryId: 'L1-0',
+        level: 1,
+        startSeq: 0,
+        endSeq: 2,
+        shadowedSeqs: [0, 2],
+        shadowedTokens: 2,
+        text: '[Recall L1-0]',
+      }])
+    }).toThrow('fold L1-0 would shadow seqs 1 without citing them')
+  })
+})
+
 describe('planFolds', () => {
   it('returns no ops when the surface already matches the selected layout', () => {
     const { session } = conversation()
@@ -261,9 +333,125 @@ describe('planFolds', () => {
       startSeq: seqs['q1'],
       endSeq: seqs['a1'],
       shadowedSeqs: [seqs['q1'], seqs['a1']],
+      shadowedTokens: tok('q1') + tok('a1'),
       // The answer's text blocks ride the recall header; reasoning is dropped.
       text: '[Recall L1-0]\n\nI remember the exchange.',
     }])
+  })
+
+  it('refuses when a pending call\'s result is raw beyond a fold node', () => {
+    const session = Session.create(SessionId('applicator-f1'))
+    const a = appendCalls(session, 'c1')
+    const x = appendPlain(session, 'x1')
+    const r = appendResults(session, ['c1'])
+    appendFold(session, 'L1-x', x, x)
+    // The picker wants [a] folded; its result sits raw past the fold node.
+    expect(planFolds(session, rt([a, r], 'L1-0', 0, 0), recall('L1-0'))).toBeNull()
+  })
+
+  it('folds when a pending call\'s result is nowhere visible', () => {
+    const session = Session.create(SessionId('applicator-f1b'))
+    const a = appendCalls(session, 'c1')
+    const x = appendPlain(session, 'x1')
+    appendFold(session, 'L1-x', x, x)
+    const plan = planFolds(session, rt([a], 'L1-0', 0, 0), recall('L1-0'))
+    expect(plan?.map(op => op.shadowedSeqs)).toEqual([[a]])
+  })
+
+  it('scans past multiple fold nodes for a pending call\'s result', () => {
+    const session = Session.create(SessionId('applicator-f1c'))
+    const a = appendCalls(session, 'c1')
+    const x1 = appendPlain(session, 'x1')
+    const x2 = appendPlain(session, 'x2')
+    const r = appendResults(session, ['c1'])
+    appendFold(session, 'L1-x1', x1, x1)
+    appendFold(session, 'L1-x2', x2, x2)
+    expect(planFolds(session, rt([a, r], 'L1-0', 0, 0), recall('L1-0'))).toBeNull()
+  })
+
+  it('refuses when the span\'s first result has its call raw before a fold node', () => {
+    const session = Session.create(SessionId('applicator-f2'))
+    const q = appendPlain(session, 'q1')
+    const a = appendCalls(session, 'c1')
+    const x = appendPlain(session, 'x1')
+    const r = appendResults(session, ['c1'])
+    appendFold(session, 'L1-x', x, x)
+    const mirror = rt([q, a, r], 'L1-0', 2, 2)
+    expect(planFolds(session, mirror, [raw(['m0']), raw(['m1']), ...recall('L1-0')])).toBeNull()
+  })
+
+  it('folds when that call is already shadowed inside the fold node', () => {
+    const session = Session.create(SessionId('applicator-f2b'))
+    const q = appendPlain(session, 'q1')
+    const a = appendCalls(session, 'c1')
+    const x = appendPlain(session, 'x1')
+    const r = appendResults(session, ['c1'])
+    appendFold(session, 'L1-x', a, x)
+    const mirror = rt([q, r], 'L1-0', 1, 1)
+    const plan = planFolds(session, mirror, [raw(['m0']), ...recall('L1-0')])
+    expect(plan?.map(op => op.shadowedSeqs)).toEqual([[r]])
+  })
+
+  it('refuses a fold-around whose result\'s call is raw before the skipped node', () => {
+    const session = Session.create(SessionId('applicator-f3'))
+    const a = appendCalls(session, 'c1')
+    const x1 = appendPlain(session, 'x1')
+    const x2 = appendPlain(session, 'x2')
+    const r = appendResults(session, ['c1'])
+    appendFold(session, 'L1-x', x1, x2)
+    // The range starts inside the fold node and extends past it: fold-around
+    // skips the node, then backward repair must refuse — the result's call is
+    // raw upstream, and pulling it in would skip the fold node mid-span.
+    const mirror = runtime({
+      messages: {
+        ma: { metadata: { dshSeq: a } },
+        mx2: { metadata: { dshSeq: x2 } },
+        mr: { metadata: { dshSeq: r } },
+      },
+      summaries: { 'L1-0': { id: 'L1-0', level: 1, first: 'mx2', last: 'mr' } },
+    })
+    expect(planFolds(session, mirror, [raw(['ma']), ...recall('L1-0')])).toBeNull()
+  })
+
+  it('chains backward pair repair until the call set closes', () => {
+    const session = Session.create(SessionId('applicator-f5'))
+    const a0 = appendCalls(session, 'c0')
+    const m1 = appendResults(session, ['c0'], ['c1'])
+    const r2 = appendResults(session, ['c1'])
+    // Folding [r2] pulls in m1 (c1's declaration), whose own result c0 then
+    // pulls in a0: the whole chain shadows together or not at all.
+    const mirror = rt([a0, m1, r2], 'L1-0', 2, 2)
+    const plan = planFolds(session, mirror, [raw(['m0']), raw(['m1']), ...recall('L1-0')])
+    expect(plan?.map(op => op.shadowedSeqs)).toEqual([[a0, m1, r2]])
+  })
+
+  it('refuses when the backward chain meets an unrelated raw node', () => {
+    const session = Session.create(SessionId('applicator-f5b'))
+    const a0 = appendCalls(session, 'c0')
+    const x = appendPlain(session, 'x')
+    const m1 = appendResults(session, ['c0'], ['c1'])
+    const r2 = appendResults(session, ['c1'])
+    const mirror = rt([a0, x, m1, r2], 'L1-0', 3, 3)
+    expect(planFolds(session, mirror, [raw(['m0']), raw(['m1']), raw(['m2']), ...recall('L1-0')])).toBeNull()
+  })
+
+  it('folds a result whose call never reached the surface', () => {
+    const session = Session.create(SessionId('applicator-orphan-result'))
+    const r = appendResults(session, ['c9'])
+    const plan = planFolds(session, rt([r], 'L1-0', 0, 0), recall('L1-0'))
+    expect(plan?.map(op => op.shadowedSeqs)).toEqual([[r]])
+  })
+
+  it('refuses when the next raw result answers a call outside the span', () => {
+    const session = Session.create(SessionId('applicator-interleaved'))
+    const a0 = appendCalls(session, 'c0')
+    const a1 = appendCalls(session, 'c1')
+    appendResults(session, ['c0'])
+    appendResults(session, ['c1'])
+    // Folding [a1] would need to absorb r0 first — but r0 answers c0, which
+    // the fold leaves visible; absorbing it orphans c0, so the pass refuses.
+    const mirror = rt([a0, a1], 'L1-0', 1, 1)
+    expect(planFolds(session, mirror, [raw(['m0']), ...recall('L1-0')])).toBeNull()
   })
 
   it('leaves an already-applied recollection in place', () => {
@@ -297,6 +485,7 @@ describe('planFolds', () => {
       startSeq: foldSeq,
       endSeq: foldSeq,
       shadowedSeqs: [foldSeq],
+      shadowedTokens: tok('[Recall L2-1]\n\nI recall it.'),
       text: '[Recall L1-0]\n\nI remember the exchange.',
     }])
     // Planning is pure: nothing landed, so the same refinement is still planned.
@@ -480,10 +669,11 @@ describe('planFolds', () => {
     )).toEqual([])
   })
 
-  it('keeps a coarser surface fold when a finer fold straddles it', () => {
-    // L2-109's range starts inside L3-42's coverage and ends past it; the
-    // pass must not subdivide the existing node, so the entry stands down
-    // and the plan folds the tail it can own.
+  it('folds around a coarser node when the range starts inside it', () => {
+    // L2-109 [q2..q3] starts inside L3-42's coverage [q1..q2] and ends past
+    // it: the node keeps the head (its fold already covers q2), and the new
+    // fold shadows from q3 on — a replace op spans a contiguous surface
+    // range, so the fold starts after the node rather than swallowing it.
     const session = Session.create(SessionId('applicator-straddle'))
     const seqs: Record<string, number> = {}
     for (const id of ['q1', 'q2', 'q3']) {
@@ -495,17 +685,28 @@ describe('planFolds', () => {
     appendFold(session, 'L3-42', seqs['q1']!, seqs['q2']!)
     const mirror = runtime({
       messages: Object.fromEntries(Object.entries(seqs).map(([id, seq]) => [id, { metadata: { dshSeq: seq } }])),
-      summaries: {
-        'L2-109': { id: 'L2-109', level: 2, first: 'q2', last: 'q3' },
-        'L2-110': { id: 'L2-110', level: 2, first: 'q3', last: 'q3' },
-      },
+      summaries: { 'L2-109': { id: 'L2-109', level: 2, first: 'q2', last: 'q3' } },
     })
-    // L2-109 [q2..q3] straddles L3-42 [q1..q2]; L2-110 [q3] lands on the tail.
-    const plan = planFolds(session, mirror, [...recall('L2-109'), ...recall('L2-110')])
+    const plan = planFolds(session, mirror, recall('L2-109'))
     expect(plan).toEqual([expect.objectContaining({
-      summaryId: 'L2-110',
+      summaryId: 'L2-109',
       shadowedSeqs: [seqs['q3']],
     })])
+  })
+
+
+  it('keeps a coarser surface fold when a finer range ends inside it', () => {
+    // End-edge straddle with nothing foldable before the node: the entry
+    // stands down rather than subdividing the existing fold.
+    const plan = planFolds(
+      stubSession([stubFold(7, 'L1-0', [10, 20])], [7]),
+      runtime({
+        messages: { first: { metadata: { dshSeq: 5 } }, last: { metadata: { dshSeq: 15 } } },
+        summaries: { 'L2-5': { id: 'L2-5', level: 2, first: 'first', last: 'last' } },
+      }),
+      recall('L2-5'),
+    )
+    expect(plan).toEqual([])
   })
 
   it('abandons the pass when a fold range misses the surface entirely', () => {
@@ -541,36 +742,16 @@ describe('planFolds', () => {
     })])
   })
 
-  it('refuses a fold whose called tool result does not follow', () => {
-    // The span ends with the call, but the next raw node is plain text: the
-    // pair cannot be made whole, so the pass plans nothing.
-    const session = Session.create(SessionId('applicator-no-result'))
-    const q = session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: 'q1' }],
-      source: { kind: 'user' },
-    }), { surfaceOp: 'append' }).seq
-    const a = session.append('assistant/message', {
-      turn: 1,
-      step: 1,
-      message: createMessage({
-        role: 'assistant',
-        content: [{ type: 'tool-call', id: CallId('c1'), name: 'probe', arguments: '{}' }],
-        source: { kind: 'model', provider: 'test', model: 'test-model' },
-      }),
-    }, { surfaceOp: 'append' }).seq
-    const q2 = session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: 'q2' }],
-      source: { kind: 'user' },
-    }), { surfaceOp: 'append' }).seq
-    const mirror = runtime({
-      messages: {
-        q1: { metadata: { dshSeq: q } },
-        a1: { metadata: { dshSeq: a } },
-        q2: { metadata: { dshSeq: q2 } },
-      },
-      summaries: { F: { id: 'F', level: 1, first: 'a1', last: 'a1' } },
-    })
-    expect(planFolds(session, mirror, [raw(['q1']), ...recall('F'), raw(['q2'])])).toBeNull()
+  it('absorbs a pair-free splice between a call and its pending result', () => {
+    // The span ends with the call and the next raw node is plain text: the
+    // splice carries no pair halves, so shadowing it with the span is safe —
+    // the call's result simply never arrives, which orphans nothing.
+    const session = Session.create(SessionId('applicator-splice'))
+    const q = appendPlain(session, 'q1')
+    const a = appendCalls(session, 'c1')
+    const q2 = appendPlain(session, 'q2')
+    const plan = planFolds(session, rt([q, a, q2], 'L1-0', 0, 1), recall('L1-0'))
+    expect(plan?.map(op => op.shadowedSeqs)).toEqual([[q, a, q2]])
   })
 
   it('accepts a fold whose call ends the surface', () => {

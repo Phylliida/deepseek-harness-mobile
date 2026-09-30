@@ -89,6 +89,11 @@ function mirrorContent(event: SessionEvent): { participant: string; content: Mem
  * running the autobiographical strategy, plus the replay watermark recovered
  * from the newest mirrored message's stamped seq.
  */
+/**
+ * Open (or reopen) the per-session runtime: a Chronicle-backed ContextManager
+ * running the autobiographical strategy, plus the replay watermark recovered
+ * from the newest mirrored message's stamped seq.
+ */
 export async function openSessionRuntime(
   storePath: string,
   config: ResolvedAutobiographicalConfig,
@@ -131,13 +136,19 @@ export async function openSessionRuntime(
   })
 
   // -1 rather than 0: seq 0 is a real event and must mirror on a fresh store.
+  // Scan backward for the newest STAMPED message: an unstamped tip (e.g. a
+  // strategy-authored transition marker) must not reset the watermark, or
+  // the next sync would re-mirror the whole history on top of itself.
   let watermark = -1
   const count = manager.getMessageCount()
-  if (count > 0) {
-    const window = manager.getMessageWindow(count - 1, 1)
-    const last: StoredMessage | undefined = window.messages[0]
-    const stamped = last?.metadata?.['dshSeq']
-    if (typeof stamped === 'number' && Number.isSafeInteger(stamped)) watermark = stamped
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const window = manager.getMessageWindow(offset, 1)
+    const message: StoredMessage | undefined = window.messages[0]
+    const stamped = message?.metadata?.['dshSeq']
+    if (typeof stamped === 'number' && Number.isSafeInteger(stamped)) {
+      watermark = stamped
+      break
+    }
   }
   return { manager, strategy, watermark }
 }

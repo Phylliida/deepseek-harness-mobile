@@ -528,7 +528,7 @@ export interface AutobiographicalCompactionConfig {
 }
 ```
 
-Source: [`packages/compaction/compaction-autobiographical/src/types.ts:8`](../packages/compaction/compaction-autobiographical/src/types.ts)
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:10`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 <a id="deepseek-aidsh-compaction-basic"></a>
 

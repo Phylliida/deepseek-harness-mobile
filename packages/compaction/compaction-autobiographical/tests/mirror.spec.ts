@@ -192,6 +192,36 @@ describe('session mirror', () => {
     second.manager.close()
   })
 
+  it('recovers the watermark past an unstamped tip', async () => {
+    const root = storeRoot()
+    const first = await open(root)
+    const session = Session.create(SessionId('mirror-unstamped-tip'))
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'stamped' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    syncSessionMirror(first, session)
+    // A strategy-authored marker carries no stamp; the tip is unstamped.
+    first.manager.addMessage('assistant', [{ type: 'text', text: 'marker' }])
+    first.manager.close()
+
+    const second = await open(root)
+    expect(second.watermark).toBe(session.events.at(-1)!.seq)
+    expect(syncSessionMirror(second, session)).toBe(0)
+    second.manager.close()
+  })
+
+  it('treats a store holding only unstamped messages as empty', async () => {
+    const root = storeRoot()
+    const first = await open(root)
+    first.manager.addMessage('assistant', [{ type: 'text', text: 'marker' }])
+    first.manager.close()
+
+    const second = await open(root)
+    expect(second.watermark).toBe(-1)
+    second.manager.close()
+  })
+
   it('leaves unstamped and malformed stamps unclaimed', async () => {
     const root = storeRoot()
     const first = await open(root)
