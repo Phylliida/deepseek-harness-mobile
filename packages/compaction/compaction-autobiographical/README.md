@@ -44,7 +44,7 @@ The backend drives the strategy in adaptive-resolution mode with its own tick au
 
 ## Usage
 
-`AutobiographicalCompactionEngine` injects `ctx.llm` and `ctx.sessions`. The composition below receives `ctx.llm` from its host and installs the session store the engine needs:
+`AutobiographicalCompactionEngine` injects `ctx.llm`. The composition below receives `ctx.llm` from its host and installs the session store the engine needs:
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'

@@ -44,7 +44,7 @@
 
 ## 用法
 
-`AutobiographicalCompactionEngine` 注入 `ctx.llm` 与 `ctx.sessions`。以下组合从其宿主接收 `ctx.llm`，并安装引擎所需的会话存储：
+`AutobiographicalCompactionEngine` 注入 `ctx.llm`。以下组合从其宿主接收 `ctx.llm`，并安装引擎所需的会话存储：
 
 ```ts
 import type { Context } from '@deepseek-ai/cordis'

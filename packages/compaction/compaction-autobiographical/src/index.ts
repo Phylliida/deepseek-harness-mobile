@@ -47,7 +47,7 @@ export type {
 export const name = 'compaction-autobiographical'
 
 /** Services this engine needs before it can fold anything. */
-export const inject = ['llm', 'compaction']
+export const inject = ['llm']
 
 /** The live context-manager stack for one session. */
 interface Runtime {
