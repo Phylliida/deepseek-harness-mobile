@@ -20,7 +20,7 @@ packages/compaction/compaction-autobiographical/src/
   index.ts    — engine: plugin entry, runtime cache, fold pass, tick chain
   store.ts    — in-memory JsStore shim
   seed.ts     — open-time seeding + live sync from the session log
-  plan.ts     — frontier walk → FoldOp list
+  plan.ts     — partition resolved messages by recollection → FoldOp list
   apply.ts    — fold execution: preflight + bracket/memory events + replaces
   bridge.ts   — membrane complete() ↔ ctx.llm.stream
   config.ts   — schema + resolution
@@ -31,6 +31,12 @@ Deleted in the same change: `mirror.ts`, `membrane.ts`, `applicator.ts`,
 `invariant.ts` (folded into `index.ts` or kept one-liner per package
 convention), `command-autobio` package, the autobio UI conversation nodes,
 and every `inheritForkArchive`/watermark/checkpoint code path.
+
+The per-section line counts below are the shape each file should have, stated
+in code lines — the prose in these files is half their length, and counting
+`wc -l` makes every one of them read as three times over budget. Measured
+against the tree as it stands: `apply` 47, `config` 17, `store` 121,
+`seed` 162, `bridge` 172, `plan` 170, `index` 329.
 
 ## The one-paragraph architecture
 
@@ -377,7 +383,7 @@ async openRuntime(session, route):
   return { manager, strategy: strat, shim, cursor: session.events.at(-1)?.seq ?? -1, … }
 ```
 
-## plan.ts — frontier walk (~90 lines)
+## plan.ts — partition by recollection, then widen (~170 lines)
 
 Replaces `applicator.ts` wholesale. No entry parsing, no `previewContext`,
 no repair chains. Two hardening rules, deliberate:
@@ -392,47 +398,39 @@ no repair chains. Two hardening rules, deliberate:
   straddle, so boundary handling never needs to look past immediate raw
   neighbors.
 
+This is one phase longer than the "frontier walk" this section first
+specified, because run-grouping cannot work: a resolution lands on the
+*messages* a recollection covered, so two adjacent recollections at the same
+level resolve their messages to the same level and a run of equal levels spans
+ground no single recollection owns. Partitioning by the entry that stands over
+each resolved message is what makes the fold's span well defined.
+
 ```
-function planFolds(session, rt): FoldOp[]
-  resolutions = rt.strategy.resolutions            // Map<MessageId, number>,
-                                                   // committed by compile()
-                                                   // (protected; same seam
-                                                   // connectome-host uses)
-  messages = messages slot, in order, dshSeq-stamped
-  surface  = annotateSurface(session)              // ~30 lines, kept from the
-             // old applicator: per node { seq, coverage (sourceEventSeqs
-             // expansion — handles pruner nodes too), foldId (Recall header),
-             // callIds, resultIds }
+function planFolds(store, session, {resolutions, summaries, seeded, seqOf})
+  ranges   = standing()          // per level, live recollections and their
+                                 // coverage (seeded ∪ resolved, both unioned),
+                                 // in mint order
+  surface  = annotateSurface(session)
+             // per node { seq, coverage (sourceEventSeqs expansion through
+             // fold nodes, memoized in seed.ts as surfaceGround), foldId
+             // (compactionId, autobio: prefix), calls, results, tokens }
 
-  // pass 1 — group mirrored messages into runs by resolution level, walk
-  // runs against the surface, collect RAW fold spans (widening comes later).
-  runs = groupConsecutive(messages, m => resolutions.get(m.id) ?? 0)
-  ops = []; at = 0
-  for run of runs:
-    if run.level == 0:
-      for msg of run:
-        skip stale fold nodes whose coverage ends before msg.dshSeq
-        node = surface[at] ?? throw Divergence('ran past surface', run)
-        if node.foldId && node.coverage.includes(msg.dshSeq): continue
-        if node.seq != msg.dshSeq: throw Divergence(expected msg.dshSeq, got node)
-        at++
-      continue
+  // pass 1 — partition the resolved messages by the recollection standing over
+  // them, which is the fold each one belongs to.
+  claimed = {}
+  for msg of messages slot, in order:
+    level = resolutions.get(msg.id) ?? 0
+    if level == 0 or msg has no sane dshSeq: continue
+    summary = standingFor(ranges, level, msg.dshSeq) ?? throw Divergence
+    claimed[summary.id] ∪= { first: min, last: max }     // coverage only widens
 
-    summary = findSummary(rt.strategy, run.level, run.first, run.last)
-    summary ?? throw Divergence('no summary for run', run)   // conformance
-
-    span = surface nodes from `at` whose coverage ⊆ [firstSeq, lastSeq]
-    head-edge fold-around: if the first node is a fold node straddling
-      firstSeq, keep it (coarser only shrinks) and start the span after it
-    if span is [one fold node with same summary id]: at = past it; continue
-    if span empty && an existing fold covers the range: continue
-    if span empty: throw Divergence('no span for run', run)
-
-    ops.push({ summaryId: summary.id, level: run.level,
-               startSeq: span.first.seq, endSeq: span.last.seq,
-               shadowedSeqs: span.map(n => n.seq), shadowedTokens: span.estimate,
-               text: `[Recall ${summary.id}]\n\n${summary.content}` })
-    at = past span
+  for { summary, first, last } of claimed:
+    covers(node) = node.foldId != summary.id
+                   and node.coverage overlaps [first, last]
+    from = first node that covers ?? continue    // already carried, or nothing
+    to   = last node in the contiguous run that covers
+    ops.push({ summaryId, level, startSeq, endSeq, shadowedSeqs,
+               shadowedTokens, summary, span: { from, to } })
 
   // pass 2 — pair-safe widening, against FINAL visibility (a node is visible
   // after this pass iff no op shadows it). Both directions are provably
@@ -440,19 +438,24 @@ function planFolds(session, rt): FoldOp[]
   // model (calls: assistant/messages; results: tool/result events —
   // agent-loop/src/tool-calls.ts:281).
   for op of ops (in order):
-    back:   if the node before op.startSeq STAYS VISIBLE and declares calls
-            answered inside op's span → extend startSeq over it.
+    back:   if the node before op.span.from declares calls answered inside
+            op's span → extend from over it.
             It is one assistant node; it carries no results; done.
             (A fold node there can't straddle — the invariant.)
     fwd:    if op's span declares calls whose results STAY VISIBLE after
-            op.endSeq → extend endSeq over that contiguous result run.
-            Result nodes carry no calls; done.
-            If the run crosses a sibling op's span: retract — the sibling
-            shadows those results, so both halves leave the wire together
-            and nothing straddles.
-    recompute op.shadowedSeqs over the widened range
-  return ops
+            op.span.to → extend to over that contiguous result run, which
+            stops at the first node that asks as well as answers.
+    recompute startSeq, endSeq, shadowedSeqs, shadowedTokens when widened
 ```
+
+Widening needs no record of what earlier ops claimed. One node answers to one
+recollection — `covers` excludes a node carrying a different fold id, and
+`syncSurface` never mirrors a fold node, so its seq cannot appear in
+`resolutions` — so the spans the partition produced are already disjoint, and
+nodes sit between a fold's first and last node only when that fold owns them.
+The sibling boundary falls out of the partition rather than being tracked, so
+there is no retract: an op's span cannot reach into a sibling's ground, because
+the run stops at the first node that sibling claimed.
 
 Deliberately absent vs. the old applicator: `parseDesired`, recall-pair
 reconstruction, chaining loops, the absorbed-node set, refusal paths, and
