@@ -16,7 +16,6 @@ import type { ContentBlock as MembraneBlock, Membrane, NormalizedRequest, Normal
 export interface BridgeOptions {
   readonly llm: LlmRuntime
   readonly provider: string
-  readonly model: string
   /** Generation budget floor; the library clamps its own request; this floors it back up. */
   readonly maxTokens?: number
   /** Participant name that maps to the assistant role (the agent's own voice). */
@@ -78,39 +77,38 @@ type RequestMessage = NormalizedRequest['messages'][number]
  * building this request, so a result arrives alone or already heads its message,
  * with the prose that trailed it following behind.
  */
-function toHarnessMessage(message: RequestMessage, agentParticipant: string, route: Route): Message[] {
+interface Voice {
+  readonly provider: string
+  readonly model: string
+}
+
+/**
+ * Voice the calls are made in. The library resolves it, so every rebuilt
+ * message is attributed to what the request asked for rather than to a second
+ * reading of the route that could drift from it.
+ */
+function toHarnessMessage(message: RequestMessage, agentParticipant: string, voice: Voice): Message[] {
   const blocks = message.content.flatMap((block) => {
     const mapped = toHarness(block)
     return mapped === null ? [] : [mapped]
   })
   if (message.participant === agentParticipant) {
-    return [createAssistantMessage({ content: blocks, source: route })]
+    return [createAssistantMessage({ content: blocks, source: voice })]
   }
   const named = message.participant === 'user'
     ? blocks
     : blocks.map((block, index) => index === 0 && block.type === 'text'
       ? { type: 'text' as const, text: `${message.participant}: ${block.text}` }
       : block)
-  const results = named.filter(block => block.type === 'tool-result')
+  // `createUserMessage` with the tool source would stamp a generic identity;
+  // the library matches a result to its call through the block's own id.
+  const results = named.flatMap(block => block.type === 'tool-result'
+    ? [createToolResultMessage({ callId: block.toolCallId, content: block.content, isError: block.isError === true })]
+    : [])
   const prose = named.filter(block => block.type !== 'tool-result')
-  return [
-    // `createUserMessage` with the tool source would stamp a generic identity;
-    // the library matches a result to its call through the block's own id.
-    ...results.map(block => createToolResultMessage({
-      callId: block.toolCallId,
-      content: block.content,
-      isError: block.isError === true,
-    })),
-    ...prose.length === 0
-      ? []
-      : [createMessage({ role: 'user', content: prose, source: { kind: 'plugin', plugin: PLUGIN } })],
-  ]
-}
-
-/** Voice the calls are made in; every rebuilt message is attributed to it. */
-interface Route {
-  readonly provider: string
-  readonly model: string
+  return prose.length === 0
+    ? results
+    : [...results, createMessage({ role: 'user', content: prose, source: { kind: 'plugin', plugin: PLUGIN } })]
 }
 
 const PLUGIN = 'compaction-autobiographical'
@@ -124,24 +122,28 @@ const PLUGIN = 'compaction-autobiographical'
  * is told to use this instead of constructing its own provider client.
  */
 export function createBridge(options: BridgeOptions): Membrane {
-  const { llm, provider, model, maxTokens, warn, onText } = options
+  const { llm, provider, maxTokens, warn, onText } = options
   const agentParticipant = options.agentParticipant ?? DEFAULT_AGENT_PARTICIPANT
-  const route: Route = { provider, model }
 
   return {
     async complete(request: NormalizedRequest): Promise<NormalizedResponse> {
-      const messages = request.messages.flatMap(message => toHarnessMessage(message, agentParticipant, route))
+      const voice: Voice = { provider, model: request.config.model }
+      const messages = request.messages.flatMap(message => toHarnessMessage(message, agentParticipant, voice))
       const assembler = new BlockAssembler()
       // The library sizes its own request; a long-reasoning model still needs
       // room for thinking beside the recollection, so the configured cap is a
-      // floor rather than a replacement.
+      // floor rather than a replacement — and a request that asks for no cap
+      // leaves the field off entirely rather than flooring it at zero.
       const capped = request.config.maxTokens > 0
         ? Math.max(request.config.maxTokens, maxTokens ?? 0)
         : maxTokens
       try {
         for await (const chunk of llm.stream({
           provider,
-          model,
+          // The request names the model the library resolved for this call
+          // (`compressionModel`), which is the voice a recollection is written
+          // in; taking it from anywhere else would let the two drift.
+          model: request.config.model,
           messages,
           ...request.system === undefined ? {} : { system: request.system },
           ...request.tools === undefined ? {} : { tools: request.tools.map(toHarnessTool) },
@@ -202,6 +204,9 @@ function toHarnessTool(tool: NonNullable<NormalizedRequest['tools']>[number]): T
   return {
     name: tool.name,
     description: tool.description,
+    // `inputSchema.type` is not read from the library's schema: the harness
+    // schema is always an object, and spreading it here would let a schema that
+    // declares its own `type` win over that.
     parameters: {
       type: 'object',
       ...properties === undefined ? {} : { properties },
@@ -212,45 +217,46 @@ function toHarnessTool(tool: NonNullable<NormalizedRequest['tools']>[number]): T
 
 /**
  * The response in the library's vocabulary, priced so a fold can pay for
- * itself. Reasoning stays on for the call, but the library charges a fold its
- * response's full output tokens and then replays the stored thinking with
- * them; a recollection whose thinking costs more than the span it replaces is
- * a fold that can never be taken, so in that case the thinking is dropped and
- * the response is priced at its text alone.
+ * itself. Reasoning stays on for the call, but a recollection that replays
+ * more thinking than the text it stands over is a fold that can never be
+ * taken, so in that case the thinking is dropped and the recollection is
+ * priced at its text alone.
+ *
+ * The comparison is characters against characters — a shape test, not a token
+ * account. It runs before the harness has priced anything and only has to
+ * separate a compact recollection from an outsized one.
  */
 function toMembraneBlocks(blocks: readonly ContentBlock[], messages: readonly Message[]): MembraneBlock[] {
-  const mapped: MembraneBlock[] = []
-  for (const block of blocks) {
+  const mapped: MembraneBlock[] = blocks.flatMap((block): MembraneBlock[] => {
     switch (block.type) {
-      case 'text':
-        mapped.push({ type: 'text', text: block.text })
-        break
-      case 'reasoning':
-        mapped.push({ type: 'thinking', thinking: block.text })
-        break
-      case 'tool-call': {
-        mapped.push({
-          type: 'tool_use',
-          id: block.id,
-          name: block.name,
-          input: parseArguments(block.arguments),
-        })
-        break
-      }
-      default:
-        break
+      case 'text': return [{ type: 'text', text: block.text }]
+      case 'reasoning': return [{ type: 'thinking', thinking: block.text }]
+      case 'tool-call': return [{
+        type: 'tool_use',
+        id: block.id,
+        name: block.name,
+        input: parseArguments(block.arguments),
+      }]
+      default: return []
     }
-  }
-  const thinking = mapped.reduce((total, block) => block.type === 'thinking' ? total + block.thinking.length : total, 0)
-  if (thinking === 0 || !mapped.some(block => block.type === 'text')) return mapped
-  const text = mapped.reduce((total, block) => block.type === 'text' ? total + block.text.length : total, 0)
-  const source = messages.reduce(
-    (total, message) => total + message.content.reduce((inner, block) => inner
-      + (block.type === 'text' ? block.text.length : 0)
-      + (block.type === 'tool-call' ? block.arguments.length : 0), 0),
+  })
+  const thinking = mapped.reduce(
+    (total, block) => block.type === 'thinking' ? total + block.thinking.length : total,
     0,
   )
-  return thinking + text > source ? mapped.filter(block => block.type !== 'thinking') : mapped
+  if (thinking === 0 || !mapped.some(block => block.type === 'text')) return mapped
+  const printed = mapped.reduce(
+    (total, block) => block.type === 'text' ? total + block.text.length : total,
+    0,
+  )
+  const ground = messages.reduce(
+    (total, message) => total + message.content.reduce(
+      (inner, block) => block.type === 'text' ? inner + block.text.length : inner,
+      0,
+    ),
+    0,
+  )
+  return thinking + printed > ground ? mapped.filter(block => block.type !== 'thinking') : mapped
 }
 
 /** Tool arguments as the library stores them; unparseable input keeps its raw form. */

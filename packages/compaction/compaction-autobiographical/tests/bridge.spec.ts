@@ -60,7 +60,6 @@ function complete(
   const bridge = createBridge({
     llm: runtime(textChunks('recollection')),
     provider: 'test',
-    model: 'test-model',
     ...options,
   })
   return (bridge as unknown as {

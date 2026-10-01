@@ -455,7 +455,6 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       membrane: createBridge({
         llm: this.ctx.llm,
         provider: route.provider,
-        model: route.model,
         warn: (message) => { this.warn(message) },
         onText: (delta, done, usage) => { this.captureText(runtime, delta, done, usage) },
       }),
