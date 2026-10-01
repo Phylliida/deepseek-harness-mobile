@@ -70,6 +70,13 @@ type RequestMessage = NormalizedRequest['messages'][number]
  * One request message in harness shape. Compression prompts are rebuilt
  * transcripts, so speaker attribution has to survive: participants that are
  * neither the agent nor `user` keep their name as a text prefix.
+ *
+ * A tool result is a harness message in its own right, because the wire
+ * serializer emits a mixed message's text before its tool entries and so
+ * orphans them from the assistant call they answer. No split happens here: the
+ * library ran `splitMixedToolMessages` and `collapseConsecutiveMessages` before
+ * building this request, so a result arrives alone or already heads its message,
+ * with the prose that trailed it following behind.
  */
 function toHarnessMessage(message: RequestMessage, agentParticipant: string, route: Route): Message[] {
   const blocks = message.content.flatMap((block) => {
@@ -84,14 +91,8 @@ function toHarnessMessage(message: RequestMessage, agentParticipant: string, rou
     : blocks.map((block, index) => index === 0 && block.type === 'text'
       ? { type: 'text' as const, text: `${message.participant}: ${block.text}` }
       : block)
-  // Tool results are messages in their own right — the wire serializer emits a
-  // mixed message's text before its tool entries, orphaning them from the
-  // assistant call they answer. Split here so every result rides alone.
   const results = named.filter(block => block.type === 'tool-result')
-  if (results.length === 0) {
-    return [createMessage({ role: 'user', content: named, source: { kind: 'plugin', plugin: PLUGIN } })]
-  }
-  const rest = named.filter(block => block.type !== 'tool-result')
+  const prose = named.filter(block => block.type !== 'tool-result')
   return [
     // `createUserMessage` with the tool source would stamp a generic identity;
     // the library matches a result to its call through the block's own id.
@@ -100,9 +101,9 @@ function toHarnessMessage(message: RequestMessage, agentParticipant: string, rou
       content: block.content,
       isError: block.isError === true,
     })),
-    ...rest.length === 0
+    ...prose.length === 0
       ? []
-      : [createMessage({ role: 'user', content: rest, source: { kind: 'plugin', plugin: PLUGIN } })],
+      : [createMessage({ role: 'user', content: prose, source: { kind: 'plugin', plugin: PLUGIN } })],
   ]
 }
 
