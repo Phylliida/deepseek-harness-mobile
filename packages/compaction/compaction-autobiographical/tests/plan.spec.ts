@@ -25,7 +25,11 @@ const ROUTE = { provider: 'test', model: 'test-model' }
 
 /** A recollection carrying the fields planning reads. */
 function summary(id: string, level: number, overrides: Partial<SummaryEntry> = {}): SummaryEntry {
-  return { id, level, content: `content of ${id}`, tokens: 12, sourceIds: [], created: 1_700_000_000_000, ...overrides } as SummaryEntry
+  return {
+    id, level, content: `content of ${id}`, tokens: 12, created: 1_700_000_000_000,
+    sourceLevel: 0, sourceIds: [], sourceRange: { first: id, last: id },
+    ...overrides,
+  }
 }
 
 function started(id: string): Session {
@@ -278,8 +282,9 @@ describe('planFolds', () => {
     const ops = plan(live, {
       level: 1,
       summaries: [
-        summary('L1-0', 1, { parentId: 'L2-0' } as Partial<SummaryEntry>),
-        summary('L1-1', 1, { mergedInto: 'L2-0' } as Partial<SummaryEntry>),
+        summary('L1-0', 1, { parentId: 'L2-0' }),
+        // oxlint-disable-next-line typescript/no-deprecated -- the legacy alias this case pins
+        summary('L1-1', 1, { mergedInto: 'L2-0' }),
         summary('L1-2', 1),
       ],
       ranges: new Map([['L1-2', span(ask, answer)]]),
@@ -552,7 +557,7 @@ describe('planFolds', () => {
     const ops = plan(live, {
       store,
       seqOf,
-      summaries: [summary('L1-0', 1, { sourceIds: ids, sourceRange: { first: ids[0], last: ids.at(-1) } } as Partial<SummaryEntry>)],
+      summaries: [summary('L1-0', 1, { sourceIds: ids, sourceRange: { first: ids[0] as string, last: ids.at(-1) as string } })],
       ranges: new Map(),
       resolutions: new Map(ids.map(id => [id, 1])),
     })

@@ -39,7 +39,7 @@ function textChunks(text: string, usage?: TokenUsage): StreamChunk[] {
     { type: 'block-start', index: 0, blockType: 'text' },
     { type: 'text-delta', index: 0, text },
     { type: 'block-end', index: 0, block: { type: 'text', text } },
-    ...usage === undefined ? [] : [{ type: 'usage', usage } as StreamChunk],
+    ...(usage === undefined ? [] : [{ type: 'usage', usage } as StreamChunk]),
     { type: 'finish', reason: { kind: 'stop' } },
   ]
 }
@@ -49,7 +49,7 @@ function request(overrides: Partial<NormalizedRequest> = {}): NormalizedRequest 
     messages: [{ participant: 'assistant', content: [{ type: 'text', text: 'source' }] }],
     config: { model: 'test-model', maxTokens: 1024 },
     ...overrides,
-  } as NormalizedRequest
+  }
 }
 
 /** The bridge as the compression path sees it: only `complete` is ever called. */

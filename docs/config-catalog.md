@@ -492,9 +492,9 @@ Requires: `llm` · `compaction`
 export interface AutobiographicalCompactionConfig {
   /**
    * Ceiling for the context the strategy keeps live, reached by folding aged
-   * history. Defaults to the routed model's window, capped at 65_536: models
-   * degrade well before their advertised window, so the operating point stays
-   * there regardless of route.
+   * history. Default 65_536: models degrade well before their advertised window,
+   * so the operating point stays there regardless of route. A configured value
+   * is the ceiling itself rather than a floor under the route's own window.
    */
   operatingWindowTokens?: number
   /** Tokens reserved for the model's response inside the compile budget; default 8192. */

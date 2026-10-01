@@ -28,15 +28,26 @@ packages/compaction/compaction-autobiographical/src/
 ```
 
 Deleted in the same change: `mirror.ts`, `membrane.ts`, `applicator.ts`,
-`invariant.ts` (folded into `index.ts` or kept one-liner per package
-convention), `command-autobio` package, the autobio UI conversation nodes,
-and every `inheritForkArchive`/watermark/checkpoint code path.
+`command-autobio` package, the autobio UI conversation nodes, and every
+`inheritForkArchive`/watermark/checkpoint code path. `invariant.ts` stays: it
+is a registered no-op installer, and `verify-package-invariants` requires one
+companion per package.
 
 The per-section line counts below are the shape each file should have, stated
 in code lines — the prose in these files is half their length, and counting
-`wc -l` makes every one of them read as three times over budget. Measured
-against the tree as it stands: `apply` 47, `config` 17, `store` 121,
-`seed` 162, `bridge` 172, `plan` 170, `index` 329.
+`wc -l` makes every one of them read as three times over budget.
+
+Measured against the tree as it stands, code lines only: `apply` 47,
+`config` 16, `invariant` 8, `store` 120, `seed` 156, `plan` 173, `bridge` 180,
+`index` 322, `types` 41. That is **1063 code lines against the ~660 the plan
+targeted**, with a further 1083 comment lines and 147 blank. The overage is
+concentrated in `index` (322 vs ~230) and `bridge` (180 vs ~110), and it is
+carried by capability this sketch predates: replay-seeded mint detection with
+a per-runtime cursor and attempt watermark, the calibration seq high-water,
+the `OverBudgetError` retry arithmetic in `compileFolds`, and tool-definition
+sync. It is not padding — the JSDoc is enforced by `verify-export-jsdoc` and
+the coverage gate is `perFile: true` at 100% on all four metrics. Trimming to
+660 would mean dropping one of those behaviours, not shortening these files.
 
 ## The one-paragraph architecture
 

@@ -28,8 +28,8 @@ import type { FoldOp } from './plan.ts'
  * Append one fold as a metered transaction.
  *
  * The session validates the provenance of the replacement node, so nothing here
- * re-proves that the op lands where it says: {@link assertProvenance} resolves the
- * range positionally against the live surface — fold nodes carry late
+ * re-proves that the op lands where it says: the session resolves the range
+ * positionally against the live surface — fold nodes carry late
  * replacement-message seqs while sitting at early positions, so a seq-value range
  * would be wrong — and refuses a range that names a node the op did not cite.
  *
@@ -42,6 +42,19 @@ import type { FoldOp } from './plan.ts'
  * The bracket id and the fold node's compaction id are the same, as the protocol
  * requires, which is also how the node identifies the recollection it stands for
  * — {@link foldIdOf} reads it back without parsing the prose.
+ *
+ * @param session - the live session the fold lands in.
+ * @param op - the fold to land, already widened to pair-safe boundaries by the
+ * planner.
+ * @param turn - the turn the events belong to, or null outside a turn. The
+ * replacement message records 0 in that case, since it requires a number.
+ * @param step - the step within the turn the replacement message is stamped
+ * with; it is not advanced, and must be the step the session already holds.
+ * @param route - the route the runtime was opened with, supplying the provider
+ * and model recorded as the fold's provenance. The session's own
+ * `requestContext()` is the value intended here.
+ * @returns the landed fold: the compaction id, the start, summary and end seqs,
+ * the fold's blocks, and the shadowed range, seqs and token count.
  */
 export function applyFold(
   session: Session,

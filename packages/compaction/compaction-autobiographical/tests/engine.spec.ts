@@ -9,15 +9,17 @@
  * a mock's bookkeeping.
  */
 
+import { ContextManager } from '@animalabs/context-manager'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { AutobiographicalCompactionEngine } from '../src/index.ts'
 import { build, contextOf, settle, transcript } from './harness.ts'
 
-/** How many runtimes the engine is holding, reached past the private map. */
-function runtimes(engine: unknown): Set<unknown> {
-  return (engine as { runtimes: Set<unknown> }).runtimes
+/** The engine's open runtimes, reached past the private map a pass holds them in. */
+function runtimes(engine: AutobiographicalCompactionEngine): Map<string, Promise<unknown>> {
+  return (engine as unknown as { runtimes: Map<string, Promise<unknown>> }).runtimes
 }
 
 /** The strategy behind a session's runtime, opened if the engine has not yet. */
@@ -138,6 +140,24 @@ describe('runtime lifetime', () => {
 
     // A later pass re-seeds from the log rather than reusing what disposal took
     // away, which is the whole point of the runtime being disposable.
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    expect(runtimes(engine).size).toBe(1)
+  })
+
+  it('does not cache a runtime whose open failed', async () => {
+    const { engine, agent } = build(30, 'engine-open-fails')
+    const open = vi.spyOn(ContextManager, 'open').mockRejectedValueOnce(new Error('library is down'))
+
+    await expect(engine.compactIfNeeded(agent, 'pressure', SIGNAL)).rejects.toThrow('library is down')
+
+    // A rejected open left in the cache would fail that session forever: every
+    // later pass would await the same rejection instead of trying again, and the
+    // failure that reaches here — an unrouted session — is one the next step
+    // boundary fixes. So the entry has to be gone before the next pass looks.
+    expect(open).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => { expect(runtimes(engine).size).toBe(0) })
+
+    open.mockRestore()
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     expect(runtimes(engine).size).toBe(1)
   })

@@ -82,7 +82,13 @@ const FOLD_ID_PREFIX = 'autobio:'
  * The recollection a fold node announces. The identity rides the compaction id
  * on the message's model source, not the prose: a summary carrying captured
  * reasoning is replayed without a header, because prepending one to verbatim
- * `responseContent` would break the signatures it exists to carry.
+ * `responseContent` would break the signatures it exists to carry. Reading the
+ * identity there is what makes a reopened session's folds recoverable: a log
+ * replayed from the first event rebuilds the pyramid from these ids alone.
+ *
+ * @param event - the logged event to read.
+ * @returns the recollection id with its prefix removed, or `undefined` when the
+ *   event is not a fold node.
  */
 export function foldIdOf(event: SessionEvent): string | undefined {
   const source = event.type === 'assistant/message' ? event.data.message.source : undefined
@@ -90,16 +96,27 @@ export function foldIdOf(event: SessionEvent): string | undefined {
   return compactionId?.startsWith(FOLD_ID_PREFIX) ? compactionId.slice(FOLD_ID_PREFIX.length) : undefined
 }
 
-/** The compaction id a fold for `summaryId` lands under. */
+/**
+ * The inverse of {@link foldIdOf}: the `source.compactionId` a fold for
+ * `summaryId` lands under. The bracket id of the transaction that lands the node
+ * is the same string, as the compaction protocol requires.
+ *
+ * @param summaryId - the recollection id to name.
+ * @returns the compaction id the fold node carries.
+ */
 export function foldCompactionId(summaryId: string): string {
   return `${FOLD_ID_PREFIX}${summaryId}`
 }
 
 /**
  * What a fold node says. Captured reasoning blocks replay verbatim — the
- * signatures cover their bytes, and the models that need them back need them
+ * signatures cover their content, and the models that need them back need them
  * back unmutated — so the recall header is only added where there is room for
  * it, on the text fallback that legacy entries and stubs take.
+ *
+ * @param summary - the minted recollection to render.
+ * @returns the blocks for the replacement message, which the caller lands
+ *   unmodified.
  */
 export function foldBlocks(summary: SummaryEntry): ContentBlock[] {
   if (summary.responseContent?.length) return summary.responseContent as ContentBlock[]
@@ -107,8 +124,31 @@ export function foldBlocks(summary: SummaryEntry): ContentBlock[] {
 }
 
 /**
- * Plan this pass's folds. Empty when the surface already matches the frontier.
- * @throws DivergenceError when the mirrored history and the log disagree.
+ * Plan this pass's folds: partition the resolved messages by the recollection
+ * standing over them, then widen each span.
+ *
+ * Runs of equal resolution level are not the unit, because a resolution lands on
+ * the *messages* a recollection covered rather than on the recollection: two
+ * adjacent recollections at one level resolve their messages identically, so a
+ * run of equal levels spans ground no single recollection owns. The entry
+ * standing for a resolved message is the fold, and the messages resolving to it
+ * are the span it replaces.
+ *
+ * Widening takes a tool call together with its result and cannot chain, since
+ * calls live on assistant nodes and results on `tool/result` nodes, never on one
+ * node.
+ *
+ * @param store - the seeded store holding the mirrored messages, each stamped
+ *   with the log seq it came from.
+ * @param session - the session whose surface the folds land on.
+ * @param inputs - the strategy's committed resolutions, its minted
+ *   recollections, and what seeding replayed.
+ * @returns one fold per recollection that has ground to replace, ordered by
+ *   first surface position. Empty when the surface already matches the frontier,
+ *   which is a settled state rather than a failure.
+ * @throws {@link DivergenceError} when the mirrored history and the log
+ *   disagree: when a resolved message has no recollection standing over it, or
+ *   when a surface node names a seq the log does not hold.
  */
 export function planFolds(store: LogStore, session: Session, inputs: PlanInputs): FoldOp[] {
   const ranges = standing(inputs)
@@ -191,7 +231,9 @@ function standing(inputs: PlanInputs): Map<number, { summary: SummaryEntry; firs
     // one standing. Both pointers are checked because the library writes
     // `mergedInto` (deprecated) on the live path and reads `parentId` as the
     // alias, so a store mid-migration can carry either.
+    /* oxlint-disable typescript/no-deprecated -- the alias this read exists for */
     if (summary.parentId !== undefined || summary.mergedInto !== undefined) continue
+    /* oxlint-enable typescript/no-deprecated */
     const seeded = inputs.seeded.get(summary.id)?.covered
     const resolved = resolveRange(inputs.seqOf, summary)
     const first = Math.min(seeded?.firstSeq ?? Infinity, resolved?.firstSeq ?? Infinity)

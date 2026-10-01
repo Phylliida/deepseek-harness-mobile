@@ -32,6 +32,9 @@ interface OpenRuntime {
   seqOf: Map<string, number>
   /** Highest log seq the cursor has mirrored into the store. */
   walked: number
+  /** The attempt counter this runtime has reached, and the count the log reports. */
+  progress: { attempt: number }
+  recorded: number
 }
 
 /** The engine's open runtimes, reached past the private map a pass holds them in. */
@@ -53,7 +56,7 @@ function asAgent(
     options,
     runMaintenance: <T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> =>
       task(new AbortController().signal),
-  } as unknown as ManualCompactAgentContext
+  }
 }
 
 /** A budget refusal carrying the shape the library throws, built without the picker. */
@@ -288,6 +291,41 @@ describe('memory formation behind the pass', () => {
     expect(events(session, 'autobio/memory').length).toBeGreaterThan(0)
   })
 
+  it('records an attempt that no recollection accompanied', async () => {
+    const { engine, agent, session } = build(30, 'index-tick-failed')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    expect(runtime).toBeDefined()
+    const attempts = (): number[] =>
+      events(session, 'autobio/memory').map(event => (event as { data: { attempt: number } }).data.attempt)
+    const settle = (engine as unknown as {
+      appendMemory(r: unknown, s: unknown): void
+    }).appendMemory.bind(engine)
+
+    // A compression call that settled: the counter now stands past every count the
+    // log holds, so the pass writes this one down.
+    runtime!.progress.attempt += 1
+    settle(runtime, session)
+    expect(attempts().at(-1)).toBe(runtime!.progress.attempt)
+
+    // A later pass with the counter where that record left it. It adds nothing:
+    // writing the same attempt again on every pass would fill the log with copies
+    // of itself, and a replay would read a count the session never reached.
+    settle(runtime, session)
+    expect(attempts()).toHaveLength(1)
+
+    // A tick whose compression call settled and which then failed — the counter has
+    // moved but no recollection came of it. This is the state that made the record
+    // load-bearing: `appendMemory` returns early while the counter is still at the
+    // count the log reports, so this writes the attempt down with no memory
+    // attached, and a reopen learns where to continue instead of redoing the call.
+    runtime!.progress.attempt += 1
+    settle(runtime, session)
+
+    expect(attempts()).toEqual([1, 2])
+    expect(events(session, 'autobio/memory').at(-1)).not.toHaveProperty('data.memory')
+  })
+
   it('refuses to write down a recollection whose ground is not in the store', async () => {
     const { engine, agent, session } = build(30, 'index-ungrounded')
     await engine.compactNow(agent, new AbortController().signal)
@@ -448,6 +486,45 @@ describe('disposal', () => {
     contextOf(engine).emit('agent/disposed', { agent, session } as never)
     await settled()
     expect(runtimes(engine).size).toBe(0)
+  })
+
+  it('keeps a runtime a disposal left behind when an abandoned open then fails', async () => {
+    const { engine, agent, session } = build(30, 'index-disposed-mid-open')
+
+    // Hold the session's first open open. A disposal during it drops the entry the
+    // pass is waiting on, and that pass then fails from its own abandonment.
+    let abandon: (error: Error) => void = () => {}
+    const opening = new Promise<never>((_resolve, reject) => {
+      abandon = reject
+    })
+    const open = vi.spyOn(ContextManager, 'open').mockReturnValueOnce(opening)
+
+    const first = engine.compactNow(agent, new AbortController().signal).catch(() => undefined)
+    for (let i = 0; i < 50 && open.mock.calls.length < 1; i += 1) await settled()
+    expect(open.mock.calls.length).toBe(1)
+
+    contextOf(engine).emit('agent/disposed', { agent, session } as never)
+    await settled()
+
+    // The session carries on without the runtime the disposal dropped, so a pass
+    // in the meantime opens its own — and that is the one the abandoned open must
+    // leave alone.
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    expect(runtimes(engine).size).toBe(1)
+    expect(open.mock.calls.length).toBe(2)
+
+    abandon(new Error('the open was abandoned'))
+    await first
+    await settled()
+
+    // The rejection belongs to an entry that is already gone. Evicting whatever
+    // the map holds now would drop a live runtime, and the next pass would rebuild
+    // its store from the log and lose the work in it.
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    expect(runtimes(engine).size).toBe(1)
+    expect(open.mock.calls.length).toBe(2)
   })
 
   it('re-seeds from the log after a disposal rather than losing the session', async () => {

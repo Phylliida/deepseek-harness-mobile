@@ -4,7 +4,7 @@
 
 **自传式压缩（compaction）后端**：`AutobiographicalCompactionEngine` 实现 `@deepseek-ai/dsh-compaction` Service Definition，由 Anima Connectome `@animalabs/context-manager` 的 `AutobiographicalStrategy` 驱动，持续进行分层记忆形成。与在 token 压力到来时压缩一次的 [`compaction-basic`](../compaction-basic/README.md) 不同，该后端在每个步骤边界把陈旧历史折叠（fold）为第一人称回忆，因此会话长度不受限制，折叠调度也以提示词 cache 稳定性为目标来规划。
 
-本包承担压缩能力的 Service Provider 角色；其约定见 [Service Definition 包](../compaction/README.md)，设计见[后端 Agent Note](../../../.agents/notes/proposed/feature/2026-03-02-autobiographical-compaction-backend.md)。
+本包承担压缩能力的 Service Provider 角色；其约定见 [Service Definition 包](../compaction/README.md)，设计见[后端 Agent Note](../../../.agents/notes/implemented/feature/2026-03-02-autobiographical-compaction-backend.md)。
 
 ## 日志即归档
 
@@ -25,7 +25,7 @@
 - **记忆形成**：压缩调用在按会话串行化的 tick 链上运行，并通过 membrane 桥接层走 `ctx.llm.stream()`，因此凭证、路由、重试与用量记账都留在 harness 适配器侧。这些调用保留推理，但当响应的思考加正文的成本超过它所折叠的源片段时，桥接层只把正文交给库——库按存储的响应为折叠定价并回放，所以折叠的成本绝不应超过它所替代的内容。回忆始终由会话自身已路由的模型书写——自传式记忆是 agent 在书写自己的历史，换成别的模型就是策略会拒绝使用的替代声音。
 - **记账**：seam 的 `compaction/start`、每次落地的折叠对应一条 `compaction/summary`，以及一条 `compaction/end`。每次折叠占用一个标记区间，因为协议只允许在 start 与其 end 之间出现一条 summary；一次通过若折叠两个区域就落地两个事务，这也正是让每个标记区间以自己的 `compactionId` 承载该折叠身份的原因。
 - **识别**：后续轮次通过该 `compactionId` 识别折叠节点，因此无需再从散文里解析回来；在该约定落地之前写下的折叠仍可从其 `[Recall <id>]` 头部恢复。
-- **生命周期**：每个会话的运行时只打开一次并缓存；打开失败会被丢弃，以便下一轮重试；`agent/disposed` 会关闭存储，即使运行配置为 `auto: false` 也是如此。
+- **生命周期**：每个会话的运行时只打开一次并缓存；打开失败会被丢弃，以便下一轮重试；`agent/disposed` 会丢弃该运行时，这就是回收的全部内容——种子存储是映射持有的内存，而不是需要关闭的产物。
 - **空闲与手动路径**：`compactNow()` 在 `agent.runMaintenance` 内执行一次折叠；`compactRegion()` 会拒绝，因为区间是随其变旧而自动折叠，而不是按需折叠。
 - **失败处理**：在自动路径上，会话尚未路由请求、上下文窗口未知，以及即使采用最粗分辨率也无法容纳的前沿，这三种情况都只发出警告，并让该轮的表层保持不变；手动调用则把同样的失败返回给调用方。折叠绝不阻塞轮次，提供方自身的溢出恢复仍是最终兜底路径。
 
@@ -77,11 +77,9 @@ export function apply(ctx: Context): void {
 
 #### 模型看到的内容
 
-一次折叠会把一段陈旧的表层节点替换为一条 `assistant/message`，其文本是 agent 自己对那段经历的回忆。逐字保留的近期尾部与被钉住的头部窗口保持原始状态，因此长会话的请求依次是头部、按时间顺序排列的回忆与仍以原始形态保留的区间、以及尾部。
+一次折叠会把一段陈旧的表层节点替换为一条 `assistant/message`，其文本是 agent 自己对那段经历的回忆。逐字保留的近期尾部与被钉住的头部窗口保持原始状态，因此长会话的请求依次是头部、按时间顺序排列的回忆与仍以原始形态保留的区间、以及尾部。库返回了已存储响应的回忆会原样回放该响应；没有的则以摘要 id 作为头部、后接正文，见下方的折叠节点文本。
 
 ##### 折叠节点文本
-
-库返回了已存储响应的回忆会原样回放该响应；否则该节点是摘要 id 作为头部，后接正文。
 
 ```markdown
 [Recall L1-4]

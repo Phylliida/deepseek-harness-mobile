@@ -49,6 +49,17 @@ interface LoggedMemory {
  * Returns the two indexes the engine reasons with afterwards: the store message
  * id behind every replayed log seq, and the log seq range each seeded
  * recollection covers.
+ *
+ * @param store - the empty scratch store to write into. Its message, summary and
+ * counter slots are registered here, so a store that already carries them is
+ * refused rather than written to twice.
+ * @param session - the session whose log is the archive. Only append events are
+ * replayed and no replacement is mirrored, so the store holds the originals a
+ * previous run folded rather than the folds themselves.
+ * @returns `seqOf`, the log seq behind each store message id; and `known`, each
+ * seeded recollection's covered and cited ranges, and the seq its fold node
+ * landed on when the log records one. Both are keyed for the engine's own reads
+ * and neither is written back to the store.
  */
 export function seedFromLog(store: LogStore, session: Session): {
   readonly seqOf: Map<string, number>
@@ -147,6 +158,17 @@ export function seedFromLog(store: LogStore, session: Session): {
 /**
  * A recollection minted after seeding records message ids, not log seqs, so its
  * range is resolved through the messages it names.
+ *
+ * A source id the replay never stored — ground a later fold removed — contributes
+ * no seq rather than failing the read.
+ *
+ * @param seqOf - the log seq behind each store message id, as
+ * {@link seedFromLog} returns it.
+ * @param summary - the recollection whose `sourceIds` name the messages it covers.
+ * @returns the first and last log seq its sources span, or undefined when none of
+ * them is in the map. The undefined case is a refusal rather than an empty span:
+ * `Math.min()` over no arguments is `Infinity`, so a caller that read the bounds
+ * anyway would record a range no seq can fall inside.
  */
 export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined {
   const known = summary.sourceIds.flatMap(id => seqOf.get(id)).filter(seq => seq !== undefined)
@@ -166,6 +188,17 @@ export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: Summar
  * large body into different records. The engine has no stake in which
  * granularity wins (`rebuildChunks` never splits a message, so the whole body
  * lands in one chunk either way), only in the two agreeing.
+ *
+ * Only append events reach this: a replacement is never mirrored, because the
+ * planner finds the ground a fold node stands for already covered and asks for no
+ * fold there.
+ *
+ * @param store - the open store whose messages slot the node is appended to.
+ * @param session - the session the event came from, read for the derived message.
+ * @param event - the appended surface event to mirror.
+ * @returns the store's own message id for the node, or undefined when the event
+ * contributes no message — a usage-only assistant step is a real and expected
+ * case, not a failure.
  */
 export function appendSurfaceNode(store: LogStore, session: Session, event: SessionEvent): string | undefined {
   const message = session.deriveEventMessage(event)
@@ -240,6 +273,11 @@ function groundOf(events: ReadonlyMap<number, SessionEvent>, seq: number): reado
  * Ground coverage per surface seq, memoized. Exported because the planner needs
  * the same expansion to keep a fold node's footprint comparable with the nodes it
  * stands for, and two implementations of it would drift.
+ *
+ * @param session - the session whose surface is expanded.
+ * @returns every surface node's seq mapped to the log seqs it stands for: its own
+ * seq for an appended event, and the appended events underneath it for a fold
+ * node, however many levels of replacement were folded over them.
  */
 export function surfaceGround(session: Session): Map<number, readonly number[]> {
   const events = new Map(session.events.map(event => [event.seq, event]))
@@ -309,6 +347,9 @@ const LEVEL_PREFIX = /^L(\d+)-/
  * body happens to mention cannot be mistaken for the one the node stands for —
  * this reader only ever runs as the fallback for a node that names no id of its
  * own.
+ *
+ * Exported for the replay tests, which read the header a pre-rewrite log names
+ * its folds with.
  */
 const RECALL_HEADER = /^\[Recall ([^\]\s]+)\]/
 
@@ -325,6 +366,11 @@ const RECALL_HEADER = /^\[Recall ([^\]\s]+)\]/
  * Exported for the replay tests: a mint's level is a property of the event, and
  * asserting it here keeps the case from being entangled with how the store
  * happens to index a summary.
+ *
+ * @param session - the session whose log is read.
+ * @returns the recollections the log records, one per distinct id, in mint order.
+ * A mint whose event carries no range has none here, and seeding drops it rather
+ * than stubbing one: nothing in the log then says what ground it stood for.
  */
 export function readMemoryLog(session: Session): LoggedMemory[] {
   const memories = new Map<string, LoggedMemory>()

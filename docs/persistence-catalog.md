@@ -246,7 +246,7 @@ Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/
 'autobio/memory': AutobiographicalMemoryEventData
 ```
 
-Source: [`packages/compaction/compaction-autobiographical/src/types.ts:77`](../packages/compaction/compaction-autobiographical/src/types.ts)
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:99`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 ### `command/*`
 

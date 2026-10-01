@@ -53,6 +53,8 @@ export const MESSAGES_STATE = 'messages'
  * because the manager is never asked to isolate them. Every other slot the
  * strategy registers itself, in a try/catch that treats a repeat as success, so
  * only the seeded three are named here.
+ *
+ * @returns The `SlotKind` registrations for the three seeded slots.
  */
 export function slots(): { messages: SlotKind; summaries: SlotKind; counter: SlotKind } {
   return {
@@ -84,6 +86,9 @@ const PROBED = new Set(['registerStateFieldIndex'])
  * The `Proxy` is what makes the boundary honest. Enumerating the unmodelled
  * methods by hand would mean keeping a copy of the library's surface in sync,
  * which is the same job as reading its d.ts and answering wrong when it moves.
+ *
+ * @returns A store satisfying the library's `JsStore` structurally. Calling any
+ * method this backend does not model throws, naming the method.
  */
 export const createStore = (): LogStore => new Proxy(new LogStore(), {
   get(target, property, receiver) {
@@ -96,6 +101,14 @@ export const createStore = (): LogStore => new Proxy(new LogStore(), {
   },
 })
 
+/**
+ * The modelled half of the store, wrapped by {@link createStore}.
+ *
+ * The `Proxy` around an instance of this class answers the rest. Construct one
+ * directly only to reach the methods below; the library must be handed the
+ * proxied object, or an unmodelled call resolves to `undefined` instead of
+ * throwing.
+ */
 export class LogStore {
   private readonly registrations = new Map<string, SlotKind>()
   private readonly arrays = new Map<string, unknown[]>()
@@ -114,6 +127,10 @@ export class LogStore {
    * `mint-preimage`'s envelope index — a code path that reaches `storeBlob`
    * first, and that this store answers with a throw. Such a slot would land in
    * `arrays` and answers no query anyway, so a guard here would be unreachable.
+   *
+   * @param registration - The slot to register. `strategy` selects the storage:
+   * `snapshot` holds one value, anything else holds an append log.
+   * @throws Error When `registration.id` is already registered.
    */
   registerState(registration: SlotKind): void {
     if (this.registrations.has(registration.id)) throw new Error(`State with id '${registration.id}' already exists`)
@@ -122,7 +139,16 @@ export class LogStore {
     else this.arrays.set(registration.id, [])
   }
 
-  /** Feature-detected by `ContextManager.open`, which then calls it to retune a slot. */
+  /**
+   * Retune a registered slot's cadence. `ContextManager.open` feature-detects this
+   * with `typeof` before calling it, which is why absence has to mean absence
+   * rather than reaching the thrower; it exists here so the retune lands on the
+   * registration `listStates` reports.
+   *
+   * @param registration - The slot's registration, carrying the new cadence.
+   * Only `id` and `strategy` are stored; cadence fields are ignored, because this
+   * store is rebuilt from the log on every open.
+   */
   updateStateStrategy(registration: SlotKind): void {
     this.registrations.set(registration.id, registration)
   }
@@ -138,6 +164,14 @@ export class LogStore {
    * returned record. Because the ids are assigned ordinals, replaying the same
    * log reproduces the same ids on every open — which is what lets a seeded
    * summary's `sourceRange` point at messages a later seed re-creates.
+   *
+   * @param stateId - An append-log slot registered with `registerState`. Throws
+   * when the slot is unknown or was registered as a snapshot.
+   * @param item - The payload to append. Its own identity fields, if any, are
+   * kept alongside the assigned ones.
+   * @param idField - Field name to carry the assigned record id under.
+   * @param sequenceField - Field name to carry the assigned sequence under.
+   * @returns The record, whose `.id` and `.sequence` are the assigned pair.
    */
   appendToStateJsonWithIdentity(stateId: string, item: unknown, idField: string, sequenceField: string): StoreRecord {
     const sequence = this.seq++
@@ -157,6 +191,12 @@ export class LogStore {
    * merge state when it misses); splicing under `id` would overwrite that name
    * with this store's record id and leave `setMergedInto` unable to find its own
    * entry — the duplicate-id divergence four summaries were lost to.
+   *
+   * @param stateId - An append-log slot registered with `registerState`.
+   * @param item - The payload to append. A payload owning an `id` keeps it; the
+   * store's own identity overwrites nothing.
+   * @returns The record, whose `.id` is this store's record id and not the
+   * payload's.
    */
   appendToStateJson(stateId: string, item: unknown): StoreRecord {
     return this.appendToStateJsonWithIdentity(stateId, item, 'storeId', 'storeSequence')
@@ -166,6 +206,11 @@ export class LogStore {
    * Replace one entry, in place. Callers hold the live array from `getStateJson`
    * and re-read it as they edit, so this has to mutate that array rather than
    * swap the slot's reference.
+   *
+   * @param stateId - An append-log slot registered with `registerState`.
+   * @param index - Position within that slot to overwrite.
+   * @param payload - The entry's new value, as a JSON buffer.
+   * @returns The record describing the write.
    */
   editStateItem(stateId: string, index: number, payload: Buffer): StoreRecord {
     const value = JSON.parse(payload.toString('utf-8')) as unknown
@@ -182,6 +227,12 @@ export class LogStore {
    * `ContextManager.removeMessage` and `removeMessages` are the only callers and
    * none in this repo reaches them — so this throw is what would name the
    * library moving a redaction path onto the messages slot.
+   *
+   * @param stateId - An append-log slot registered with `registerState`.
+   * @param start - First position to remove.
+   * @param end - Exclusive end, so `index, index + 1` removes one entry.
+   * @returns The record describing the removal.
+   * @throws Error When `stateId` is the messages slot.
    */
   redactStateItems(stateId: string, start: number, end: number): StoreRecord {
     if (stateId === MESSAGES_STATE) throw new Error('LogStore: the messages slot is append-only')
@@ -189,7 +240,16 @@ export class LogStore {
     return this.record(stateId, { redacted: [start, end] }, this.seq++)
   }
 
-  /** The live array, deliberately — see the module docstring. */
+  /**
+   * Read a slot. For an append-log slot this is the live array and not a copy:
+   * `MessageStore` caches the reference and revalidates it against the branch
+   * name, `currentSequence`, the write version and the last item's id and
+   * sequence, so returning a copy would force a full materialization on every
+   * call. An unregistered slot reads as null.
+   *
+   * @param stateId - The slot to read.
+   * @returns The live value: the append log's array, a snapshot's value, or null.
+   */
   getStateJson(stateId: string): unknown {
     return this.scalars.has(stateId) ? this.scalars.get(stateId) ?? null : this.arrays.get(stateId) ?? null
   }
@@ -198,21 +258,49 @@ export class LogStore {
    * A JSON-array buffer over the requested window — the shape the library's
    * feature detection expects for a point lookup that avoids materializing a
    * large append log. Null means empty, which its caller already handles.
+   *
+   * @param stateId - An append-log slot registered with `registerState`.
+   * @param offset - First position in the window.
+   * @param limit - Maximum entries in the window.
+   * @returns A JSON array buffer over the window, or null when it is empty.
    */
   getStateSlice(stateId: string, offset: number, limit: number): Buffer | null {
     const window = (this.arrays.get(stateId) ?? []).slice(offset, offset + limit)
     return window.length === 0 ? null : Buffer.from(JSON.stringify(window))
   }
 
+  /**
+   * The entry count of an append-log slot, without materializing it.
+   *
+   * @param stateId - The slot to measure.
+   * @returns The count, or null when the slot holds no append log.
+   */
   getStateLen(stateId: string): number | null {
     return this.arrays.get(stateId)?.length ?? null
   }
 
-  /** Feature-detected alongside `getStateSlice`, which is why it is present and correct. */
+  /**
+   * One entry of an append-log slot, without materializing the rest.
+   * Feature-detected alongside `getStateSlice`, which is why it is present and
+   * correct rather than reached through the thrower.
+   *
+   * @param stateId - An append-log slot registered with `registerState`.
+   * @param index - Position of the entry to read.
+   * @returns The entry, or null when the slot or the position holds nothing.
+   */
   getStateItemJson(stateId: string, index: number): unknown {
     return this.arrays.get(stateId)?.[index] ?? null
   }
 
+  /**
+   * Overwrite a whole slot: an append-log slot is rewritten entry for entry, a
+   * snapshot slot takes the value directly.
+   *
+   * @param stateId - The slot to write. An unregistered id registers as a
+   * snapshot, which is how `persistPins` stores its object.
+   * @param value - The new value, round-tripped through JSON.
+   * @returns The record describing the write.
+   */
   setStateJson(stateId: string, value: unknown): StoreRecord {
     const stored = canonical(value)
     // An append-log slot is rewritten, never given a scalar: every append-log
@@ -223,6 +311,12 @@ export class LogStore {
     return this.record(stateId, stored, this.seq++)
   }
 
+  /**
+   * Every registered slot, in registration order.
+   *
+   * @returns The slots' ids and strategies. Cadence fields are not included,
+   * because `updateStateStrategy` does not store them.
+   */
   listStates(): Array<{ id: string; strategy: string }> {
     return [...this.registrations.values()].map(({ id, strategy }) => ({ id, strategy }))
   }
@@ -231,17 +325,31 @@ export class LogStore {
    * One branch, and always the same object: callers compare it by identity, and
    * a fresh object per call would read as a branch switch and wipe the token
    * cache.
+   *
+   * @returns The one branch, the same object on every call.
    */
   currentBranch(): { name: string } {
     return this.branch
   }
 
-  /** The head of the log — -1 when nothing has been written. */
+  /**
+   * The head of the log.
+   *
+   * @returns The sequence of the newest write, or -1 when nothing has been
+   * written yet.
+   */
   currentSequence(): number {
     return this.seq - 1
   }
 
-  /** Compaction is Chronicle reclaiming log space. There is no log here. */
+  /**
+   * Chronicle reclaims persisted log space here. This store holds nothing on
+   * disk, so there is nothing to reclaim: the compression-refusal-quarantine
+   * ledger is the only caller, and it ignores the return value, so null is safe.
+   *
+   * @param _stateId - The slot the caller wants compacted. Unused.
+   * @returns Always null.
+   */
   compactState(_stateId: string): StoreRecord | null {
     return null
   }

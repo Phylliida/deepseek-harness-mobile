@@ -133,6 +133,17 @@ const PLUGIN = 'compaction-autobiographical'
  * paths all funnel through it, and the rest of the class is streaming, retry
  * and provider-plumbing the harness already owns. The cast is how the library
  * is told to use this instead of constructing its own provider client.
+ *
+ * The request's own tools are forwarded to the harness call. The library's
+ * refusal ladder is built on the request carrying them: a summarizer request
+ * that replays tool history without its tools reads to a provider's safety
+ * classifier as a foreign agent trace, which is a deterministic refusal of every
+ * memory-write, and there is nothing for the ladder to escalate from.
+ *
+ * @param options - the harness LLM runtime, the routed provider, the token floor
+ *   under the library's own request size, the participant that maps to the
+ *   assistant role, and the warning and streamed-text taps.
+ * @returns a `Membrane` the library can be handed in place of a provider client.
  */
 export function createBridge(options: BridgeOptions): Membrane {
   const { llm, provider, maxTokens, warn, onText } = options

@@ -74,11 +74,12 @@ interface Runtime {
    */
   progress: { attempt: number; active: boolean; usage?: TokenUsage }
   /**
-   * The attempt count the log held when this runtime opened. A tick that finishes
-   * no call leaves `progress.attempt` here, which is what keeps it from writing a
-   * duplicate record on every pass.
+   * The attempt count the newest record in the log reports. Replay seeds it from
+   * the log and every write moves it forward, so a tick that finishes no call
+   * leaves `progress.attempt` here and writes nothing — which is what keeps a
+   * driven pass from writing the same attempt down again and again.
    */
-  watermark: number
+  recorded: number
   /** Seq of the newest event fed to calibration, so one usage is reported once. */
   calibrated: number
   /** Background work chain; a turn never awaits it. */
@@ -288,13 +289,26 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * nothing here is ever awaited by a turn.
    */
   private kickTick(runtime: Runtime, session: Session): void {
+    // The record is written on both paths, and before the failure is reported.
+    // That order is the point: the attempt counter advances inside the compression
+    // call, so a tick that failed *after* that advance holds a count the log can
+    // only learn from its record. Skipping it would leave `attemptFromLog` short
+    // and make every later record inherit the error. The write is a no-op unless
+    // the count moved, since `appendMemory` returns before writing when no
+    // recollection appeared and the attempt is still at the watermark.
+    const settle = (): void => {
+      // The session may have been disposed while the tick ran.
+      if (this.runtimes.has(session.id)) this.appendMemory(runtime, session)
+    }
     runtime.tickChain = runtime.tickChain
       .then(() => runtime.manager.tick())
-      .catch((error: unknown) => { this.warn(`memory formation failed: ${describe(error)}`) })
-      .then(() => {
-        // The session may have been disposed while the tick ran.
-        if (this.runtimes.has(session.id)) this.appendMemory(runtime, session)
-      })
+      .then(
+        () => { settle() },
+        (error: unknown) => {
+          settle()
+          this.warn(`memory formation failed: ${describe(error)}`)
+        },
+      )
   }
 
   /**
@@ -308,10 +322,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    */
   private appendMemory(runtime: Runtime, session: Session): void {
     const mint = this.newestMint(runtime)
-    if (mint === undefined && runtime.progress.attempt <= runtime.watermark) return
+    if (mint === undefined && runtime.progress.attempt <= runtime.recorded) return
     const { progress } = runtime
     const usage = progress.usage
     delete progress.usage
+    runtime.recorded = progress.attempt
     session.append('autobio/memory', {
       ...runtime.strategy.getStats(),
       attempt: progress.attempt,
@@ -376,11 +391,12 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     const opening = this.openRuntime(agent, route)
     this.runtimes.set(id, opening)
     // A failed open must not be cached: the usual failure is an unrouted session,
-    // and the next step boundary has a route.
+    // and the next step boundary has a route. It must not evict a runtime opened
+    // since, either — a disposal during this open drops the entry, the session
+    // opens another, and deleting whatever the map holds then would leave a live
+    // runtime to be rebuilt from the log on the next pass. The comparison is what
+    // tells the two apart, and `disposal` covers the sequence.
     opening.catch(() => {
-      /* v8 ignore next -- unreachable: only this method sets the entry, and it
-         runs synchronously, so between the set above and this rejection nothing
-         can have replaced it. The comparison is here for the next reader. */
       if (this.runtimes.get(id) === opening) this.runtimes.delete(id)
     })
     return opening
@@ -405,8 +421,8 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // thinking, overstating every such pair the planner weighs.
       carrierPolicy: 'live-strip',
     })
-    const watermark = attemptFromLog(agent.session)
-    const progress: Runtime['progress'] = { attempt: watermark, active: false }
+    const recorded = attemptFromLog(agent.session)
+    const progress: Runtime['progress'] = { attempt: recorded, active: false }
     // No estimator is handed over: the manager's own default is density-aware
     // and its calibration reports against the wire, so a fixed-density one here
     // would only overwrite the first of those.
@@ -435,7 +451,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       walked: agent.session.events.length - 1,
       known: seed.known,
       progress,
-      watermark,
+      recorded,
       calibrated: 0,
       tickChain: Promise.resolve(),
     }

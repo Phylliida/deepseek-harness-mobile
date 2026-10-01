@@ -100,9 +100,10 @@ describe('LogStore', () => {
   it('leaves a payload\'s own identity alone, because a recollection is named by it', () => {
     const { store } = seeded(1)
     store.appendToStateJson(slots().summaries.id, { id: 'L1-0', content: 'x' })
-    const [entry] = store.getStateJson(slots().summaries.id) as Array<{ id: string; storeId: string }>
+    const entry = (store.getStateJson(slots().summaries.id) as Array<{ id: string; storeId: string }>)[0] as { id: string; storeId: string }
     // Both survive: `L1-0` is the recollection's name, `storeId` its log position.
-    expect(entry).toMatchObject({ id: 'L1-0', storeId: expect.stringMatching(/^record-\d{12}$/) })
+    expect(entry.id).toBe('L1-0')
+    expect(entry.storeId).toMatch(/^record-\d{12}$/)
   })
 
   it('edits an entry in place, because its callers hold the live array', () => {

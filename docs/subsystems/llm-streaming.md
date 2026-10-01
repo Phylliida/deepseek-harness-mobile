@@ -47,6 +47,13 @@ interface AssistantProvenance {
    * currently owns both this historical provider and the target provider.
    */
   replayState?: unknown
+  /**
+   * Compaction transaction this message is the replacement node of. A backend
+   * that rewrites history as a model-authored message carries its
+   * `CompactionId` here so the message correlates with the `compaction/*`
+   * events that bracket it.
+   */
+  compactionId?: string
 }
 ```
 

@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 The **autobiographical compaction backend**: an `AutobiographicalCompactionEngine` implementing the `@deepseek-ai/dsh-compaction` Service Definition with continuous, hierarchical memory formation driven by the `AutobiographicalStrategy` of the Anima Connectome `@animalabs/context-manager`. Where [`compaction-basic`](../compaction-basic/README.md) compacts once when token pressure arrives, this backend folds aged history into first-person recollections at every step boundary, so session length is unbounded and the fold schedule is planned for prompt-cache stability.
 
-This package owns the Service Provider role of the compaction capability — see the [Service Definition package](../compaction/README.md) for its contract and the [backend Agent Note](../../../.agents/notes/proposed/feature/2026-03-02-autobiographical-compaction-backend.md) for the design.
+This package owns the Service Provider role of the compaction capability — see the [Service Definition package](../compaction/README.md) for its contract and the [backend Agent Note](../../../.agents/notes/implemented/feature/2026-03-02-autobiographical-compaction-backend.md) for the design.
 
 ## The log is the archive
 
@@ -25,7 +25,7 @@ Because both halves replay from the log, a restart, a crash, or a fork costs zer
 - **Memory formation** — compression calls run on a serialized per-session tick chain and ride `ctx.llm.stream()` through a membrane bridge, so credentials, routing, retry, and usage accounting stay with the harness adapters. Reasoning stays on for those calls, but when a response's thinking plus text would cost more than the source span it folds, the bridge hands the library the text alone — the library prices and replays a fold at its stored response, so a fold must never cost more than what it replaces. Recollections are always written by the session's own routed model — autobiographical memory is the agent writing about its own history, so a different model would be a substitute voice the strategy refuses to write with.
 - **Bookkeeping** — the seam's `compaction/start`, one `compaction/summary` per landed fold, and one `compaction/end`. One fold per bracket, because the protocol allows exactly one summary between a start and its end; a pass that folds two regions lands two transactions, which is also what lets each bracket carry the fold's own identity as its `compactionId`.
 - **Recognition** — a fold node is identified on later passes by that `compactionId`, so nothing parses the prose back out; a fold written before that convention landed is still recovered from its `[Recall <id>]` header.
-- **Lifecycle** — runtimes are opened once per session and cached; a failed open is dropped so the next pass retries, and `agent/disposed` closes the store, including for a run configured with `auto: false`.
+- **Lifecycle** — runtimes are opened once per session and cached; a failed open is dropped so the next pass retries, and `agent/disposed` drops the runtime, which is the whole of disposal because the seeded store is memory the map was holding rather than an artifact to close.
 - **Idle and manual paths** — `compactNow()` runs one fold pass inside `agent.runMaintenance`; `compactRegion()` rejects, because regions fold automatically as they age rather than on demand.
 - **Failure handling** — on the automatic path, a session that has not routed a request yet, an unknown context window, and a frontier that cannot fit even at its coarsest resolution each warn and leave the surface unchanged for that pass; a manual call surfaces the same failures to its caller instead. A fold never blocks a turn, and the provider's own overflow recovery remains the terminal path.
 
@@ -77,11 +77,9 @@ Loading the plugin registers `ctx.compaction`. With `auto: true` (the default) i
 
 #### What the model sees
 
-A fold replaces an aged span of surface nodes with one `assistant/message` whose text is the agent's own recollection of that span. The verbatim recent tail and any pinned head window stay raw, so a long session's request is head, then recollections and surviving raw regions in chronological order, then the tail.
+A fold replaces an aged span of surface nodes with one `assistant/message` whose text is the agent's own recollection of that span. The verbatim recent tail and any pinned head window stay raw, so a long session's request is head, then recollections and surviving raw regions in chronological order, then the tail. A recollection the library returned with a stored response replays that response verbatim; one without replays the summary id as a header followed by the prose, under the fold node text below.
 
 ##### Fold node text
-
-A recollection the library returned with a stored response replays that response verbatim. Otherwise the node is the summary id as a header, then the prose:
 
 ```markdown
 [Recall L1-4]

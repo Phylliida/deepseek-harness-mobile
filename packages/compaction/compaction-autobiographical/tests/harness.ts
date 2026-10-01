@@ -105,7 +105,7 @@ export function build(
     // The loop hands the engine a claim so manual work cannot race a step; a spec
     // driving the manual entry point stands in for it.
     runMaintenance: <T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> => task(new AbortController().signal),
-  } as ManualCompactAgentContext
+  }
   return { engine, calls, session, agent, ctx }
 }
 

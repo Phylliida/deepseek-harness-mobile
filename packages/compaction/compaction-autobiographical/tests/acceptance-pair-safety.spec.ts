@@ -17,7 +17,7 @@ import { CallId, createAssistantMessage, createToolResultMessage, createUserMess
 import type { Message } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import type { CompactionAgentContext, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
+import type { CompactionAgentContext } from '@deepseek-ai/dsh-compaction'
 import type { SummaryEntry } from '@animalabs/context-manager'
 import { describe, expect, it } from 'vitest'
 import AutobiographicalCompactionEngine from '../src/index.ts'
@@ -131,7 +131,7 @@ describe('a fold never splits a tool pair', () => {
   it('folds a tool transcript and leaves no orphaned call or result', async () => {
     const { engine, agent, session, pairs } = toolEngine('pair-settled', 30)
     for (let pass = 0; pass < 6; pass++) {
-      await engine.compactIfNeeded(agent, 'pressure' as CompactionTrigger, new AbortController().signal)
+      await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
       await new Promise(resolve => setTimeout(resolve, 20))
     }
 
@@ -146,7 +146,7 @@ describe('a fold never splits a tool pair', () => {
     // A straddle would have to be introduced by one pass and never repaired. The
     // end state alone cannot show that: a later fold could absorb the orphan.
     for (let pass = 0; pass < 6; pass++) {
-      await engine.compactIfNeeded(agent, 'pressure' as CompactionTrigger, new AbortController().signal)
+      await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
       await new Promise(resolve => setTimeout(resolve, 20))
       expect({ pass, ...orphans(session) }).toEqual({ pass, unanswered: [], ungrounded: [] })
     }
@@ -155,7 +155,7 @@ describe('a fold never splits a tool pair', () => {
   it('takes a pair as a whole: a covered call covers its result', async () => {
     const { engine, agent, session, pairs } = toolEngine('pair-whole', 30)
     for (let pass = 0; pass < 6; pass++) {
-      await engine.compactIfNeeded(agent, 'pressure' as CompactionTrigger, new AbortController().signal)
+      await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
       await new Promise(resolve => setTimeout(resolve, 20))
     }
 

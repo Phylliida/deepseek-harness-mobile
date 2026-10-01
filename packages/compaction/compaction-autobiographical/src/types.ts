@@ -15,9 +15,9 @@ type StrategyStats = ReturnType<AutobiographicalStrategy['getStats']>
 export interface AutobiographicalCompactionConfig {
   /**
    * Ceiling for the context the strategy keeps live, reached by folding aged
-   * history. Defaults to the routed model's window, capped at 65_536: models
-   * degrade well before their advertised window, so the operating point stays
-   * there regardless of route.
+   * history. Default 65_536: models degrade well before their advertised window,
+   * so the operating point stays there regardless of route. A configured value
+   * is the ceiling itself rather than a floor under the route's own window.
    */
   operatingWindowTokens?: number
   /** Tokens reserved for the model's response inside the compile budget; default 8192. */
@@ -108,6 +108,10 @@ declare module '@deepseek-ai/dsh-session/types' {
  * The compile budget does not read this. The manager prices its own store with a
  * density-aware estimator, so passing this one to `ContextManager.open` would
  * replace a measured heuristic with a cruder one and misprice every pick.
+ *
+ * @param text - the rendered text to size.
+ * @returns the text's length divided by four and rounded up, so text of any
+ *   length reports at least one token.
  */
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)
