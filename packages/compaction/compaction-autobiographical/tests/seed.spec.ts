@@ -8,7 +8,7 @@
  */
 
 import type { SummaryEntry } from '@animalabs/context-manager'
-import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
@@ -196,6 +196,154 @@ describe('seedFromLog', () => {
     // them, and still in store-position order.
     const [summary] = seededSummaries(store)
     expect(summary?.sourceIds).toEqual(['record-000000000000', 'record-000000000001'])
+  })
+
+  it('reads the header past the blocks that are not text, and gives up on a node whose type it does not read', () => {
+    const store = new LogStore()
+    const live = Session.create(SessionId('seed-legacy-partial'))
+    live.append('turn/start', { turn: 0 })
+    const ask = live.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'ask' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    const call = live.append('assistant/message', {
+      turn: 0,
+      step: 0,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: 'calling' }, { type: 'tool-call', id: CallId('call-1'), name: 'read', arguments: '{}' }],
+        source: { provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    const result = live.append('tool/result', {
+      turn: 0,
+      step: 0,
+      message: createToolResultMessage({ callId: CallId('call-1'), content: [{ type: 'text', text: 'output' }], isError: false }),
+    }, { surfaceOp: 'append' }).seq
+    // A landed node whose text does not lead, in the shape a fold node with
+    // signed content takes, so the prose reader has to walk past the block
+    // before the header.
+    live.append('autobio/memory', tick({ id: 'L1-0' }))
+    live.append('assistant/message', {
+      turn: 0,
+      step: 1,
+      message: createAssistantMessage({
+        content: [
+          { type: 'reasoning', text: 'reasoning block' },
+          { type: 'text', text: '[Recall L1-0] the ground this stands for' },
+        ],
+        source: { provider: 'test', model: 'test-model', compactionId: 'autobio-session-legacy-partial' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: ask, end: call }, sourceEventSeqs: [ask, call] })
+    // A tool result rewritten to lead with prose that names no recollection. It
+    // is a replacement node on the surface, so the reader has to give up on it by
+    // type: reading its text would hand some recollection a range out of a node
+    // that stands for none of it. The session compares the replaced event against
+    // the replacement with only the block's body nulled, so a content rewrite
+    // reuses the original block's shape.
+    const landed = live.events.find(event => event.seq === result)
+    if (landed?.type !== 'tool/result') throw new Error('the tool result did not land')
+    const [block] = landed.data.message.content
+    const rewrite = (from: number, text: string): number => live.append('tool/result', {
+      turn: 0,
+      step: 0,
+      message: { ...landed.data.message, content: [{ ...block, content: [{ type: 'text', text }] }] },
+    }, { surfaceOp: { op: 'replace', start: from, end: from }, sourceEventSeqs: [from] }).seq
+    // No header at all, then a bracket that opens one and names nothing.
+    const blanked = rewrite(result, 'rewritten output')
+    rewrite(blanked, '[Recall] rewritten output')
+    // A recollection nothing in the log says it landed: the node that would
+    // answer for it is the one the reader just gave up on.
+    live.append('autobio/memory', tick({ id: 'L1-1' }))
+
+    seedFromLog(store, live)
+
+    // Only the assistant node answered for a recollection: it is the one landing
+    // on the ground `L1-0` stands for, and `L1-1` has no node at all.
+    expect(seededSummaries(store).map(entry => [entry.id, entry.sourceIds])).toEqual([
+      ['L1-0', ['record-000000000000', 'record-000000000001']],
+    ])
+  })
+
+  it('gives up on a landed node whose text opens no header', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('seed-legacy-noheader')
+    // A recollection naming neither its id in a `compactionId` nor its ground in
+    // the prose. It is the shape a response carrying captured reasoning takes:
+    // the blocks replay verbatim, so the header has no room. Nothing recovered it,
+    // and nothing should: the only node over its ground says it stands for another
+    // recollection, so handing `L1-1` a range would be reading a node's text as a
+    // claim it does not make.
+    live.append('autobio/memory', tick({ id: 'L1-1' }))
+    live.append('assistant/message', {
+      turn: 0,
+      step: 1,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '[Recall L1-0] captured reasoning, no header of its own' }],
+        source: { provider: 'test', model: 'test-model', compactionId: 'autobio-session-legacy-noheader' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: answer, end: answer }, sourceEventSeqs: [answer] })
+    // A recollection of its own, standing over the ground next door, and one that
+    // named itself in a `compactionId` rather than in the prose.
+    live.append('autobio/memory', tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: ask } }))
+    live.append('assistant/message', {
+      turn: 0,
+      step: 2,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: 'the ground this stands for, named in its source' }],
+        source: { provider: 'test', model: 'test-model', compactionId: 'autobio:L1-0' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: ask, end: ask }, sourceEventSeqs: [ask] })
+
+    seedFromLog(store, live)
+
+    // The recollection that named itself in its source is the only one recovered,
+    // and it stands over the ground its own node took. Reading the headerless node
+    // as prose would not merely add a recollection: it would hand `L1-1` a range
+    // out of a node standing for another recollection, and `L1-0` a range of the
+    // whole exchange rather than the ask it actually replaced.
+    const summaries = seededSummaries(store)
+    expect(summaries.map(entry => [entry.id, entry.sourceIds])).toEqual([
+      ['L1-0', ['record-000000000000']],
+    ])
+  })
+
+  it('reads a parent\'s coverage through the child fold node it cites', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('seed-legacy-nested')
+    // A level-1 fold over the exchange, then a level-2 fold whose only citation
+    // is that node. The log writes it this way: a parent cites its children's
+    // *nodes*, which sit at the bounds of the interval it names, so reading the
+    // citations as seqs would report ground the parent never took. Measured on
+    // the red-lemma log, 36 of its 160 fold nodes cite an earlier fold's node.
+    const child = foldNode(live, 'L1-0', [ask, answer])
+    live.append('autobio/memory', tick({ id: 'L2-0', level: 2 }))
+    live.append('assistant/message', {
+      turn: 0,
+      step: 2,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '[Recall L2-0] the ground its child already took' }],
+        source: { provider: 'test', model: 'test-model', compactionId: 'autobio-session-legacy-L2-0' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: child, end: child }, sourceEventSeqs: [child] })
+
+    seedFromLog(store, live)
+
+    // The parent stands for its child, not for the node standing in for it: the
+    // expansion turns the single citation back into the messages underneath.
+    const summaries = seededSummaries(store)
+    expect(summaries.map(entry => [entry.id, entry.sourceIds])).toEqual([
+      ['L1-0', ['record-000000000000', 'record-000000000001']],
+      ['L2-0', ['L1-0']],
+    ])
+    // The bounds say the same story: the parent is bounded by its child's
+    // *record*, not by the child's node. The node sits at `child`, well after
+    // the exchange, so reading the citation as a seq would bound the parent at
+    // the node instead of at the ground that node stands for.
+    const bounds = new Map(
+      (store.getStateJson(slots().summaries.id) as SummaryEntry[]).map(entry => [entry.id, entry.sourceRange]),
+    )
+    expect(bounds.get('L2-0')).toEqual({ first: 'L1-0', last: 'L1-0' })
+    expect(child).toBeGreaterThan(answer)
   })
 
   it('does not let one recollection\'s fold node stand in for another', () => {

@@ -77,16 +77,22 @@ export function seedFromLog(store: LogStore, session: Session): {
   const surface = [...idAtSeq].sort((a, b) => a[0] - b[0])
 
   const known = new Map<string, RecollectionRange>()
+  const coverage = surfaceGround(session)
   let counter = 0
 
   for (const memory of readMemoryLog(session)) {
-    const legacy = legacyRange(session, memory.id)
-    const range = memory.range ?? legacy?.range
+    const legacy = legacyRange(session, coverage, memory.id)
+    const range = memory.range ?? legacy?.covered
     if (range === undefined) continue
     const { firstSeq, lastSeq } = range
     // A minted range is recorded by the mint itself, so the node that landed it is
     // the only one that could have: no reader needed.
     const landedAt = legacy?.at
+    // The interval a child's node has to fall inside. For a minted range that is
+    // the range itself; for a legacy fold it is the envelope its node cited, which
+    // is where its children's nodes sit — the expanded ground starts at the events
+    // underneath them.
+    const widened = legacy?.cited ?? range
 
     // Message ids when nothing has folded the ground, and the ids still on the
     // surface when something has — an L1 above a fold is not a leaf the recall
@@ -94,7 +100,7 @@ export function seedFromLog(store: LogStore, session: Session): {
     const covered = memory.level === 1
       ? slice(surface, firstSeq, lastSeq).map(([, id]) => id)
       : [...known]
-        .filter(([, child]) => child.at !== undefined && child.at >= firstSeq && child.at <= lastSeq)
+        .filter(([, child]) => child.at !== undefined && child.at >= widened.firstSeq && child.at <= widened.lastSeq)
         .map(([id]) => id)
 
     // Skipped, not stubbed: an entry citing ground that does not exist would have
@@ -130,7 +136,7 @@ export function seedFromLog(store: LogStore, session: Session): {
       created: memory.created,
     } satisfies SummaryEntry)
 
-    known.set(memory.id, { covered: coveredSeq, cited: { firstSeq, lastSeq }, ...(landedAt === undefined ? {} : { at: landedAt }) })
+    known.set(memory.id, { covered: coveredSeq, cited: widened, ...(landedAt === undefined ? {} : { at: landedAt }) })
     counter = Math.max(counter, Number(/-(\d+)$/.exec(memory.id)?.[1] ?? -1) + 1)
   }
 
@@ -209,27 +215,81 @@ function slice(surface: ReadonlyArray<readonly [number, string]>, firstSeq: numb
 }
 
 /**
- * The range of a recollection minted before the log recorded one.
+ * The ground a replacement node took, by log seq — every cited node expanded
+ * through the fold nodes it stands for, down to appended events.
  *
- * The pre-rewrite engine stamped no `sourceRange` on its `autobio/memory`
- * events, so the only surviving record of what a fold took is the fold node's
- * own `sourceEventSeqs`. Naming the node is the whole difficulty, and it takes
- * two readers because the identity moved: a node the old engine landed carries
- * no `compactionId` in its source and is named only by the `[Recall id]` header
- * in its text, while a node this engine lands carries the id in
- * `source.compactionId` and needs no prose. Unlanded mints are dropped: nothing
- * in the log says what ground they stood for.
+ * A citation is a node, and a node can be a fold's own replacement rather than
+ * something appended: measured against the red-lemma log, 36 of its 160 fold
+ * nodes cite an earlier fold's node. Reading those citations as seqs reports the
+ * interval the parent *named* instead of the ground it took, and the two are not
+ * the same interval — `L2-6` cites `6709..54199` while the ground it actually
+ * stands over is `249..49115`, which is ground a child already owned.
+ *
+ * Self-citations cannot recurse, and the recursion needs no guard of its own: the
+ * session refuses a citation that is not strictly earlier than the node citing it
+ * (`sourceEventSeqs must reference earlier events`), so every expansion step
+ * descends in seq and the walk terminates.
  */
-function legacyRange(session: Session, id: string): { range: { firstSeq: number; lastSeq: number }; at: number } | undefined {
+function groundOf(events: ReadonlyMap<number, SessionEvent>, seq: number): readonly number[] {
+  const event = events.get(seq)
+  const sources = event !== undefined && isReplacementSurfaceEvent(event) ? event.sourceEventSeqs : undefined
+  return sources?.length ? sources.flatMap(source => groundOf(events, source)) : [seq]
+}
+
+/**
+ * Ground coverage per surface seq, memoized. Exported because the planner needs
+ * the same expansion to keep a fold node's footprint comparable with the nodes it
+ * stands for, and two implementations of it would drift.
+ */
+export function surfaceGround(session: Session): Map<number, readonly number[]> {
+  const events = new Map(session.events.map(event => [event.seq, event]))
+  const coverage = new Map<number, readonly number[]>()
+  for (const seq of session.surface.nodes) coverage.set(seq, groundOf(events, seq))
+  return coverage
+}
+
+/**
+ * The ranges of a recollection minted before the log recorded one.
+ *
+ * `covered` is the ground the fold took, which is what the planner compares a
+ * surface node against. It is the cited seqs *expanded* through
+ * {@link surfaceGround}: a pre-rewrite node cites the child fold nodes it shadows
+ * as readily as it cites raw events, and reading those citations as seqs reports
+ * the interval the parent named rather than the ground it took. The two are not
+ * the same interval — `L2-6` cites `6709..54199` while the ground it stands over
+ * is `249..49115`, which is ground its own child already owned.
+ *
+ * `cited` is that unexpanded envelope, and it is the one a higher recollection's
+ * interval has to be measured against: a child is found by the seq its own node
+ * landed on, and those nodes sit at the cited bounds. Collapsing the two loses
+ * the children in exactly the fold-over-fold case that matters.
+ *
+ * The node is named by the `[Recall id]` header in its text: a pre-rewrite node
+ * carries a `compactionId` of its own form (`autobio-session-<id>-<n>`, which
+ * `foldIdOf` does not match — measured on the red-lemma log, all 160 fold nodes
+ * name themselves the old way), so the header answers for the whole legacy set.
+ * Unlanded mints are dropped: nothing in the log says what ground they stood
+ * for.
+ */
+function legacyRange(
+  session: Session,
+  coverage: ReadonlyMap<number, readonly number[]>,
+  id: string,
+): { covered: { firstSeq: number; lastSeq: number }; cited: { firstSeq: number; lastSeq: number }; at: number } | undefined {
   for (const event of session.events) {
     if (!isReplacementSurfaceEvent(event)) continue
     // A node that names an id in its source is read only there: the prose is a
     // fallback for nodes that name nothing, never a second opinion.
     if ((foldIdOf(event) ?? recallHeaderId(event)) !== id) continue
-    // A replacement always cites every node it shadowed, so there is always a
-    // list here to bound: the session refuses a replace that names no ground.
-    const sources = event.sourceEventSeqs ?? []
-    return { range: { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) }, at: event.seq }
+    // A replacement cites every node it shadowed or it does not land, so the list
+    // to bound is always here: the session refuses a replace that names no ground.
+    const sources = event.sourceEventSeqs as number[]
+    const ground = sources.flatMap(seq => coverage.get(seq) ?? [seq])
+    return {
+      covered: { firstSeq: Math.min(...ground), lastSeq: Math.max(...ground) },
+      cited: { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) },
+      at: event.seq,
+    }
   }
   return undefined
 }
@@ -237,12 +297,8 @@ function legacyRange(session: Session, id: string): { range: { firstSeq: number;
 /** The recollection a pre-rewrite fold node names in its text, if it names one. */
 function recallHeaderId(event: SessionEvent): string | undefined {
   if (event.type !== 'assistant/message') return undefined
-  for (const block of event.data.message.content) {
-    if (block.type !== 'text') continue
-    const id = RECALL_HEADER.exec(block.text)?.[1]
-    if (id !== undefined) return id
-  }
-  return undefined
+  const texts = event.data.message.content.flatMap(block => (block.type === 'text' ? [block.text] : []))
+  return texts.map(text => RECALL_HEADER.exec(text)?.[1]).find(id => id !== undefined)
 }
 
 const LEVEL_PREFIX = /^L(\d+)-/
