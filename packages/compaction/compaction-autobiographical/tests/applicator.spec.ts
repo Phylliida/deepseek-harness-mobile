@@ -233,6 +233,37 @@ describe('assertFoldOpsApply', () => {
     }).not.toThrow()
   })
 
+  it('checks the range positionally — a fold node\'s late seq is not swept in', () => {
+    // Surface order is positional; fold nodes carry replacement-message seqs
+    // that can numerically fall inside a later op's range while sitting
+    // before it (production shape from the b410187f stall).
+    expect(() => {
+      assertFoldOpsApply([1, 3, 2, 4, 5], [{
+        summaryId: 'L1-0',
+        level: 1,
+        startSeq: 2,
+        endSeq: 5,
+        shadowedSeqs: [2, 4, 5],
+        shadowedTokens: 3,
+        text: '[Recall L1-0]',
+      }])
+    }).not.toThrow()
+  })
+
+  it('throws when an op\'s range does not resolve on the surface', () => {
+    expect(() => {
+      assertFoldOpsApply([0, 1, 2], [{
+        summaryId: 'L1-0',
+        level: 1,
+        startSeq: 7,
+        endSeq: 9,
+        shadowedSeqs: [7, 9],
+        shadowedTokens: 2,
+        text: '[Recall L1-0]',
+      }])
+    }).toThrow('fold L1-0 range 7..9 does not resolve on the live surface')
+  })
+
   it('throws before the bracket opens when an op skips a surface node', () => {
     expect(() => {
       assertFoldOpsApply([0, 1, 2], [{

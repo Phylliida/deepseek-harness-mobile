@@ -82,7 +82,15 @@ function foldNodeSummaryId(event: SessionEvent): string | undefined {
 export function assertFoldOpsApply(surfaceSeqs: readonly number[], ops: readonly FoldOp[]): void {
   for (const op of ops) {
     const shadowed = new Set(op.shadowedSeqs)
-    const missing = surfaceSeqs.filter(seq => seq >= op.startSeq && seq <= op.endSeq && !shadowed.has(seq))
+    // Positional, not numeric: fold nodes carry late replacement-message
+    // seqs while sitting at early surface positions, so a seq-value range
+    // would sweep in nodes the op never spans.
+    const startIdx = surfaceSeqs.indexOf(op.startSeq)
+    const endIdx = surfaceSeqs.indexOf(op.endSeq)
+    if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+      throw new Error(`fold ${op.summaryId} range ${op.startSeq}..${op.endSeq} does not resolve on the live surface`)
+    }
+    const missing = surfaceSeqs.slice(startIdx, endIdx + 1).filter(seq => !shadowed.has(seq))
     if (missing.length > 0) {
       throw new Error(`fold ${op.summaryId} would shadow seqs ${missing.join(', ')} without citing them`)
     }
