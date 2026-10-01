@@ -39,9 +39,10 @@ export interface FoldOp {
   /** What the replacement node says. */
   readonly summary: SummaryEntry
   /**
-   * Where the span sits on the surface. Sequencing alone cannot say: a landed
-   * fold node takes the position of the ground it replaced, so the surface is
-   * ordered by log seq except where it is not.
+   * Where the span sits on the surface, as positions into it. Log seqs cannot
+   * say: a landed fold node takes the position of the ground it replaced, so the
+   * surface is ordered by seq except where it is not. Internal to the walk —
+   * {@link FoldOp} is what the caller gets, and widening consumes this.
    */
   readonly span: { readonly from: number; readonly to: number }
 }
@@ -110,6 +111,7 @@ export function foldBlocks(summary: SummaryEntry): ContentBlock[] {
  * @throws DivergenceError when the mirrored history and the log disagree.
  */
 export function planFolds(store: LogStore, session: Session, inputs: PlanInputs): FoldOp[] {
+  const ranges = standing(inputs)
   // A resolution lands on the *messages* a recollection covered, so two adjacent
   // recollections at the same level resolve the same way and a run of equal
   // levels spans ground no single recollection owns. Partition by recollection
@@ -120,7 +122,7 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
     const level = inputs.resolutions.get(message.id) ?? 0
     const seq = message.metadata?.['dshSeq']
     if (level === 0 || !Number.isSafeInteger(seq)) continue
-    const summary = standingFor(inputs, level, seq as number)
+    const summary = standingFor(ranges, level, seq as number)
     // A recollection is folded once however its messages are divided, so the
     // surface is never asked to carry the same recollection twice. Every message
     // a recollection covers resolves to the same level and the entry standing for
@@ -139,31 +141,31 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
   for (const { summary, first, last } of claimed.values()) {
     // A landed fold node standing for other ground is this fold's to replace
     // like any message — the replacement subsumes it. The recollection's own
-    // landed node is not, or the surface would carry it twice. The endpoints
-    // ride along with the walk, so the span cannot disagree with what it covers.
-    const shadowed: number[] = []
+    // landed node is not, or the surface would carry it twice. Nodes covered are
+    // contiguous, because the mirrored messages they stand for are and nothing
+    // else can sit between two consecutive messages of one run, so the first and
+    // last offsets are the whole span.
+    const covers = (node: SurfaceNode): boolean =>
+      node.foldId !== summary.id && node.coverage.some(seq => seq >= first && seq <= last)
+    const from = surface.findIndex(covers)
+    if (from < 0) continue
+    let to = from
     let tokens = 0
-    let from: number | undefined
-    let to: number | undefined
-    surface.forEach((node, at) => {
-      if (node.foldId === summary.id) return
-      if (!node.coverage.some(seq => seq >= first && seq <= last)) return
-      shadowed.push(node.seq)
-      tokens += node.tokens
-      from ??= at
+    for (let at = from; at < surface.length; at++) {
+      const node = surface[at] as SurfaceNode
+      if (!covers(node)) break
       to = at
-    })
-
-    if (from === undefined) continue
+      tokens += node.tokens
+    }
     ops.push({
       summaryId: summary.id,
       level: summary.level,
       startSeq: surface[from]?.seq ?? 0,
-      endSeq: surface[to ?? from]?.seq ?? 0,
-      shadowedSeqs: shadowed,
+      endSeq: surface[to]?.seq ?? 0,
+      shadowedSeqs: surface.slice(from, to + 1).map(node => node.seq),
       shadowedTokens: tokens,
       summary,
-      span: { from, to: to ?? from },
+      span: { from, to },
     })
   }
 
@@ -171,40 +173,45 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
 }
 
 /**
- * The recollection at `level` standing for one log seq, or a throw. Both
- * coverage readings are unioned rather than one being preferred: the seeded
- * coverage is what the log recorded at mint time and the resolved one is what
- * the entry's own sources say now, and a recollection that has since absorbed
- * more ground is the wider of the two.
+ * Every live recollection's coverage, by level, in the order the pyramid minted
+ * them. Both coverage readings are unioned rather than one being preferred: the
+ * seeded coverage is what the log recorded at mint time and the resolved one is
+ * what the entry's own sources say now, and a recollection that has since
+ * absorbed more ground is the wider of the two. Computed once per pass, because
+ * every mirrored message asks the same table for the entry standing over it.
  */
-function standingFor(inputs: PlanInputs, level: number, seq: number): SummaryEntry {
-  const spans = (summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined => {
+function standing(inputs: PlanInputs): Map<number, { summary: SummaryEntry; first: number; last: number }[]> {
+  const byLevel = new Map<number, { summary: SummaryEntry; first: number; last: number }[]>()
+  for (const summary of inputs.summaries) {
+    // The picker leaves the newest recollection standing for a covered run
+    // unresolved, so the entry of the level the run needs has no resolution. A
+    // recollection the pyramid has merged upward is superseded, so it is not the
+    // one standing. Both pointers are checked because the library writes
+    // `mergedInto` (deprecated) on the live path and reads `parentId` as the
+    // alias, so a store mid-migration can carry either.
+    if (summary.parentId !== undefined || summary.mergedInto !== undefined) continue
     const seeded = inputs.seeded.get(summary.id)?.covered
     const resolved = resolveRange(inputs.seqOf, summary)
-    if (seeded === undefined) return resolved
-    if (resolved === undefined) return seeded
-    return {
-      firstSeq: Math.min(seeded.firstSeq, resolved.firstSeq),
-      lastSeq: Math.max(seeded.lastSeq, resolved.lastSeq),
-    }
+    const first = Math.min(seeded?.firstSeq ?? Infinity, resolved?.firstSeq ?? Infinity)
+    const last = Math.max(seeded?.lastSeq ?? -Infinity, resolved?.lastSeq ?? -Infinity)
+    if (first > last) continue
+    const level = byLevel.get(summary.level)
+    if (level === undefined) byLevel.set(summary.level, [{ summary, first, last }])
+    else level.push({ summary, first, last })
   }
-  // The picker leaves the newest recollection standing for a covered run
-  // unresolved, so the entry of the level the run needs has no resolution. A
-  // recollection the pyramid has merged upward is superseded, so it is not the
-  // one standing. Both pointers are checked because the library writes
-  // `mergedInto` (deprecated) on the live path and reads `parentId` as the
-  // alias, so a store mid-migration can carry either.
-  const summary = inputs.summaries
-    .filter(entry =>
-      entry.level === level
-      && entry.parentId === undefined
-      && entry.mergedInto === undefined
-      && (spans(entry)?.firstSeq ?? Infinity) <= seq
-      && (spans(entry)?.lastSeq ?? -Infinity) >= seq)
-    .at(-1)
-  if (summary === undefined) {
-    throw new DivergenceError(`no level-${level} recollection stands for log seq ${seq}`)
-  }
+  return byLevel
+}
+
+/** The recollection at `level` standing for one log seq, or a throw. */
+function standingFor(
+  byLevel: Map<number, { summary: SummaryEntry; first: number; last: number }[]>,
+  level: number,
+  seq: number,
+): SummaryEntry {
+  // The newest standing entry wins, because a recollection that absorbed ground
+  // is minted after the ones it absorbed.
+  const summary = byLevel.get(level)?.filter(entry => entry.first <= seq && entry.last >= seq).at(-1)?.summary
+  if (summary === undefined) throw new DivergenceError(`no level-${level} recollection stands for log seq ${seq}`)
   return summary
 }
 
@@ -216,13 +223,16 @@ function annotateSurface(session: Session): SurfaceNode[] {
   const events = new Map(session.events.map(event => [event.seq, event]))
   const cache = new Map<number, readonly number[]>()
 
+  /** Original append seqs a node stands for, with every fold node it cites expanded. */
   const coverageOf = (seq: number, seen: Set<number>): readonly number[] => {
     const cached = cache.get(seq)
     if (cached !== undefined) return cached
+    // A fold citing itself would recurse forever; the log forbids it, and this is
+    // cheaper than proving it.
     if (seen.has(seq)) return [seq]
     seen.add(seq)
     const event = events.get(seq)
-    const sources = event && isReplacementSurfaceEvent(event) ? event.sourceEventSeqs : undefined
+    const sources = event !== undefined && isReplacementSurfaceEvent(event) ? event.sourceEventSeqs : undefined
     const coverage = sources?.length ? sources.flatMap(source => coverageOf(source, seen)) : [seq]
     cache.set(seq, coverage)
     return coverage
@@ -233,7 +243,7 @@ function annotateSurface(session: Session): SurfaceNode[] {
     const calls: string[] = []
     const results: string[] = []
     let text = ''
-    for (const block of (event && deriveEventMessage(event)?.content) || []) {
+    for (const block of (event === undefined ? undefined : deriveEventMessage(event)?.content) ?? []) {
       if (block.type === 'tool-call') calls.push(block.id)
       if (block.type === 'tool-result') results.push(block.toolCallId)
       if (block.type === 'text') text += block.text

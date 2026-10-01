@@ -14,7 +14,6 @@
 
 import { AutobiographicalStrategy, ContextManager, OverBudgetError } from '@animalabs/context-manager'
 import type { SummaryEntry, TokenBudget } from '@animalabs/context-manager'
-import type { ToolParameter } from '@animalabs/membrane'
 import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -253,20 +252,15 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   private syncToolDefinitions(runtime: Runtime, session: Session): void {
     const tools = session.requestHeader()?.tools
     if (tools === undefined) return
-    runtime.manager.setToolDefinitions(tools.map((tool) => {
-      // Both sides are JSON-Schema shaped; the membrane type just narrows the
-      // fields it reads when rendering the compression prompt.
-      const parameters = tool.parameters as { properties?: Record<string, ToolParameter>; required?: string[] }
-      return {
-        name: tool.name,
-        description: tool.description,
-        inputSchema: {
-          type: 'object' as const,
-          ...parameters.properties === undefined ? {} : { properties: parameters.properties },
-          ...parameters.required === undefined ? {} : { required: parameters.required },
-        },
-      }
-    }))
+    // Both sides are JSON-Schema shaped and the library reads `inputSchema` as an
+    // open record, so the schema passes through with the object type forced: the
+    // `type` is written last because the harness requires it to be `'object'` and
+    // a tool declaring otherwise must not win.
+    runtime.manager.setToolDefinitions(tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: { ...tool.parameters, type: 'object' as const },
+    })))
   }
 
   /**
