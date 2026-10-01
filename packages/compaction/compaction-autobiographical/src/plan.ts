@@ -118,34 +118,18 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
   const claimed = new Map<string, { summary: SummaryEntry; first: number; last: number }>()
   for (const message of store.getStateJson(MESSAGES_STATE) as StoredMessage[]) {
     const level = inputs.resolutions.get(message.id) ?? 0
-    if (level === 0) continue
     const seq = message.metadata?.['dshSeq']
-    if (typeof seq !== 'number' || !Number.isSafeInteger(seq)) continue
-    // The picker leaves the newest recollection standing for a covered run
-    // unresolved, so the entry of the level the run needs has no resolution.
-    // A recollection the pyramid has already merged upward is superseded, so it
-    // is not the one standing. Both pointers are checked because the library
-    // writes `mergedInto` (deprecated) on the live path and reads `parentId` as
-    // the alias, so a store mid-migration can carry either.
-    const summary = inputs.summaries
-      .filter(entry =>
-        entry.level === level
-        && entry.parentId === undefined
-        && entry.mergedInto === undefined
-        && standsOver(inputs, entry, seq))
-      .at(-1)
-    if (summary === undefined) {
-      throw new DivergenceError(`no level-${level} recollection stands for log seq ${seq}`)
-    }
+    if (level === 0 || !Number.isSafeInteger(seq)) continue
+    const summary = standingFor(inputs, level, seq as number)
     // A recollection is folded once however its messages are divided, so the
     // surface is never asked to carry the same recollection twice. Every message
     // a recollection covers resolves to the same level and the entry standing for
     // one of them stands for the rest, so the coverage only widens here.
-    const seen = claimed.get(summary.id)
-    if (seen === undefined) claimed.set(summary.id, { summary, first: seq, last: seq })
+    const claimedSo = claimed.get(summary.id)
+    if (claimedSo === undefined) claimed.set(summary.id, { summary, first: seq as number, last: seq as number })
     else {
-      seen.first = Math.min(seen.first, seq)
-      seen.last = Math.max(seen.last, seq)
+      claimedSo.first = Math.min(claimedSo.first, seq as number)
+      claimedSo.last = Math.max(claimedSo.last, seq as number)
     }
   }
 
@@ -186,27 +170,42 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
   return widen(ops, surface)
 }
 
-/** Whether a recollection's coverage takes in one log seq. */
-function standsOver(inputs: PlanInputs, summary: SummaryEntry, seq: number): boolean {
-  const range = rangeOf(inputs, summary)
-  return range !== undefined && range.firstSeq <= seq && range.lastSeq >= seq
-}
-
 /**
- * The log seqs a recollection stands for. Both readings are kept and unioned
- * rather than one being preferred: the seeded coverage is what the log recorded
- * at mint time, the resolved one is what the entry's own sources say now, and a
- * recollection that has since absorbed more ground is the wider of the two.
+ * The recollection at `level` standing for one log seq, or a throw. Both
+ * coverage readings are unioned rather than one being preferred: the seeded
+ * coverage is what the log recorded at mint time and the resolved one is what
+ * the entry's own sources say now, and a recollection that has since absorbed
+ * more ground is the wider of the two.
  */
-function rangeOf(inputs: PlanInputs, summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined {
-  const seeded = inputs.seeded.get(summary.id)?.covered
-  const resolved = resolveRange(inputs.seqOf, summary)
-  if (seeded === undefined) return resolved
-  if (resolved === undefined) return seeded
-  return {
-    firstSeq: Math.min(seeded.firstSeq, resolved.firstSeq),
-    lastSeq: Math.max(seeded.lastSeq, resolved.lastSeq),
+function standingFor(inputs: PlanInputs, level: number, seq: number): SummaryEntry {
+  const spans = (summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined => {
+    const seeded = inputs.seeded.get(summary.id)?.covered
+    const resolved = resolveRange(inputs.seqOf, summary)
+    if (seeded === undefined) return resolved
+    if (resolved === undefined) return seeded
+    return {
+      firstSeq: Math.min(seeded.firstSeq, resolved.firstSeq),
+      lastSeq: Math.max(seeded.lastSeq, resolved.lastSeq),
+    }
   }
+  // The picker leaves the newest recollection standing for a covered run
+  // unresolved, so the entry of the level the run needs has no resolution. A
+  // recollection the pyramid has merged upward is superseded, so it is not the
+  // one standing. Both pointers are checked because the library writes
+  // `mergedInto` (deprecated) on the live path and reads `parentId` as the
+  // alias, so a store mid-migration can carry either.
+  const summary = inputs.summaries
+    .filter(entry =>
+      entry.level === level
+      && entry.parentId === undefined
+      && entry.mergedInto === undefined
+      && (spans(entry)?.firstSeq ?? Infinity) <= seq
+      && (spans(entry)?.lastSeq ?? -Infinity) >= seq)
+    .at(-1)
+  if (summary === undefined) {
+    throw new DivergenceError(`no level-${level} recollection stands for log seq ${seq}`)
+  }
+  return summary
 }
 
 /**
@@ -269,16 +268,16 @@ function widen(ops: FoldOp[], surface: SurfaceNode[]): FoldOp[] {
     // Backward: an assistant node just before the fold whose calls the fold
     // answers is half a round the fold would break. It declares calls only, so
     // one node of reach is all there is.
-    const before = surface[start - 1]
-    if (before !== undefined && !taken.has(start - 1)) {
-      const answered = new Set(surface.slice(start, end + 1).flatMap(node => node.results))
-      if (before.calls.some(id => answered.has(id))) from = start - 1
-    }
+    const covered = surface.slice(start, end + 1)
+    const results = new Set(covered.flatMap(node => node.results))
+    const before = taken.has(start - 1) ? undefined : surface[start - 1]
+    if (before !== undefined && before.calls.some(id => results.has(id))) from = start - 1
 
     // Forward: results the fold leaves standing, taken as one contiguous run so
     // that a round stays whole.
-    const inside = new Set(surface.slice(from, to + 1).flatMap(node => node.results))
-    const pending = new Set(surface.slice(from, to + 1).flatMap(node => node.calls).filter(id => !inside.has(id)))
+    const pending = new Set(
+      surface.slice(from, to + 1).flatMap(node => node.calls).filter(id => !results.has(id)),
+    )
     while (to + 1 < surface.length && pending.size > 0 && !taken.has(to + 1)) {
       const next = surface[to + 1] as SurfaceNode
       const answers = next.results.filter(id => pending.has(id))
@@ -290,13 +289,10 @@ function widen(ops: FoldOp[], surface: SurfaceNode[]): FoldOp[] {
     const widened = surface.slice(from, to + 1)
     widened.forEach((_, offset) => taken.add(from + offset))
     if (from === start && to === end) return op
-    const head = surface[from]
-    const tail = surface[to]
-    if (head === undefined || tail === undefined) return op
     return {
       ...op,
-      startSeq: head.seq,
-      endSeq: tail.seq,
+      startSeq: surface[from]?.seq ?? op.startSeq,
+      endSeq: surface[to]?.seq ?? op.endSeq,
       shadowedSeqs: widened.map(node => node.seq),
       shadowedTokens: widened.reduce((total, node) => total + node.tokens, 0),
       span: { from, to },
