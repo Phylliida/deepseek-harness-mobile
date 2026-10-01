@@ -113,12 +113,20 @@ describe('LogStore', () => {
     expect((live[0] as { participant: string }).participant).toBe('system')
   })
 
-  it('treats the redaction end as exclusive', () => {
+  it('refuses to redact the messages slot, whose ids are surface positions', () => {
     const store = empty()
     for (const seq of [1, 2, 3]) store.appendToStateJson(MESSAGES_STATE, { seq })
-    store.redactStateItems(MESSAGES_STATE, 0, 1)
-    expect(store.getStateLen(MESSAGES_STATE)).toBe(2)
-    expect((store.getStateJson(MESSAGES_STATE) as Array<{ seq: number }>).map(item => item.seq)).toEqual([2, 3])
+    expect(() => store.redactStateItems(MESSAGES_STATE, 0, 1)).toThrow(/append-only/)
+    expect(store.getStateLen(MESSAGES_STATE)).toBe(3)
+  })
+
+  it('treats the redaction end as exclusive', () => {
+    const store = empty()
+    store.registerState(slots().summaries)
+    for (const seq of [1, 2, 3]) store.appendToStateJson(slots().summaries.id, { seq })
+    store.redactStateItems(slots().summaries.id, 0, 1)
+    expect(store.getStateLen(slots().summaries.id)).toBe(2)
+    expect((store.getStateJson(slots().summaries.id) as Array<{ seq: number }>).map(item => item.seq)).toEqual([2, 3])
   })
 
   it('serves a point lookup as a JSON array buffer, and null when empty', () => {
@@ -129,16 +137,17 @@ describe('LogStore', () => {
     expect(store.getStateItemJson(MESSAGES_STATE, 99)).toBeNull()
   })
 
-  it('keeps blobs by content hash', () => {
-    const store = new LogStore()
-    const hash = store.storeBlob(Buffer.from('evidence'), 'text/plain')
-    expect(store.getBlob(hash)?.toString()).toBe('evidence')
-    expect(store.getBlob('blob-nope')).toBeNull()
+  it('leaves inline media alone, so a session with an image seeds without a blob store', () => {
+    const store = empty()
+    const image = { type: 'image', source: { type: 'base64', mediaType: 'image/png', data: 'aGk=' } }
+    store.appendToStateJson(MESSAGES_STATE, { participant: 'user', content: [image] })
+    const [stored] = store.getStateJson(MESSAGES_STATE) as Array<{ content: unknown[] }>
+    expect(stored?.content).toEqual([image])
   })
 
   it('names the slot when a write races ahead of its registration', () => {
     const store = new LogStore()
-    expect(() => store.appendToStateJson('unregistered', {})).toThrow(/no state "unregistered"/)
+    expect(() => store.appendToStateJson('unregistered', {})).toThrow(/no append-log state "unregistered"/)
   })
 
   it('rewrites an append-log slot through setStateJson, since that slot has no single value', () => {

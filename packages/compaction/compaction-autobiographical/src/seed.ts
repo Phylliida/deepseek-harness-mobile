@@ -29,7 +29,7 @@ import { foldIdOf } from './plan.ts'
 import { LogStore, slots } from './store.ts'
 
 /** A recollection as the log records it. */
-export interface LoggedMemory {
+interface LoggedMemory {
   id: string
   level: number
   content: string
@@ -39,21 +39,20 @@ export interface LoggedMemory {
   range?: { firstSeq: number; lastSeq: number }
 }
 
-/** What seeding replayed: the two indexes the engine reasons with afterwards. */
-export interface SeedResult {
-  /** Store message id behind every replayed log seq. */
-  readonly seqOf: Map<string, number>
-  /** Log seq range each seeded recollection covers. */
-  readonly known: Map<string, { first: number; last: number }>
-}
-
 /**
  * Write the scratch store's contents for one session log.
  *
  * Run before `ContextManager.open`: the message slot has to exist before the
  * manager tries to register it, and the strategy's slots before it loads them.
+ *
+ * Returns the two indexes the engine reasons with afterwards: the store message
+ * id behind every replayed log seq, and the log seq range each seeded
+ * recollection covers.
  */
-export function seedFromLog(store: LogStore, session: Session): SeedResult {
+export function seedFromLog(store: LogStore, session: Session): {
+  readonly seqOf: Map<string, number>
+  readonly known: Map<string, { first: number; last: number }>
+} {
   const ids = slots()
   store.registerState(ids.messages)
   store.registerState(ids.summaries)
@@ -66,20 +65,7 @@ export function seedFromLog(store: LogStore, session: Session): SeedResult {
     const message = session.deriveEventMessage(event)
     // A usage-only assistant step carries no message and so contributes no node.
     if (!message) continue
-    const id = store.appendToStateJsonWithIdentity(
-      ids.messages.id,
-      {
-        // The harness message has no participant name of its own, and roles are
-        // what the library's tool-message normalization reads. The participant
-        // is therefore the role itself.
-        participant: message.role,
-        content: message.content,
-        metadata: { dshSeq: event.seq },
-        timestamp: new Date(event.time),
-      },
-      'id',
-      'sequence',
-    ).id
+    const id = writeMessage(store, event, message, 'id', 'sequence')
     seqOf.set(id, event.seq)
     idAtSeq.set(event.seq, id)
   }
@@ -89,11 +75,10 @@ export function seedFromLog(store: LogStore, session: Session): SeedResult {
   // `recallCurveLeafIds` checks before it will treat an entry as a leaf.
   const surface = [...idAtSeq].sort((a, b) => a[0] - b[0])
 
-  const memories = readMemoryLog(session)
   const known = new Map<string, { first: number; last: number }>()
   let counter = 0
 
-  for (const memory of memories) {
+  for (const memory of readMemoryLog(session)) {
     const range = memory.range ?? legacyRange(session, memory.id)
     if (range === undefined) continue
     const { firstSeq, lastSeq } = range
@@ -146,24 +131,37 @@ export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: Summar
  * Append a surface node's derived message during a live session, returning the
  * store's id for it, or undefined when the event contributes no message.
  *
- * Appended straight to the shim rather than through `ContextManager.addMessage`
- * for one reason: only the shim's own id-injection reproduces the ids a replay
- * produces, and `seqOf` is keyed on them. The seam is otherwise invisible to the
- * engine — coverage travels in log seqs, so a fold formed live and the same fold
- * formed by replay agree regardless of the ids underneath.
- *
- * Both paths staying on the shim also keeps them consistent with each other.
- * `addMessage` runs ingress sharding for a message over twice
- * `targetChunkTokens`, and replay cannot reconstruct that decision from the log,
- * because the log stores the promoter's message rather than the shards. Live and
- * replayed would then cut a large message into different records. The engine has
- * no stake in which granularity wins — `rebuildChunks` never splits a message,
- * so the whole body lands in one chunk either way — only in the two agreeing.
+ * Both paths write through the store directly rather than through
+ * `ContextManager.addMessage`, for two reasons. Only the store's own id
+ * injection reproduces the ids a replay produces, and `seqOf` is keyed on them.
+ * And `addMessage` shards a message over twice `targetChunkTokens`, a decision
+ * replay cannot reconstruct from the log — so live and replayed would cut a
+ * large body into different records. The engine has no stake in which
+ * granularity wins (`rebuildChunks` never splits a message, so the whole body
+ * lands in one chunk either way), only in the two agreeing.
  */
 export function appendSurfaceNode(store: LogStore, session: Session, event: SessionEvent): string | undefined {
   const message = session.deriveEventMessage(event)
   // A usage-only assistant step carries no message and so contributes no node.
   if (!message) return undefined
+  return writeMessage(store, event, message, 'id', 'sequence')
+}
+
+/**
+ * One log event as a stored message.
+ *
+ * The harness message has no participant name of its own, and roles are what the
+ * library's tool-message normalization reads, so the participant is the role
+ * itself. `dshSeq` keeps the originating log seq on the row, which is how a
+ * stored message is traced back to the event it came from.
+ */
+function writeMessage(
+  store: LogStore,
+  event: SessionEvent,
+  message: { role: string; content: unknown },
+  idField: string,
+  sequenceField: string,
+): string {
   return store.appendToStateJsonWithIdentity(
     slots().messages.id,
     {
@@ -172,25 +170,20 @@ export function appendSurfaceNode(store: LogStore, session: Session, event: Sess
       metadata: { dshSeq: event.seq },
       timestamp: new Date(event.time),
     },
-    'id',
-    'sequence',
+    idField,
+    sequenceField,
   ).id
 }
 
 /**
  * The replayed messages a log seq range spans. Replay is in seq order, so the
- * survivors inside a minted range are one contiguous run and the slice is exact
- * rather than a filter.
+ * survivors inside a minted range are one contiguous run and the bounds are
+ * exact rather than a filter.
  */
 function slice(surface: ReadonlyArray<readonly [number, string]>, firstSeq: number, lastSeq: number): Array<readonly [number, string]> {
   const from = surface.findIndex(([seq]) => seq >= firstSeq)
   if (from === -1) return []
-  let to = from
-  while (to + 1 < surface.length) {
-    const next = surface[to + 1]
-    if (next === undefined || next[0] > lastSeq) break
-    to++
-  }
+  const to = surface.findLastIndex(([seq]) => seq <= lastSeq)
   return surface.slice(from, to + 1)
 }
 

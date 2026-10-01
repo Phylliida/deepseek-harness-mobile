@@ -89,7 +89,7 @@ Slot ids the strategy uses (all under ns `default/` unless configured):
 `kvunified:presentation-receipt`. We never enumerate these; the strategy
 registers what it needs at `initialize()` and the shim registers blindly.
 
-## store.ts — the shim (~120 lines)
+## store.ts — the shim (~120 lines of code, ~270 with rationale)
 
 Every method the library calls, verified by grep against
 `ref/context-manager/src`. Anything else throws `Error('shim: <method> not
@@ -114,7 +114,13 @@ getStateSlice(id,off,limit):
   return Buffer.from(JSON.stringify(arrays.get(id)?.slice(off, off+limit) ?? []))
 
 appendToStateJson(id, item):
-  return appendToStateJsonWithIdentity(id, item, 'id', 'sequence')
+  // NOT ('id', 'sequence'). A SummaryEntry is named 'L1-0' and the library
+  // matches persisted summaries by item.id === entry.id
+  // (autobiographical.ts:3649, warns and drops the merge state when it
+  // misses). Splicing under 'id' overwrites that name with the shim's record
+  // id and leaves setMergedInto unable to find its own entry — the
+  // duplicate-id divergence four summaries were lost to.
+  return appendToStateJsonWithIdentity(id, item, 'storeId', 'storeSequence')
 
 appendToStateJsonWithIdentity(id, item, idField, seqField):
   // THE message-identity rule: ids are shim-assigned ordinals, so replaying
@@ -133,8 +139,12 @@ redactStateItems(id, s, e):
   if (id === messagesSlotId) throw Error('shim: messages slot is append-only')
   arrays.get(id).splice(s, e - s)
 
-currentBranch():    return { name: 'main' }        // eternal single branch;
-currentSequence():  return this.seq                // branch-generation guards
+currentBranch():    return this.branch          // one stable OBJECT: callers
+                                                 // compare it by identity, and a
+                                                 // fresh object per call reads as a
+                                                 // branch switch and wipes the token cache
+currentSequence():  return this.seq - 1          // the HEAD of the log, not its
+                                                 // length; -1 before the first write
 isClosed()/close(): trivial                        // never fire (WeakMap gen 0)
 sync():             no-op   // NOTHING TO CHECKPOINT. the log is the fsync.
 compactState(id):   no-op
@@ -142,13 +152,21 @@ listStates():       [...regs entries]
 
 // loud throws — unused in our config, and we want to know if that changes:
 createBranchAt / switchBranch / deleteBranch / getStateJsonAt / getStateAt
-storeBlob / getBlob / treeSet / treeGet / treeBatch / treeList / treeDiff /
+treeSet / treeGet / treeBatch / treeList / treeDiff /
 treeSnapshot / query / subscribe / unsubscribe / pollSubscription* /
 catchUpSubscription / registerStateFieldIndex / queryStateIndex* /
 getStateIndexValueCounts / appendWithLinks / appendJsonWithLinks /
 getEffects / getLinksTo / stats / getCompactionSummary / compactAllStates /
 setAutoSnapshot / autoSnapshotEnabled / getRecord / getRecordIdsByType /
 getStateTail / recovery
+
+// storeBlob/getBlob are not modelled and are NOT worth modelling.
+// MessageStore.append does run content through BlobManager.extractBlobs, but
+// that leaves an inline base64 image alone instead of writing a blob_ref and
+// calling storeBlob, so the bytes the session log already holds are the bytes
+// the library reads back. A blob map would be a second copy of data nothing
+// consults. Deleting them changed no behaviour outside the unit test that
+// asserted the map itself.
 ```
 
 `getStore()` exposure on the manager returns the shim; nothing in our code
@@ -232,7 +250,7 @@ hook only does bookkeeping, never a tick.
 
 ```
 class AutobiographicalCompactionEngine extends CompactionEngine:
-  inject = ['llm', 'sessions']
+  inject = ['llm', 'compaction']
   runtimes = Map<SessionId, Promise<RuntimeEntry>>   // open-once cache
   // RuntimeEntry = { manager, strategy, shim, cursor, tickChain, route }
 
@@ -347,7 +365,14 @@ async openRuntime(session, route):
     store: shim,                         // ← THE WHOLE POINT
     strategy: strat,
     membrane: bridge,
-    tokenEstimator: text => Math.ceil(text.length / 4),  // calibration corrects it
+    // NO tokenEstimator. Giving the manager one REPLACES its default rather
+    // than layering on it, and the default is better than a flat /4: it
+    // samples the first 2000 chars and picks 2.9 or 2.3 chars/token by density
+    // (message-store.ts:1723-1744). Calibration does not correct a crude
+    // estimator as this doc once claimed — it is a single global MULTIPLIER
+    // (tokenCalibration, default 1, clamped to 0.25..4 by setTokenCalibration),
+    // which scales one estimate uniformly and cannot tell prose from code. A
+    // flat /4 would misprice every pick and stay mispriced.
   })
   return { manager, strategy: strat, shim, cursor: session.events.at(-1)?.seq ?? -1, … }
 ```

@@ -295,13 +295,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   private kickTick(runtime: Runtime, session: Session): void {
     runtime.tickChain = runtime.tickChain
       .then(() => runtime.manager.tick())
-      .then(() => {
+      .catch((error: unknown) => { this.warn(`memory formation failed: ${describe(error)}`) })      .then(() => {
         // The session may have been disposed while the tick ran.
         if (this.runtimes.has(session.id)) this.appendMemory(runtime, session)
-      })
-      .catch((error: unknown) => {
-        this.warn(`memory formation failed: ${describe(error)}`)
-        this.appendMemory(runtime, session)
       })
   }
 
@@ -361,7 +357,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     return undefined
   }
 
-  /** Report the last step's real prompt size, so the estimator learns from the wire. */
+  /**
+   * Report the last step's real prompt size, so the estimator learns from the
+   * wire. `lastFedSeq` is the high-water mark: usage is fed once per step, and a
+   * call that reported none leaves the mark where it is for the next step to find.
+   */
   private feedCalibration(runtime: Runtime, session: Session): void {
     for (let index = session.events.length - 1; index > runtime.lastFedSeq; index--) {
       const event = session.events[index]
@@ -549,9 +549,7 @@ function routeOf(agent: CompactionAgentContext): Route | undefined {
   const routed = agent.session.requestContext()
   if (routed !== undefined) return { provider: routed.provider, model: routed.model }
   const { provider, model } = agent.options
-  if (provider === undefined || provider.length === 0 || model === undefined || model.length === 0) {
-    return undefined
-  }
+  if (!provider || !model) return undefined
   return { provider, model }
 }
 
