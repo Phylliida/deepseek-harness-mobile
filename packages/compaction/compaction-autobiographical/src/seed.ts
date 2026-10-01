@@ -1,0 +1,250 @@
+/**
+ * Rebuild the scratch store's memory system from the session log.
+ *
+ * Two passes, both idempotent:
+ *
+ * 1. History replay — walk the log's append events and append each one's derived
+ *    message to the `messages` slot, in seq order. Replacements are skipped: a
+ *    fold node is not mirrored, so the strategy replans over the originals it
+ *    stands for. The planner then finds the ground already covered (`standsOver`)
+ *    and asks for no fold there, which is what keeps a replay from re-minting
+ *    everything a previous run folded.
+ * 2. Memory replay — every `autobio/memory` event becomes a `SummaryEntry`. A
+ *    recollection cannot be derived (minting calls a model), so the event
+ *    payload *is* the archive: content, level, and the seq range it covered.
+ *
+ * The chunks slot stays empty on purpose. `AutobiographicalStrategy` synthesizes
+ * chunk records from L1 `sourceIds` whenever it finds L1s and no chunks
+ * (`migrateChunkRecords`), then `rebuildChunks` spreads them over the live
+ * messages — so re-deriving them here would duplicate a migration the library
+ * already performs.
+ *
+ * @module @deepseek-ai/dsh-compaction-autobiographical/seed
+ */
+
+import type { SummaryEntry } from '@animalabs/context-manager'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+import { foldIdOf } from './plan.ts'
+import { LogStore, slots } from './store.ts'
+
+/** A recollection as the log records it. */
+export interface LoggedMemory {
+  id: string
+  level: number
+  content: string
+  tokens: number
+  created: number
+  /** The seq range the mint replaced, or undefined if the mint recorded none. */
+  range?: { firstSeq: number; lastSeq: number }
+}
+
+/** What seeding replayed: the two indexes the engine reasons with afterwards. */
+export interface SeedResult {
+  /** Store message id behind every replayed log seq. */
+  readonly seqOf: Map<string, number>
+  /** Log seq range each seeded recollection covers. */
+  readonly known: Map<string, { first: number; last: number }>
+}
+
+/**
+ * Write the scratch store's contents for one session log.
+ *
+ * Run before `ContextManager.open`: the message slot has to exist before the
+ * manager tries to register it, and the strategy's slots before it loads them.
+ */
+export function seedFromLog(store: LogStore, session: Session): SeedResult {
+  const ids = slots()
+  store.registerState(ids.messages)
+  store.registerState(ids.summaries)
+  store.registerState(ids.counter)
+
+  const seqOf = new Map<string, number>()
+  const idAtSeq = new Map<number, string>()
+  for (const event of session.events) {
+    if (!isAppendSurfaceEvent(event)) continue
+    const message = session.deriveEventMessage(event)
+    // A usage-only assistant step carries no message and so contributes no node.
+    if (!message) continue
+    const id = store.appendToStateJsonWithIdentity(
+      ids.messages.id,
+      {
+        // The harness message has no participant name of its own, and roles are
+        // what the library's tool-message normalization reads. The participant
+        // is therefore the role itself.
+        participant: message.role,
+        content: message.content,
+        metadata: { dshSeq: event.seq },
+        timestamp: new Date(event.time),
+      },
+      'id',
+      'sequence',
+    ).id
+    seqOf.set(id, event.seq)
+    idAtSeq.set(event.seq, id)
+  }
+
+  // Sorted by log seq, so a recollection's `sourceIds` come out in store
+  // position order and `sourceRange` can bound them — which is what
+  // `recallCurveLeafIds` checks before it will treat an entry as a leaf.
+  const surface = [...idAtSeq].sort((a, b) => a[0] - b[0])
+
+  const memories = readMemoryLog(session)
+  const known = new Map<string, { first: number; last: number }>()
+  let counter = 0
+
+  for (const memory of memories) {
+    const range = memory.range ?? legacyRange(session, memory.id)
+    if (range === undefined) continue
+    const { firstSeq, lastSeq } = range
+
+    // Message ids when nothing folded the ground, and the ids still on the
+    // surface when something did — an L1 above a fold is not a leaf the recall
+    // curve can walk. Child recollections when the ground is summaries.
+    const covered = memory.level === 1
+      ? slice(surface, firstSeq, lastSeq).map(([, id]) => id)
+      : [...known].filter(([, child]) => child.first >= firstSeq && child.last <= lastSeq).map(([id]) => id)
+
+    // Skipped, not stubbed: an entry citing ground that does not exist would have
+    // no sources to resolve and no range to cover, and `recallCurveLeafIds`
+    // rejects it anyway (its `sourceRange` could not bound its `sourceIds`).
+    // A non-empty list always has both bounds, so these two stand in for it.
+    const first = covered.at(0)
+    const last = covered.at(-1)
+    if (first === undefined || last === undefined) continue
+
+    store.appendToStateJson(ids.summaries.id, {
+      id: memory.id,
+      level: memory.level,
+      content: memory.content,
+      tokens: memory.tokens,
+      sourceLevel: memory.level - 1,
+      sourceIds: covered,
+      sourceRange: { first, last },
+      created: memory.created,
+    } satisfies SummaryEntry)
+
+    known.set(memory.id, { first: firstSeq, last: lastSeq })
+    counter = Math.max(counter, Number(/-(\d+)$/.exec(memory.id)?.[1] ?? -1) + 1)
+  }
+
+  store.setStateJson(ids.counter.id, counter)
+  return { seqOf, known }
+}
+
+/**
+ * A recollection minted after seeding records message ids, not log seqs, so its
+ * range is resolved through the messages it names.
+ */
+export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: SummaryEntry): { first: number; last: number } | undefined {
+  const known = summary.sourceIds.flatMap(id => seqOf.get(id)).filter(seq => seq !== undefined)
+  if (known.length === 0) return undefined
+  return { first: Math.min(...known), last: Math.max(...known) }
+}
+
+/**
+ * Append a surface node's derived message during a live session, returning the
+ * store's id for it, or undefined when the event contributes no message.
+ *
+ * Appended straight to the shim rather than through `ContextManager.addMessage`
+ * for one reason: only the shim's own id-injection reproduces the ids a replay
+ * produces, and `seqOf` is keyed on them. The seam is otherwise invisible to the
+ * engine — coverage travels in log seqs, so a fold formed live and the same fold
+ * formed by replay agree regardless of the ids underneath.
+ *
+ * Both paths staying on the shim also keeps them consistent with each other.
+ * `addMessage` runs ingress sharding for a message over twice
+ * `targetChunkTokens`, and replay cannot reconstruct that decision from the log,
+ * because the log stores the promoter's message rather than the shards. Live and
+ * replayed would then cut a large message into different records. The engine has
+ * no stake in which granularity wins — `rebuildChunks` never splits a message,
+ * so the whole body lands in one chunk either way — only in the two agreeing.
+ */
+export function appendSurfaceNode(store: LogStore, session: Session, event: SessionEvent): string | undefined {
+  const message = session.deriveEventMessage(event)
+  // A usage-only assistant step carries no message and so contributes no node.
+  if (!message) return undefined
+  return store.appendToStateJsonWithIdentity(
+    slots().messages.id,
+    {
+      participant: message.role,
+      content: message.content,
+      metadata: { dshSeq: event.seq },
+      timestamp: new Date(event.time),
+    },
+    'id',
+    'sequence',
+  ).id
+}
+
+/**
+ * The replayed messages a log seq range spans. Replay is in seq order, so the
+ * survivors inside a minted range are one contiguous run and the slice is exact
+ * rather than a filter.
+ */
+function slice(surface: ReadonlyArray<readonly [number, string]>, firstSeq: number, lastSeq: number): Array<readonly [number, string]> {
+  const from = surface.findIndex(([seq]) => seq >= firstSeq)
+  if (from === -1) return []
+  let to = from
+  while (to + 1 < surface.length) {
+    const next = surface[to + 1]
+    if (next === undefined || next[0] > lastSeq) break
+    to++
+  }
+  return surface.slice(from, to + 1)
+}
+
+/**
+ * The range of a recollection minted before the log recorded one.
+ *
+ * The pre-rewrite engine stamped no `sourceRange` on its `autobio/memory`
+ * events, so the only surviving record of what a fold took is the fold node's
+ * own `sourceEventSeqs`. `foldIdOf` names the recollection from the compaction
+ * id the node landed under — reading the prose header instead would report a
+ * range for whichever recollection the text happened to mention. Unlanded mints
+ * are dropped: nothing in the log says what ground they stood for.
+ */
+function legacyRange(session: Session, id: string): { firstSeq: number; lastSeq: number } | undefined {
+  for (const event of session.events) {
+    if (!isReplacementSurfaceEvent(event) || foldIdOf(event) !== id) continue
+    // A replacement always cites every node it shadowed, so there is always a
+    // list here to bound: the session refuses a replace that names no ground.
+    const sources = event.sourceEventSeqs ?? []
+    return { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) }
+  }
+  return undefined
+}
+
+const LEVEL_PREFIX = /^L(\d+)-/
+
+/**
+ * The recollections one log records, keyed by id and deduplicated, in mint order.
+ * Level comes from the recorded level with the `L<n>-` id prefix as fallback, and
+ * coverage from the mint event's own stamp — the log holds no other record of
+ * which surface a mint replaced.
+ *
+ * Duplicate ids are dropped rather than merged: a pre-rewrite log can hold
+ * several mints of one recollection id, and the first is the one whose recorded
+ * range matches the content kept.
+ *
+ * Exported for the replay tests: a mint's level is a property of the event, and
+ * asserting it here keeps the case from being entangled with how the store
+ * happens to index a summary.
+ */
+export function readMemoryLog(session: Session): LoggedMemory[] {
+  const memories = new Map<string, LoggedMemory>()
+  for (const event of session.events) {
+    if (event.type !== 'autobio/memory') continue
+    const mint = event.data.memory
+    if (!mint || memories.has(mint.id)) continue
+    memories.set(mint.id, {
+      id: mint.id,
+      level: mint.level || Number(LEVEL_PREFIX.exec(mint.id)?.[1] ?? 1),
+      content: mint.content,
+      tokens: mint.tokens,
+      created: mint.created,
+      ...mint.sourceRange === undefined ? {} : { range: mint.sourceRange },
+    })
+  }
+  return [...memories.values()]
+}

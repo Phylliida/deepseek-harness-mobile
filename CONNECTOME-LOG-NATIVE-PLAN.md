@@ -51,16 +51,17 @@ library does `instanceof JsStore` — the store is duck-typed in practice.
 
 ## Components and line budget
 
-~700 lines new (feature parity) against ~2,000 deleted (engine, mirror,
-applicator, membrane, `command-autobio`, UI memory rows, Chronicle + membrane
+~660 lines new (feature parity) against ~2,000 deleted (engine, mirror,
+applicator, `command-autobio`, UI memory rows, Chronicle + membrane
 native deps).
 
 | Component | Lines | Notes |
 |---|---|---|
 | Store shim | ~120 | Map/array-backed implementation of the ~20 JsStore methods the library actually calls (verified by grep): state-slot get/set/append/edit/redact, `currentBranch` (constant), `currentSequence`, `getStateItemJson`/`getStateLen`/`getStateSlice`, `compactState`/`sync`/`close`/`isClosed` (no-ops or trivial). Blobs, tree state, subscriptions: loud throws — unreachable in our config, and a thrown method is the upgrade alarm. |
 | Seed + live replay | ~130 | On open: replay surface events into the `messages` slot (reusing the existing block-mapping direction), replay `autobio/memory` events into the `summaries` slot, set the id counter to max. Then append new events live. No watermark: open = full replay. |
-| Engine | ~230 | Per-session runtime, `agent/pre-step` fold pass: sync → background tick → compile → plan → apply. Config: 3 harness knobs (operating window, reserve, `auto`) plus a pass-through strategy bag. Never blocks a turn (see Behavior changes). |
-| Frontier planner + apply | ~70 | Reads `strategy.resolutions` after `compile()`; groups per-message levels into runs; maps each run to its summary; emits one replace op per run; boundary stub scan (below). |
+| Engine | ~220 | Per-session runtime, `agent/pre-step` fold pass: sync → background tick → compile → plan → apply. Config: 3 harness knobs (operating window, reserve, `auto`) plus a pass-through strategy bag. Never blocks a turn (see Behavior changes). |
+| Frontier planner + widening | ~90 | Reads `strategy.resolutions` after `compile()`; groups per-message levels into runs; maps each run to its summary; widens spans to pair-safe boundaries (bounded, chain-free); emits one replace op per run. Divergence throws. |
+| Fold apply | ~60 | Preflight assert + bracket events + one single-node replace per fold. Cannot make a pairing mistake — planning owns that. |
 | Bridge | ~110 | Library `complete()` ↔ `ctx.llm.stream()`. Forwards `request.tools` (fixes the crippled refusal ladder, below). Uses the library's exported `splitMixedToolMessages` instead of the hand-rolled split. Keeps thinking-strip pricing (a fold must never cost more than the span it replaces) and usage on the done flush. |
 | Types/config | ~50 | Schemastery schema for the harness knobs + loose strategy passthrough. |
 
@@ -121,30 +122,28 @@ Drift note: `resolutions` is a protected field. The conformance test asserts
 "level-k run == some L_k summary's sourceRange" so a silent upstream change
 fails loud. A tiny public getter is the right upstream ask; not blocking.
 
-### 3. Tool-pair safety: stubs at the boundary, not span surgery
+### 3. Tool-pair safety: invariant-preserving bounded widening
 
-The library's own answer to orphaned tool blocks is stubs and drops at render
-time (`autobiographical.ts:4537` adds stub tool_results; `:5029` drops leading
-orphans). The current applicator instead widens fold spans with chained
-back/forward repair and two refusal paths — the source of "skip the whole
-pass" failure modes and bursty folding.
+The key fact, verified against the agent loop: **calls and results never
+share a surface node** in DSH (`tool/result` events are pure user-role result
+messages — `agent-loop/src/tool-calls.ts:281`; calls live in
+assistant/messages). So widening a fold span to cover a straddled pair is
+provably chain-free — one node backward, one bounded run forward — and if
+every fold lands pair-safe, then inductively *the surface is always
+pair-safe*: fold nodes never participate in straddles, and the old
+applicator's chaining, absorbed-node bookkeeping, and refusal paths cannot
+arise.
 
-The rebuild bakes stubs into the fold at apply time (DSH convention:
-derivation is a verbatim pass-through; producers bake framing into content —
-see `surface.ts`). Per the DeepSeek serializer (`llm-deepseek/src/serialize.ts`):
+Widening happens in the planner against *final* post-pass visibility (a
+neighbor half shadowed by a sibling op in the same pass needs nothing). Apply
+is then pure mechanics that cannot make a pairing mistake. The current
+applicator's complexity came from chaining against message shapes the harness
+never produces.
 
-- Fold shadows a call whose result stays visible: the fold node is an
-  assistant message; add stub `tool-call` blocks with the straddled ids.
-  Wire: `[assistant: recollection + stub tool_calls][role:tool result]`.
-- Fold shadows a result whose call stays visible: land two nodes — a
-  stub-only node (user-role, tool-result blocks only; `serialize.ts:128`
-  emits no text entry for it) carrying the replace op, then the recollection
-  appended after. Wire: `[call assistant][role:tool stubs][assistant
-  recollection]` — the normal "tools returned, assistant continues" shape.
-
-Apply cannot fail: no widening, no chaining, no absorbed nodes, no refusal
-paths. The fold lands exactly where the frontier says; plan/apply divergence
-disappears as a class.
+Both simpler alternatives were considered and rejected: span-repair with
+refusals (the status quo — bursty folding, skipped passes) and boundary stub
+blocks (the library's render-side answer — creates stub-obligation
+composition across later folds and a two-node fold convention).
 
 ### 4. Budget calibration: feed the library's closed loop
 
@@ -217,8 +216,8 @@ retry, and usage accounting with the harness adapters.
 4. Old sessions: seeded from their existing `autobio/memory` events; landed
    folds recover ranges from fold nodes; unlanded mints from the Chronicle
    era are dropped. Old `.dsh/autobio` dirs become deletable garbage.
-5. A fold can land as two adjacent nodes in the mid-pair case (stub node +
-   recollection).
+5. The live surface is pair-safe by invariant; folds widen to the nearest
+   pair-safe boundary instead of refusing or straddling.
 
 ## Alternatives considered
 
@@ -241,8 +240,18 @@ retry, and usage accounting with the harness adapters.
 - **Parse `previewContext` entries for planning**: rejected — reverse-
   engineers structured state the strategy already holds (`resolutions`);
   fragile against library render changes.
-- **Widen fold spans for tool-pair safety** (current applicator): rejected —
-  chaining and refusal paths; stubs are the library's own proven answer.
+- **Boundary stub blocks** (the library's render-side answer to orphans):
+  rejected — stubs create obligations that compose across later folds (a
+  shadowed stub result orphans the stub call on an earlier fold node), need a
+  two-node fold convention for one direction, and change fold-node
+  recognition. Widening with the pair-safety invariant has none of that.
+- **The current applicator's chained widening**: rejected — its chains guard
+  against message shapes (calls and results in one node) the harness never
+  produces, and its refusal paths turn plan/surface divergence into silently
+  skipped passes. Bounded widening keeps the correct core.
+- **Silent plan-skip on divergence** (the old `return null` paths): rejected
+  — seeding is deterministic, so divergence is always a bug; throw, catch at
+  the engine boundary, warn, continue the turn.
 
 ## Pre-build verification list
 
@@ -267,8 +276,10 @@ retry, and usage accounting with the harness adapters.
 - Fork a session: no archive copy; child seeds from its inherited log events.
 - The red-lemma session replays through the shim with the same fold history
   it actually lived.
-- A fold never splits a tool pair on the wire (stub construction covered by
-  wire-level tests against the real serializer).
+- A fold never splits a tool pair on the wire: the pair-safety invariant is
+  covered by scripted straddle tests at both boundaries (including sibling-op
+  adjacency) and by a property test replaying real session logs through the
+  real serializer.
 - A turn is never delayed by memory formation.
 - `pnpm dsh` runs with no Chronicle native dependency.
 - Net diff: ~−1,300 lines.

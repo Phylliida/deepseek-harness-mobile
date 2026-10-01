@@ -100,17 +100,16 @@ const isTokenUsage = (usage: unknown): usage is TokenUsage =>
   && typeof (usage as TokenUsage).outputTokens === 'number'
 
 /**
- * The usage an autobiographical memory-formation call reports on its terminal
- * progress flush, if any. The event type belongs to
- * dsh-compaction-autobiographical; token-meter reads it structurally so the
- * packages stay decoupled. These calls pay tokens outside any turn/step, so
- * the projection folds them in additively below.
+ * The usage an autobiographical memory-formation call reports on its tick
+ * record, if any. The event type belongs to dsh-compaction-autobiographical;
+ * token-meter reads it structurally so the packages stay decoupled. These calls
+ * pay tokens outside any turn/step, so the projection folds them in additively
+ * below. One record per tick that settled a call, so no replace dedup is needed.
  */
 const memoryUsageOf = (event: SessionEvent): TokenUsage | undefined => {
-  if ((event.type as string) !== 'autobio/memory-progress') return undefined
-  const data = event.data as { done?: unknown; usage?: unknown }
-  if (data.done !== true || !isTokenUsage(data.usage)) return undefined
-  return data.usage
+  if ((event.type as string) !== 'autobio/memory') return undefined
+  const data = event.data as { usage?: unknown }
+  return isTokenUsage(data.usage) ? data.usage : undefined
 }
 
 /**

@@ -244,14 +244,13 @@ describe('tokenUsage session projection', () => {
   })
 
   it('folds memory-formation calls into the totals additively', async () => {
-    // Each call's terminal flush is one paid request outside any turn/step:
-    // two calls add, a mid-call flush and a malformed record count nothing.
+    // Each settled call's tick record is one paid request outside any turn/step:
+    // two calls add, and a malformed record counts nothing.
     const { ctx, session } = await harness()
     const append = session.append.bind(session) as (type: string, data: unknown) => unknown
-    append('autobio/memory-progress', { attempt: 1, delta: '', done: true, usage: { inputTokens: 6000, outputTokens: 500 } })
-    append('autobio/memory-progress', { attempt: 2, delta: '', done: true, usage: { inputTokens: 6000, outputTokens: 500, cacheReadTokens: 100 } })
-    append('autobio/memory-progress', { attempt: 2, delta: 'partial' })
-    append('autobio/memory-progress', { attempt: 3, delta: '', done: true, usage: 'oops' })
+    append('autobio/memory', { attempt: 1, usage: { inputTokens: 6000, outputTokens: 500 } })
+    append('autobio/memory', { attempt: 2, usage: { inputTokens: 6000, outputTokens: 500, cacheReadTokens: 100 } })
+    append('autobio/memory', { attempt: 3, usage: 'oops' })
     expect(projected(ctx, session)).toEqual({
       uncachedInputTokens: 12000,
       outputTokens: 1000,
@@ -263,7 +262,7 @@ describe('tokenUsage session projection', () => {
   it('splits a provider-billed memory call out of the unrated set', async () => {
     const { ctx, session } = await harness()
     const append = session.append.bind(session) as (type: string, data: unknown) => unknown
-    append('autobio/memory-progress', { attempt: 1, delta: '', done: true, usage: { inputTokens: 6000, outputTokens: 500, costUsd: 0.03 } })
+    append('autobio/memory', { attempt: 1, usage: { inputTokens: 6000, outputTokens: 500, costUsd: 0.03 } })
     expect(projected(ctx, session)).toEqual({
       uncachedInputTokens: 6000,
       outputTokens: 500,

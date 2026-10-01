@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-一个压缩（compaction）能力家族（参见[能力 seam](../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)）：Service Definition、两个摘要提供方、无模型工具结果修剪配套工具，以及两个用户命令 Consumer。这些全是**产品**包。
+一个压缩（compaction）能力家族（参见[能力 seam](../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.md)）：Service Definition、两个摘要提供方、无模型工具结果修剪配套工具，以及一个用户命令 Consumer。这些全是**产品**包。
 
 | 包 | 职责 | ctx key |
 |---|---|---|
@@ -11,7 +11,6 @@
 | [`compaction-autobiographical/`](compaction-autobiographical/README.md) | 持续的自传式记忆折叠后端 | 注册 `ctx.compaction` |
 | [`compaction-tool-result-pruner/`](compaction-tool-result-pruner/README.md) | 可选的无模型工具结果修剪 | `ctx.toolResultPruner` |
 | [`command-compact/`](command-compact/README.md) | 用户压缩命令 | 注册到 `ctx.commands` |
-| [`command-autobio/`](command-autobio/README.md) | 自传式后端折叠的用户开关 | 注册到 `ctx.commands` |
 
 后端、可选修剪器和用户命令通过该 seam 组合；token 测量仍是独立的 LLM（大语言模型）家族服务。[压缩能力 seam Agent Note](../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md) 负责说明依赖关系的设计依据。
 

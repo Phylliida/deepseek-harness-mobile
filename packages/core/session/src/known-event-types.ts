@@ -25,7 +25,6 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'assistant/chunk',
   'assistant/message',
   'autobio/memory',
-  'autobio/memory-progress',
   'command/done',
   'command/run',
   'compaction/end',

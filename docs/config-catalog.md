@@ -485,50 +485,35 @@ Source: [`packages/coding/coding-activity/src/index.ts:44`](../packages/coding/c
 
 ## `@deepseek-ai/dsh-compaction-autobiographical`
 
-Requires: `llm` · `sessions`
+Requires: `llm` · `compaction`
 
 ```ts config-catalog
 /** Knobs accepted by the plugin config; every field is optional. */
 export interface AutobiographicalCompactionConfig {
   /**
-   * Directory root for the per-session Chronicle stores. Relative values
-   * resolve against the session's project directory.
+   * Ceiling for the context the strategy keeps live, reached by folding aged
+   * history. Defaults to the routed model's window, capped at 65_536: models
+   * degrade well before their advertised window, so the operating point stays
+   * there regardless of route.
    */
-  storeRoot?: string
-  /**
-   * Compile budget ceiling, overriding the adapter-reported context window
-   * when set. Without it (and before the first routed request) the pass
-   * skips until a routed window is known.
-   */
-  contextWindowTokens?: number
-  /** Per-model operating ceilings, keyed by the session's routed model; beats the ~64k default. */
-  contextWindowTokensByModel?: Record<string, number>
-  /** Tokens reserved for the model's response inside the compile budget. */
+  operatingWindowTokens?: number
+  /** Tokens reserved for the model's response inside the compile budget; default 8192. */
   reserveTokens?: number
-  /** Verbatim recent tail kept before anything folds; default 30000. */
-  recentWindowTokens?: number
-  /** Verbatim head pinned at the start of the session; default 4000. */
-  headWindowTokens?: number
-  /** Token ceiling for one mirrored message before the library splits it; default 10000. */
-  maxMessageTokens?: number
-  /** Approximate size of one L1 recollection chunk. */
-  targetChunkTokens?: number
-  /** How many same-level summaries merge into the next level. */
-  mergeThreshold?: number
-  /**
-   * Generation budget pinned on every memory-formation call; unset leaves
-   * the strategy's own request size. Raise it for long-reasoning models —
-   * thinking shares this budget with the recollection text.
-   */
-  maxTokens?: number
-  /** Frontier planning policy; `kv-stable` minimizes prompt-cache perturbation (default). */
-  foldingStrategy?: 'kv-stable' | 'flat-profile' | 'oldest-first'
-  /** Register the step-boundary folding listener. */
+  /** Register the step-boundary folding listener; default true. */
   auto?: boolean
+  /**
+   * Strategy knobs handed to `AutobiographicalStrategy` untouched, so
+   * upstream options (`kvStableReachTokens`, `speculativeProduction`,
+   * `summaryTargetTokens`, …) flow with the library version instead of
+   * being mirrored here one field at a time.
+   */
+  strategy?: AutobiographicalOptions
 }
 ```
 
-Source: [`packages/compaction/compaction-autobiographical/src/types.ts:10`](../packages/compaction/compaction-autobiographical/src/types.ts)
+Depends on: `AutobiographicalOptions` (`@animalabs/context-manager`)
+
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:15`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 <a id="deepseek-aidsh-compaction-basic"></a>
 
@@ -3241,7 +3226,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
-- `@deepseek-ai/dsh-command-autobio` — requires `commands` · `compaction` ([`packages/compaction/command-autobio/src/index.ts`](../packages/compaction/command-autobio/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))
 - `@deepseek-ai/dsh-command-feedback` — requires `commands` ([`packages/feedback/command-feedback/src/index.ts`](../packages/feedback/command-feedback/src/index.ts))
 - `@deepseek-ai/dsh-command-goal` — requires `commands` · `goals` ([`packages/goal/command-goal/src/index.ts`](../packages/goal/command-goal/src/index.ts))
