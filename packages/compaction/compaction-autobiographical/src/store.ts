@@ -108,12 +108,15 @@ export class LogStore {
   /**
    * Throws when the slot already exists, because the library depends on that:
    * `registerStates` wraps every call in a try/catch that treats a repeat as
-   * success. `tree` slots are the one strategy this backend refuses, and no
-   * config here enables them (`mint-preimage.ts:523` is the only registrant).
+   * success.
+   *
+   * Nothing refuses a `tree` slot, which the library reserves for
+   * `mint-preimage`'s envelope index — a code path that reaches `storeBlob`
+   * first, and that this store answers with a throw. Such a slot would land in
+   * `arrays` and answers no query anyway, so a guard here would be unreachable.
    */
   registerState(registration: SlotKind): void {
     if (this.registrations.has(registration.id)) throw new Error(`State with id '${registration.id}' already exists`)
-    if (registration.strategy === 'tree') throw new Error(`LogStore: tree state "${registration.id}" is unsupported`)
     this.registrations.set(registration.id, registration)
     if (registration.strategy === 'snapshot') this.scalars.set(registration.id, null)
     else this.arrays.set(registration.id, [])
@@ -171,9 +174,14 @@ export class LogStore {
   }
 
   /**
-   * Exclusive end, matching Chronicle: callers pass `index, index + 1`. The
-   * `messages` slot is ordinal-addressed — message ids *are* positions — so
-   * redacting it is a structural bug rather than a compaction.
+   * Exclusive end, matching Chronicle: callers pass `index, index + 1`.
+   *
+   * Redacting the `messages` slot is a structural bug rather than a
+   * compaction: message ids *are* positions, so removing one slides every later
+   * id out from under the summaries that cite it. Nothing redacts it —
+   * `ContextManager.removeMessage` and `removeMessages` are the only callers and
+   * none in this repo reaches them — so this throw is what would name the
+   * library moving a redaction path onto the messages slot.
    */
   redactStateItems(stateId: string, start: number, end: number): StoreRecord {
     if (stateId === MESSAGES_STATE) throw new Error('LogStore: the messages slot is append-only')
@@ -207,10 +215,10 @@ export class LogStore {
 
   setStateJson(stateId: string, value: unknown): StoreRecord {
     const stored = canonical(value)
-    // For an append-log slot this rewrites the entries, which is what the
-    // library means by it: writing a scalar instead would put the value where
-    // `getStateJson` never looks.
-    if (this.arrays.has(stateId)) this.arrays.set(stateId, Array.isArray(stored) ? stored : [stored])
+    // An append-log slot is rewritten, never given a scalar: every append-log
+    // receiver passes an array, and one that did not would be replacing a log
+    // with a value its own reader cannot walk.
+    if (this.arrays.has(stateId)) this.arrays.set(stateId, stored as unknown[])
     else this.scalars.set(stateId, stored)
     return this.record(stateId, stored, this.seq++)
   }

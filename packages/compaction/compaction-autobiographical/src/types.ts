@@ -35,7 +35,7 @@ export interface AutobiographicalCompactionConfig {
 
 /** Runtime configuration: the harness defaults applied over the plugin config. */
 export interface ResolvedAutobiographicalConfig {
-  operatingWindowTokens?: number
+  operatingWindowTokens: number
   reserveTokens: number
   auto: boolean
   strategy: AutobiographicalOptions

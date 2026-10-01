@@ -26,7 +26,7 @@ import type {
 } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
-import type { RequestContext, Session } from '@deepseek-ai/dsh-session'
+import type { RequestContext, Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import { applyFold } from './apply.ts'
 import { createBridge } from './bridge.ts'
@@ -49,39 +49,49 @@ export const name = 'compaction-autobiographical'
 /** Services this engine needs before it can fold anything. */
 export const inject = ['llm', 'compaction']
 
-/**
- * Ceiling for the context the strategy keeps live, reached by folding aged
- * history. Models degrade well before their advertised window, so the operating
- * point sits here whatever the route advertises.
- */
-const OPERATING_WINDOW_CAP = 65_536
-
 /** The live context-manager stack for one session. */
 interface Runtime {
   manager: ContextManager
   store: LogStore
   strategy: AutobiographicalStrategy
-  /** Log seq coverage per seeded recollection. */
+  /**
+   * Log seq coverage per recollection the log has announced. Presence is also
+   * the record that it was announced: the coverage is written at the same moment
+   * the recollection is, so a set beside this map would hold the same keys.
+   */
   known: Map<string, RecollectionRange>
   /** Log seq behind each mirrored message id. */
   seqOf: Map<string, number>
   /**
-   * Highest log seq mirrored into the store. Replay leaves it at the log's end,
-   * so a live pass only ever walks what arrived since.
+   * Index of the newest log event mirrored into the store. Replay leaves it at
+   * the log's end, so a live pass only ever walks what arrived since.
    */
-  cursor: number
-  /** Recollections already announced in the log. */
-  announced: Set<string>
+  walked: number
   /**
-   * The attempt counter a replayed log reconstructs, this call's usage, and
-   * whether the call streamed any text — the terminal flush carries an empty
-   * delta, so only the mid-call flushes prove a call produced something.
+   * The attempt counter this runtime has reached, this call's usage, and whether
+   * the call streamed any text — the terminal flush carries an empty delta, so
+   * only the mid-call flushes prove a call produced something.
    */
   progress: { attempt: number; active: boolean; usage?: TokenUsage }
-  /** Newest event seq fed to calibration, so one usage is reported once. */
-  lastFedSeq: number
+  /**
+   * The attempt count the log held when this runtime opened. A tick that finishes
+   * no call leaves `progress.attempt` here, which is what keeps it from writing a
+   * duplicate record on every pass.
+   */
+  watermark: number
+  /** Seq of the newest event fed to calibration, so one usage is reported once. */
+  calibrated: number
   /** Background work chain; a turn never awaits it. */
   tickChain: Promise<void>
+}
+
+/**
+ * The strategy's protected state this backend reads: the picker's committed
+ * resolutions, and the recollections it has minted.
+ */
+interface Internals {
+  resolutions: Map<string, number>
+  summaries: SummaryEntry[]
 }
 
 /**
@@ -97,7 +107,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   static readonly Config = Schema.object({
     /**
      * Ceiling for the live context the strategy keeps, reached by folding aged
-     * history. Defaults to the routed model's window, capped at 65_536.
+     * history. Default 65_536.
      */
     operatingWindowTokens: Schema.number(),
     /**
@@ -128,7 +138,19 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   constructor(ctx: Context, config: AutobiographicalCompactionConfig = {}) {
     super(ctx)
     this.config = resolveConfig(config)
-    if (this.config.auto) this.registerAutomaticFolding()
+    // Fold aged history before the next request is derived. A failure is loud on
+    // the console and never stops the turn: the strategy replans from the log on
+    // every compile, so the next step boundary is a complete retry.
+    if (this.config.auto) {
+      ctx.on('agent/pre-step', async ({ agent }, next) => {
+        try {
+          await this.foldPass(agent)
+        } catch (error: unknown) {
+          this.warn(`folding failed: ${describe(error)}; continuing the turn`)
+        }
+        return next()
+      })
+    }
     // Dropping the runtime is the whole of disposal. `ContextManager.close()`
     // calls the store's `close` only when the manager opened it itself, and this
     // backend always hands its own store in, so there is nothing to close — and
@@ -137,11 +159,6 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       this.runtimes.delete(agent.session.id)
     })
     ctx.effect(() => () => { this.runtimes.clear() }, 'compaction-autobiographical.disposal')
-  }
-
-  /** How many sessions hold a seeded runtime. Disposal is the whole of what it changes. */
-  get openRuntimes(): number {
-    return this.runtimes.size
   }
 
   override async compactIfNeeded(
@@ -177,25 +194,6 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   }
 
   /**
-   * Fold aged history before the next request is derived. A failure is loud on
-   * the console and never stops the turn: the strategy replans from the log on
-   * every compile, so the next step boundary is a complete retry.
-   */
-  private registerAutomaticFolding(): void {
-    this.ctx.on('agent/pre-step', async (
-      { agent },
-      next,
-    ) => {
-      try {
-        await this.foldPass(agent)
-      } catch (error: unknown) {
-        this.warn(`folding failed: ${describe(error)}; continuing the turn`)
-      }
-      return next()
-    })
-  }
-
-  /**
    * One folding pass: replay what the log gained, kick memory formation off the
    * turn's critical path, report the last step's real prompt size, then compile
    * and write down the layout the strategy reached.
@@ -206,15 +204,16 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * recollections the last ticks minted.
    */
   private async foldPass(agent: CompactionAgentContext): Promise<CompactionResult | null> {
-    // Both refusals are the session's to fix, not the pass's to fail: a session
-    // that has not routed has no budget and no route, and a session whose route
-    // advertises no window has no budget either. Opening a runtime first would
-    // turn the same state into a thrown error, so the guard comes first.
+    // All three refusals are the session's to fix, not the pass's to fail: a
+    // session that has not routed has no route, one whose route advertises no
+    // window has no window, and one whose window is no larger than the reserve has
+    // no room to fold into. Opening a runtime first would turn the same state into
+    // a thrown error, so the guard comes first.
     const routed = agent.session.requestContext()
-    const budget = this.computeBudget(routed?.contextWindow)
-    const route = routeOf(agent, routed)
-    if (budget === undefined || route === undefined) return null
-    const runtime = await this.runtimeFor(agent, route)
+    if (routed?.contextWindow === undefined) return null
+    const budget = this.computeBudget(routed.contextWindow)
+    if (budget === undefined) return null
+    const runtime = await this.runtimeFor(agent, routed)
     const { session } = agent
     this.syncSurface(runtime, session)
     this.syncToolDefinitions(runtime, session)
@@ -230,9 +229,10 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     this.kickTick(runtime, session)
 
     const turn = currentTurn(session)
+    const { resolutions, summaries } = internals(runtime.strategy)
     const [op] = planFolds(runtime.store, session, {
-      resolutions: resolutionsOf(runtime.strategy),
-      summaries: summariesOf(runtime.strategy),
+      resolutions,
+      summaries,
       seeded: runtime.known,
       seqOf: runtime.seqOf,
     })
@@ -240,7 +240,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     this.ctx.logger.info(
       `autobiographical compaction: folded ${op.shadowedSeqs.length} node(s) into ${op.summaryId}`,
     )
-    return applyFold(session, op, turn, 0, route)
+    return applyFold(session, op, turn, 0, routed)
   }
 
   /**
@@ -272,14 +272,14 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * would compress that ground again on every pass.
    */
   private syncSurface(runtime: Runtime, session: Session): void {
-    for (const event of session.events) {
-      if (event.seq <= runtime.cursor) continue
+    for (let index = runtime.walked + 1; index < session.events.length; index++) {
+      const event = session.events[index] as SessionEvent
+      runtime.walked = index
       if (!isAppendSurfaceEvent(event)) continue
       const id = appendSurfaceNode(runtime.store, session, event)
       if (id === undefined) continue
       runtime.seqOf.set(id, event.seq)
     }
-    runtime.cursor = session.events.at(-1)?.seq ?? runtime.cursor
   }
 
   /**
@@ -298,22 +298,23 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   }
 
   /**
-   * Write down every recollection the last tick minted, with the surface span it
-   * stands for. These events plus the fold nodes they name are the archive: a
-   * replayed log rebuilds the pyramid, so nothing else about a recollection has
-   * to survive the process.
+   * Write down the recollection the last tick minted, or the call it finished,
+   * with the surface span the recollection stands for. These events plus the fold
+   * nodes they name are the archive: a replayed log rebuilds the pyramid, so
+   * nothing else about a recollection has to survive the process.
    *
-   * A tick that minted nothing and finished no call has nothing to say, and
-   * saying it anyway would append an identical record on every pass forever.
+   * A tick that neither minted nor finished a call has nothing to say, and saying
+   * it anyway would append an identical record on every pass forever.
    */
   private appendMemory(runtime: Runtime, session: Session): void {
     const mint = this.newestMint(runtime)
-    if (mint === undefined && runtime.progress.attempt <= attemptFromLog(session)) return
-    const usage = runtime.progress.usage
-    delete runtime.progress.usage
+    if (mint === undefined && runtime.progress.attempt <= runtime.watermark) return
+    const { progress } = runtime
+    const usage = progress.usage
+    delete progress.usage
     session.append('autobio/memory', {
       ...runtime.strategy.getStats(),
-      attempt: runtime.progress.attempt,
+      attempt: progress.attempt,
       ...usage === undefined ? {} : { usage },
       ...mint === undefined ? {} : { memory: mint },
     })
@@ -327,45 +328,33 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * it was distilled from.
    */
   private newestMint(runtime: Runtime): AutobiographicalMemoryMint | undefined {
-    for (const summary of summariesOf(runtime.strategy)) {
-      if (runtime.announced.has(summary.id)) continue
+    for (const summary of internals(runtime.strategy).summaries) {
+      if (runtime.known.has(summary.id)) continue
       const range = resolveRange(runtime.seqOf, summary)
       // A recollection whose ground is not in the store has no coverage to
       // record, and a replayed entry citing nothing is rejected by the strategy's
       // own source validation on the next open, so it is left for a later pass
       // rather than written down ungrounded.
       if (range === undefined) continue
-      runtime.announced.add(summary.id)
       runtime.known.set(summary.id, { covered: range, cited: range })
-      return {
-        id: summary.id,
-        level: summary.level,
-        content: summary.content,
-        tokens: summary.tokens,
-        created: summary.created,
-        sourceRange: range,
-      }
+      return createMint(summary, range)
     }
     return undefined
   }
 
   /**
    * Report the last step's real prompt size, so the estimator learns from the
-   * wire. `lastFedSeq` is the high-water mark: usage is fed once per step, and a
+   * wire. `calibrated` is the high-water mark: usage is fed once per step, and a
    * call that reported none leaves the mark where it is for the next step to find.
    */
   private feedCalibration(runtime: Runtime, session: Session): void {
-    for (let index = session.events.length - 1; index > runtime.lastFedSeq; index--) {
-      const event = session.events[index]
-      if (event?.type !== 'assistant/message') continue
-      const usage = event.data.usage
-      if (usage === undefined) continue
-      runtime.lastFedSeq = event.seq
-      runtime.strategy.reportRealInputTokens(
-        usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0),
-      )
-      return
-    }
+    const sized = newestUsage(session)
+    if (sized === undefined || sized.seq <= runtime.calibrated) return
+    runtime.calibrated = sized.seq
+    const { usage } = sized
+    runtime.strategy.reportRealInputTokens(
+      usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0),
+    )
   }
 
   /**
@@ -374,17 +363,13 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * response allowance; prompt overhead is not subtracted here because the
    * estimator's calibration multiplier already accounts for it.
    */
-  private computeBudget(window: number | undefined): TokenBudget | undefined {
-    // A window the route never advertised is not a window of zero and not one of
-    // the cap either: the budget is unknown until the session routes.
-    if (window === undefined) return undefined
-    const maxTokens = Math.min(window, this.config.operatingWindowTokens ?? OPERATING_WINDOW_CAP)
-      - this.config.reserveTokens
+  private computeBudget(window: number): TokenBudget | undefined {
+    const maxTokens = Math.min(window, this.config.operatingWindowTokens) - this.config.reserveTokens
     return maxTokens <= 0 ? undefined : { maxTokens, reserveForResponse: this.config.reserveTokens }
   }
 
   /** The session's runtime, seeded from its log and opened once. */
-  private runtimeFor(agent: CompactionAgentContext, route: Route): Promise<Runtime> {
+  private runtimeFor(agent: CompactionAgentContext, route: RequestContext): Promise<Runtime> {
     const id = agent.session.id
     const open = this.runtimes.get(id)
     if (open !== undefined) return open
@@ -393,13 +378,16 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // A failed open must not be cached: the usual failure is an unrouted session,
     // and the next step boundary has a route.
     opening.catch(() => {
+      /* v8 ignore next -- unreachable: only this method sets the entry, and it
+         runs synchronously, so between the set above and this rejection nothing
+         can have replaced it. The comparison is here for the next reader. */
       if (this.runtimes.get(id) === opening) this.runtimes.delete(id)
     })
     return opening
   }
 
   /** Build the in-memory store, replay the log into it, then open the manager. */
-  private async openRuntime(agent: CompactionAgentContext, route: Route): Promise<Runtime> {
+  private async openRuntime(agent: CompactionAgentContext, route: RequestContext): Promise<Runtime> {
     const store = createStore()
     const seed = seedFromLog(store, agent.session)
     // `autoTickOnNewMessage` stays off because replay itself appends messages:
@@ -417,7 +405,8 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // thinking, overstating every such pair the planner weighs.
       carrierPolicy: 'live-strip',
     })
-    const progress: Runtime['progress'] = { attempt: attemptFromLog(agent.session), active: false }
+    const watermark = attemptFromLog(agent.session)
+    const progress: Runtime['progress'] = { attempt: watermark, active: false }
     // No estimator is handed over: the manager's own default is density-aware
     // and its calibration reports against the wire, so a fixed-density one here
     // would only overwrite the first of those.
@@ -443,11 +432,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       strategy: manager.getStrategy() as AutobiographicalStrategy,
       store,
       seqOf: seed.seqOf,
-      cursor: agent.session.events.at(-1)?.seq ?? -1,
+      walked: agent.session.events.length - 1,
       known: seed.known,
-      announced: new Set(seed.known.keys()),
       progress,
-      lastFedSeq: -1,
+      watermark,
+      calibrated: 0,
       tickChain: Promise.resolve(),
     }
   }
@@ -455,8 +444,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   /**
    * Record a settled bridge call. The attempt counter advances here and nowhere
    * else, so a replayed log reconstructs it, and `appendMemory` writes the record
-   * the counter and usage belong to. Bookkeeping must never kill a compression
-   * call, hence the swallow: the session can close mid-call.
+   * the counter and usage belong to.
    */
   private captureText(
     progress: Runtime['progress'],
@@ -464,23 +452,19 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     done: boolean,
     usage: TokenUsage | undefined,
   ): void {
-    try {
-      progress.active ||= delta.length > 0
-      // A call that never streamed text formed no memory, and usage without text
-      // is not one either — leave the counter alone so the next tick writes no
-      // record. The terminal flush's own delta is always empty, so the verdict
-      // comes from the mid-call flushes this flag accumulated.
-      if (!done || !progress.active) return
-      progress.attempt++
-      progress.active = false
-      // `exactOptionalPropertyTypes`: absent and `undefined` are not the same
-      // property, and a call that reported no usage must not leave the previous
-      // call's in place for `appendMemory` to bill twice.
-      delete progress.usage
-      if (usage !== undefined) progress.usage = usage
-    } catch {
-      // The session closed under a compression call; the call is already lost.
-    }
+    progress.active ||= delta.length > 0
+    // A call that never streamed text formed no memory, and usage without text is
+    // not one either — leave the counter alone so the next tick writes no record.
+    // The terminal flush's own delta is always empty, so the verdict comes from
+    // the mid-call flushes this flag accumulated.
+    if (!done || !progress.active) return
+    progress.attempt++
+    progress.active = false
+    // `exactOptionalPropertyTypes`: absent and `undefined` are not the same
+    // property, and a call that reported no usage must not leave the previous
+    // call's in place for `appendMemory` to bill twice.
+    delete progress.usage
+    if (usage !== undefined) progress.usage = usage
   }
 
   /** Diagnostics go to the console as well: headless surfaces drop logger output. */
@@ -515,6 +499,10 @@ async function compileFolds(
       await runtime.manager.compile({ maxTokens: affordable, reserveForResponse: reserveTokens })
       return true
     } catch (retry: unknown) {
+      /* v8 ignore next -- every refusal reports an `actual` above the budget it was
+         measured against, so `affordable` is strictly larger than the budget the first
+         call already refused: a retry at that size cannot refuse for size. Anything else
+         it throws belongs to the caller. */
       if (!(retry instanceof OverBudgetError)) throw retry
       return over(retry, retry.budget, warn)
     }
@@ -527,20 +515,6 @@ function over(error: OverBudgetError, budget: number, warn: (message: string) =>
   return false
 }
 
-/** The provider and model a compression call is routed to. */
-interface Route {
-  provider: string
-  model: string
-}
-
-/** The session's current route: the newest durable request, else the agent's options. */
-function routeOf(agent: CompactionAgentContext, routed: RequestContext | undefined): Route | undefined {
-  if (routed !== undefined) return { provider: routed.provider, model: routed.model }
-  const { provider, model } = agent.options
-  if (!provider || !model) return undefined
-  return { provider, model }
-}
-
 /** The session's latest started turn, for fold-node attribution outside a live step. */
 function currentTurn(session: Session): number | null {
   for (let index = session.events.length - 1; index >= 0; index--) {
@@ -550,10 +524,20 @@ function currentTurn(session: Session): number | null {
   return null
 }
 
+/** The newest assistant step that reported usage, and the seq it reported at. */
+function newestUsage(session: Session): { seq: number; usage: TokenUsage } | undefined {
+  for (let index = session.events.length - 1; index >= 0; index--) {
+    const event = session.events[index]
+    if (event?.type !== 'assistant/message') continue
+    if (event.data.usage !== undefined) return { seq: event.seq, usage: event.data.usage }
+  }
+  return undefined
+}
+
 /**
- * The attempt count a replayed log already recorded. A reopened session resumes
- * the counter from the log rather than from zero, so a tick that finishes no
- * call has nothing new to report and writes nothing.
+ * The attempt count the log already recorded, read once when a runtime opens. A
+ * replayed session resumes the counter from the log rather than from zero, so a
+ * tick that finishes no call has nothing new to report and writes nothing.
  */
 function attemptFromLog(session: Session): number {
   let attempt = 0
@@ -563,19 +547,26 @@ function attemptFromLog(session: Session): number {
   return attempt
 }
 
+/** One recollection as the log records it, with the span of log it stands for. */
+function createMint(summary: SummaryEntry, range: { firstSeq: number; lastSeq: number }): AutobiographicalMemoryMint {
+  return {
+    id: summary.id,
+    level: summary.level,
+    content: summary.content,
+    tokens: summary.tokens,
+    created: summary.created,
+    sourceRange: { firstSeq: range.firstSeq, lastSeq: range.lastSeq },
+  }
+}
+
 /**
  * The strategy's committed resolutions and minted recollections. Both are
  * `protected` upstream, and both are the seam the library's own connectome UI
  * reads, so the access is deliberate rather than incidental: there is no public
  * accessor for either, and a fold needs both to know what the picker decided.
  */
-function resolutionsOf(strategy: AutobiographicalStrategy): Map<string, number> {
-  return (strategy as unknown as { resolutions: Map<string, number> }).resolutions
-}
-
-/** See {@link resolutionsOf}. */
-function summariesOf(strategy: AutobiographicalStrategy): SummaryEntry[] {
-  return (strategy as unknown as { summaries: SummaryEntry[] }).summaries
+function internals(strategy: AutobiographicalStrategy): Internals {
+  return strategy as unknown as Internals
 }
 
 function describe(error: unknown): string {

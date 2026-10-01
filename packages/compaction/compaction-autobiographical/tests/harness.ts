@@ -77,6 +77,7 @@ export function build(
   overrides: AutobiographicalCompactionConfig = {},
   into?: Context,
   llm?: { stream: (options: GenerateOptions) => AsyncIterable<StreamChunk> },
+  contextWindow: number | undefined = 100_000,
 ): {
   engine: AutobiographicalCompactionEngine
   calls: GenerateOptions[]
@@ -84,7 +85,7 @@ export function build(
   agent: ManualCompactAgentContext
   ctx: Context
 } {
-  const session = transcript(id, turns)
+  const session = transcript(id, turns, contextWindow)
   const calls: GenerateOptions[] = []
   const ctx = into ?? new Context()
   ctx.provide('llm', (llm ?? summarizer(calls)) as never)

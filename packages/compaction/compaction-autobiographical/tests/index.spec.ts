@@ -11,7 +11,7 @@
  */
 
 import { ContextManager, OverBudgetError } from '@animalabs/context-manager'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -24,9 +24,19 @@ async function settled(): Promise<void> {
   for (let i = 0; i < 3; i += 1) await new Promise(resolve => setTimeout(resolve, 0))
 }
 
+/** An open runtime: the strategy it holds and the manager a pass compiles through. */
+interface OpenRuntime {
+  strategy: { summaries: unknown[]; tick(): Promise<void>; store: { getStateJson(id: string): unknown[] } }
+  manager: { compile(budget: unknown): Promise<unknown> }
+  /** Log seq behind each mirrored message id, as the runtime keeps it. */
+  seqOf: Map<string, number>
+  /** Highest log seq the cursor has mirrored into the store. */
+  walked: number
+}
+
 /** The engine's open runtimes, reached past the private map a pass holds them in. */
-function runtimes(engine: AutobiographicalCompactionEngine): Map<string, Promise<{ strategy: { summaries: unknown[] } }>> {
-  return (engine as unknown as { runtimes: Map<string, Promise<{ strategy: { summaries: unknown[] } }>> }).runtimes
+function runtimes(engine: AutobiographicalCompactionEngine): Map<string, Promise<OpenRuntime>> {
+  return (engine as unknown as { runtimes: Map<string, Promise<OpenRuntime>> }).runtimes
 }
 
 function events(session: Session, type: string): unknown[] {
@@ -98,14 +108,29 @@ describe('the compile budget', () => {
   })
 
   it('passes on options that name only half a route', async () => {
-    // A header carries no route of its own, so `routeOf` falls through to the
-    // options — and options naming half a route are not a route.
+    // A header carries no route of its own, so the route comes from
+    // `requestContext` — and a logged context naming half a route is not a route.
     const session = Session.create(SessionId('index-half-route'))
     session.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 100_000 })
     const { engine } = build(0, 'index-half-route')
 
     expect(await engine.compactNow(asAgent(session, { provider: 'test' }), new AbortController().signal)).toBeNull()
     expect(await engine.compactNow(asAgent(session, { provider: '', model: 'test-model' }), new AbortController().signal)).toBeNull()
+  })
+
+  it('passes on a window no larger than the reserve leaves no room in', async () => {
+    // A budget of zero or less is not a small budget to fold with, it is no budget:
+    // the pass must refuse before it opens a runtime, because the manager refuses
+    // to compile at all in this shape and the refusal would arrive as a throw.
+    const session = Session.create(SessionId('index-no-room'))
+    session.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 64 })
+    const { engine } = build(0, 'index-no-room', { reserveTokens: 64 })
+    const compile = vi.spyOn(ContextManager.prototype, 'compile')
+
+    expect(await engine.compactNow(asAgent(session, {}), new AbortController().signal)).toBeNull()
+    expect(compile).not.toHaveBeenCalled()
+    // No runtime either: a refused pass leaves nothing open behind it.
+    expect(runtimes(engine).size).toBe(0)
   })
 })
 
@@ -293,20 +318,118 @@ describe('memory formation behind the pass', () => {
 describe('mirroring the log after a runtime is open', () => {
   it('hands the strategy the messages the log gained', async () => {
     const { engine, agent, session } = build(4, 'index-late-append')
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    const runtime = await runtimes(engine).get(session.id)
+    const stored = runtime!.strategy.store.getStateJson('messages').length
     const before = session.surface.nodes.length
-    // The first pass opens the runtime and replays what is already there. This
-    // message lands after that, so it is only in the store if the cursor moved
-    // — the replay alone cannot account for it.
+
+    // Both events land after the runtime is open and before the pass that mirrors
+    // them: one the cursor writes, one it must walk past. A usage-only step is an
+    // append surface event that derives no message, so skipping it is the whole
+    // reason the walk is not simply "append what arrived".
+    session.append('assistant/message', {
+      turn: 99,
+      step: 0,
+      message: createAssistantMessage({ content: [], source: { provider: 'test', model: 'test-model' } }),
+      usage: { inputTokens: 7, outputTokens: 0 },
+    }, { surfaceOp: 'append' })
     session.append(
       'user/message',
       createUserMessage({ content: [{ type: 'text', text: 'a later ask' }], source: { kind: 'user' } }),
       { surfaceOp: 'append' },
     )
+    const landed = session.events.at(-1)!
+    expect(landed.type).toBe('user/message')
+
+    // Rewound, because a pass may re-open the runtime: a fresh one replays the
+    // log and arrives with the appended message already in the store, which would
+    // make the assertions below pass without the cursor ever moving. This is the
+    // only way to pin the live walk rather than a replay that happens to agree.
+    runtime!.walked = landed.seq - 2
 
     await engine.compactNow(agent, new AbortController().signal)
 
-    expect(session.surface.nodes.length).toBe(before + 1)
+    expect(session.surface.nodes.length).toBe(before + 2)
+    expect(runtime!.walked).toBe(landed.seq)
+    expect(runtime!.strategy.store.getStateJson('messages').length).toBe(stored + 1)
+    // The cursor's one write is the index the planner resolves fold ground
+    // through; a message in the store with no seq behind it is unreachable by
+    // every later fold, so the mirror is only complete with the seq. The id is
+    // the store's own record id, not the log message id: the store mints one per
+    // sequence, and the log seq rides beside it as `dshSeq` in the metadata.
+    const mirrored = runtime!.strategy.store.getStateJson('messages') as { id: string; metadata: { dshSeq: number } }[]
+    const newest = mirrored.at(-1)!
+    expect(newest.metadata.dshSeq).toBe(landed.seq)
+    expect(runtime!.seqOf.get(newest.id)).toBe(landed.seq)
     await expect(engine.compactNow(agent, new AbortController().signal)).resolves.not.toThrow()
+  })
+
+  it('skips a step that carries usage but no message', async () => {
+    const { engine, agent, session } = build(4, 'index-usage-only')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    const stored = runtime!.strategy.store.getStateJson('messages').length
+
+    // An assistant step whose content is empty exists only to host usage. It is
+    // an append surface event, so the cursor sees it — and it derives no message,
+    // so recording one would put a content-less assistant turn in front of the
+    // model. The event still has to be walked, or every later pass re-reads it.
+    session.append('assistant/message', {
+      turn: 99,
+      step: 0,
+      message: createAssistantMessage({ content: [], source: { provider: 'test', model: 'test-model' } }),
+      usage: { inputTokens: 7, outputTokens: 0 },
+    }, { surfaceOp: 'append' })
+    const events = session.events.length
+
+    await engine.compactNow(agent, new AbortController().signal)
+
+    expect(runtime!.strategy.store.getStateJson('messages').length).toBe(stored)
+    await expect(engine.compactNow(agent, new AbortController().signal)).resolves.not.toThrow()
+    expect(session.events.length).toBe(events)
+  })
+
+  it('warns and keeps the session alive when a tick rejects outright', async () => {
+    const { engine, agent, session } = build(4, 'index-tick-rejected')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    // A summarizer failure is quarantined inside a resolving tick; a store or
+    // strategy fault rejects it. The pass is already over by then, so the only
+    // thing that can keep the rejection from becoming an unhandled one is the
+    // chain's own catch — and the non-Error payload is what a napi store throws.
+    vi.spyOn(runtime!.strategy as unknown as { tick(): Promise<void> }, 'tick')
+      .mockRejectedValue('the store is gone')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+
+    expect(warn.mock.calls.flat().join('\n')).toContain('memory formation failed: the store is gone')
+    // The chain survives the rejection, so the next pass still runs.
+    await expect(engine.compactNow(agent, new AbortController().signal)).resolves.not.toThrow()
+  })
+})
+
+describe('the budget a pass folds to', () => {
+  it('caps the budget at the operating window when the route advertises more', async () => {
+    // The harness's own window sits below every fixture's route, so this is the
+    // one place the cap is the smaller of the two. Raising it above the cap is
+    // what makes the cap the deciding number: a model advertising 100k tokens
+    // folds to the operating point, not to whatever the route happens to allow.
+    const { engine, agent, session } = build(30, 'index-capped', { operatingWindowTokens: 1_000 })
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    const compile = vi.spyOn(runtime!.manager, 'compile')
+
+    await engine.compactNow(agent, new AbortController().signal)
+
+    // The first call of the pass is the one the budget decides; a refusal after
+    // it retries at the size the strategy could actually reach.
+    expect(compile.mock.calls[0]?.[0]).toEqual({
+      maxTokens: 1_000 - 128,
+      reserveForResponse: 128,
+    })
   })
 })
 
@@ -314,17 +437,17 @@ describe('disposal', () => {
   it('drops the runtime its session owned', async () => {
     const { engine, agent, session } = build(30, 'index-disposed')
     await engine.compactNow(agent, new AbortController().signal)
-    expect(engine.openRuntimes).toBe(1)
+    expect(runtimes(engine).size).toBe(1)
 
     contextOf(engine).emit('agent/disposed', { agent, session } as never)
     await settled()
-    expect(engine.openRuntimes).toBe(0)
+    expect(runtimes(engine).size).toBe(0)
 
     // Disposing a session that never opened one is a no-op rather than a throw:
     // the log-only paths reach the engine too.
     contextOf(engine).emit('agent/disposed', { agent, session } as never)
     await settled()
-    expect(engine.openRuntimes).toBe(0)
+    expect(runtimes(engine).size).toBe(0)
   })
 
   it('re-seeds from the log after a disposal rather than losing the session', async () => {
@@ -338,18 +461,18 @@ describe('disposal', () => {
 
     // The reopened runtime replays the same log, so the surface it cooperates
     // with is the one the disposal left behind.
-    expect(engine.openRuntimes).toBe(1)
+    expect(runtimes(engine).size).toBe(1)
     expect(session.surface.nodes.length).toBe(folded)
   })
 
   it('drops every runtime when the plugin unloads', async () => {
     const { engine, agent } = build(30, 'index-unloaded')
     await engine.compactNow(agent, new AbortController().signal)
-    expect(engine.openRuntimes).toBe(1)
+    expect(runtimes(engine).size).toBe(1)
 
     await contextOf(engine).fiber.dispose()
     await settled()
 
-    expect(engine.openRuntimes).toBe(0)
+    expect(runtimes(engine).size).toBe(0)
   })
 })

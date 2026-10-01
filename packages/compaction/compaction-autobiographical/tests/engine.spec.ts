@@ -15,6 +15,21 @@ import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { build, contextOf, settle, transcript } from './harness.ts'
 
+/** How many runtimes the engine is holding, reached past the private map. */
+function runtimes(engine: unknown): Set<unknown> {
+  return (engine as { runtimes: Set<unknown> }).runtimes
+}
+
+/** The strategy behind a session's runtime, opened if the engine has not yet. */
+async function runtimeStrategy(engine: unknown, agent: unknown): Promise<{ reportRealInputTokens(n: number): void }> {
+  const opened = (engine as {
+    runtimeFor: (a: unknown, r: { provider: string; model: string }) => Promise<{
+      strategy: { reportRealInputTokens(n: number): void }
+    }>
+  }).runtimeFor(agent, { provider: 'test', model: 'test-model' })
+  return (await opened).strategy
+}
+
 const SIGNAL = new AbortController().signal
 
 afterEach(() => {
@@ -116,14 +131,40 @@ describe('runtime lifetime', () => {
     // The session can only be released once its runtime exists, and opening is
     // what puts it in the map the disposal edge is keyed on.
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
-    expect(engine.openRuntimes).toBe(1)
+    expect(runtimes(engine).size).toBe(1)
 
     agentEvents(contextOf(engine), agent1).emit('agent/disposed', {})
-    await vi.waitFor(() => { expect(engine.openRuntimes).toBe(0) })
+    await vi.waitFor(() => { expect(runtimes(engine).size).toBe(0) })
 
     // A later pass re-seeds from the log rather than reusing what disposal took
     // away, which is the whole point of the runtime being disposable.
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
-    expect(engine.openRuntimes).toBe(1)
+    expect(runtimes(engine).size).toBe(1)
+  })
+})
+
+describe('calibration', () => {
+  it('reports the last step\'s real prompt size on the first pass', async () => {
+    const { engine, agent } = build(30, 'engine-calibration')
+    const reported = vi.spyOn(await runtimeStrategy(engine, agent), 'reportRealInputTokens')
+
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+
+    // The step the fixture just ran is the one whose usage is reported, and it
+    // has to happen on the first pass: an estimator that waits for a second pass
+    // prices the first fold by a guess it was already handed the answer to.
+    expect(reported).toHaveBeenCalledWith(1000)
+  })
+
+  it('reports a step once rather than once per pass', async () => {
+    const { engine, agent } = build(30, 'engine-calibration-once')
+    const reported = vi.spyOn(await runtimeStrategy(engine, agent), 'reportRealInputTokens')
+
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+
+    // A pass that appends nothing new finds no unreported usage, so the mark has
+    // to survive the pass that fed it.
+    expect(reported).toHaveBeenCalledTimes(1)
   })
 })
