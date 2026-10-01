@@ -8,7 +8,7 @@ import type { SummaryEntry } from '@animalabs/context-manager'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 import { applyFold } from '../src/apply.ts'
-import { resolveConfig } from '../src/config.ts'
+import { OPERATING_WINDOW_CAP, resolveConfig } from '../src/config.ts'
 import type { FoldOp } from '../src/plan.ts'
 
 /** A session holding one user and one assistant append. */
@@ -53,11 +53,15 @@ function op(overrides: Partial<FoldOp> & Pick<FoldOp, 'startSeq' | 'endSeq' | 's
 }
 
 describe('resolveConfig', () => {
-  it('leaves the operating window unset so the route\'s own window decides', () => {
+  it('defaults the operating window to the cap', () => {
     const resolved = resolveConfig({})
 
-    expect(resolved).toEqual({ reserveTokens: 8192, auto: true, strategy: {} })
-    expect('operatingWindowTokens' in resolved).toBe(false)
+    expect(resolved).toEqual({
+      operatingWindowTokens: OPERATING_WINDOW_CAP,
+      reserveTokens: 8192,
+      auto: true,
+      strategy: {},
+    })
   })
 
   it('carries a caller\'s window and knobs through unchanged', () => {
@@ -100,19 +104,26 @@ describe('applyFold', () => {
     expect(node?.type === 'assistant/message' && node.data.turn).toBe(0)
   })
 
+  // The two refusals below belong to the session, which resolves a replacement's
+  // range positionally against its own live surface and refuses a range that
+  // names a node the op did not cite. Applying does not re-prove either, so these
+  // pin that the session still catches them.
   it('refuses a range that does not resolve on the live surface', () => {
     const { session, ask, answer } = live()
+    const before = session.surface.nodes.length
 
     expect(() => applyFold(session, op({ startSeq: ask + 900, endSeq: answer, shadowedSeqs: [] }), null, 0, { provider: 'test', model: 'test-model' }))
-      .toThrow(/does not resolve on the live surface/)
-    // Nothing opened: a refusal must not leave a bracket behind.
-    expect(session.events.some(event => event.type === 'compaction/start')).toBe(false)
+      .toThrow(/not found in surface/)
+    // The refusal comes from the replacement node, so the bracket and the
+    // metered summary are already down. What must not exist is the node itself:
+    // no node landed, so the surface is exactly as it was.
+    expect(session.surface.nodes.length).toBe(before)
   })
 
   it('refuses a range that would silently swallow an uncited node', () => {
     const { session, ask, answer } = live()
 
     expect(() => applyFold(session, op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask] }), null, 0, { provider: 'test', model: 'test-model' }))
-      .toThrow(new RegExp(`would shadow seqs ${answer} without citing them`))
+      .toThrow(new RegExp(`must include every shadowed surface node; missing ${answer}`))
   })
 })

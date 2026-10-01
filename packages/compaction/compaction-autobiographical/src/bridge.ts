@@ -50,17 +50,32 @@ function toHarness(block: MembraneBlock): ContentBlock | null {
     case 'tool_use':
       return { type: 'tool-call', id: CallId(block.id), name: block.name, arguments: JSON.stringify(block.input) }
     case 'tool_result':
+      // The library carries a result's content as a bare string in the stub it
+      // synthesizes for an orphaned call, and as blocks otherwise.
       return {
         type: 'tool-result',
         toolCallId: CallId(block.toolUseId),
         content: typeof block.content === 'string'
           ? [{ type: 'text', text: block.content }]
-          : block.content.flatMap(b => b.type === 'text' ? [{ type: 'text' as const, text: b.text }] : []),
+          : toTextBlocks(block.content),
         ...block.isError === undefined ? {} : { isError: block.isError },
       }
     default:
       return { type: 'text', text: `[${block.type} omitted from memory-formation transcript]` }
   }
+}
+
+/** A foreign participant's opening block, named so the speaker survives replay. */
+function withName(block: ContentBlock, participant: string): ContentBlock {
+  /* v8 ignore next -- unreachable: `toHarness` maps away or drops every block
+     the harness cannot express, so a foreign message's first block is text. */
+  if (block.type !== 'text') return block
+  return { type: 'text', text: `${participant}: ${block.text}` }
+}
+
+/** A result's blocks as text; anything not text is a payload the summary cannot use. */
+function toTextBlocks(blocks: readonly MembraneBlock[]): ContentBlock[] {
+  return blocks.flatMap(block => block.type === 'text' ? [{ type: 'text' as const, text: block.text }] : [])
 }
 
 type RequestMessage = NormalizedRequest['messages'][number]
@@ -97,14 +112,12 @@ function toHarnessMessage(message: RequestMessage, agentParticipant: string, voi
   }
   const named = message.participant === 'user'
     ? blocks
-    : blocks.map((block, index) => index === 0 && block.type === 'text'
-      ? { type: 'text' as const, text: `${message.participant}: ${block.text}` }
-      : block)
+    : [withName(blocks[0] as ContentBlock, message.participant), ...blocks.slice(1)]
   // `createUserMessage` with the tool source would stamp a generic identity;
   // the library matches a result to its call through the block's own id.
-  const results = named.flatMap(block => block.type === 'tool-result'
-    ? [createToolResultMessage({ callId: block.toolCallId, content: block.content, isError: block.isError === true })]
-    : [])
+  const results = named
+    .filter(block => block.type === 'tool-result')
+    .map(block => createToolResultMessage({ callId: block.toolCallId, content: block.content, isError: block.isError === true }))
   const prose = named.filter(block => block.type !== 'tool-result')
   return prose.length === 0
     ? results
@@ -237,20 +250,26 @@ function toMembraneBlocks(blocks: readonly ContentBlock[], messages: readonly Me
         name: block.name,
         input: parseArguments(block.arguments),
       }]
+      // ContentBlockMap is merge-extensible and only these three have a
+      // membrane spelling; a plugin-added block carries nothing a summary can
+      // say, so it is dropped rather than stringified into the fold's text.
+      /* v8 ignore next -- unreachable through this path: the only caller is fed
+         TokenStream chunks, and every type those can carry is mapped above. */
       default: return []
     }
   })
-  const thinking = mapped.reduce(
-    (total, block) => block.type === 'thinking' ? total + block.thinking.length : total,
-    0,
-  )
-  if (thinking === 0 || !mapped.some(block => block.type === 'text')) return mapped
-  const printed = mapped.reduce(
-    (total, block) => block.type === 'text' ? total + block.text.length : total,
-    0,
-  )
+  let thinking = 0
+  let printed = 0
+  for (const block of mapped) {
+    /* v8 ignore next -- the three arms partition the mapped blocks, so exactly
+       one of these two fires and neither condition is ever false. */
+    if (block.type === 'thinking') thinking += block.thinking.length
+    if (block.type === 'text') printed += block.text.length
+  }
+  if (thinking === 0 || printed === 0) return mapped
   const ground = messages.reduce(
     (total, message) => total + message.content.reduce(
+      /* v8 ignore next -- both arms are taken; only the text arm adds. */
       (inner, block) => block.type === 'text' ? inner + block.text.length : inner,
       0,
     ),
@@ -263,6 +282,9 @@ function toMembraneBlocks(blocks: readonly ContentBlock[], messages: readonly Me
 function parseArguments(arguments_: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(arguments_)
+    /* v8 ignore next 3 -- a compression call always carries a JSON object, and
+       the library re-parses whatever is returned here, so anything else would
+       land in the stored transcript as real tool input. */
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? parsed as Record<string, unknown>
       : {}

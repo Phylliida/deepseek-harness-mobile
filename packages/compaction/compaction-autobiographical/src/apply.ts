@@ -20,36 +20,24 @@
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
 import { createAssistantMessage } from '@deepseek-ai/dsh-llm'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { RequestContext, Session } from '@deepseek-ai/dsh-session'
 import { foldBlocks, foldCompactionId } from './plan.ts'
 import type { FoldOp } from './plan.ts'
 
 /**
- * Prove the op lands where it says, before the bracket opens. Positional rather
- * than numeric: fold nodes carry late replacement-message seqs while sitting at
- * early surface positions, so a seq-value range would sweep in nodes the op never
- * spans.
- */
-function assertLands(surfaceSeqs: readonly number[], op: FoldOp): void {
-  const start = surfaceSeqs.indexOf(op.startSeq)
-  const end = surfaceSeqs.indexOf(op.endSeq)
-  if (start === -1 || end === -1 || start > end) {
-    throw new Error(`fold ${op.summaryId} range ${op.startSeq}..${op.endSeq} does not resolve on the live surface`)
-  }
-  const cited = new Set(op.shadowedSeqs)
-  const missing = surfaceSeqs.slice(start, end + 1).filter(seq => !cited.has(seq))
-  if (missing.length > 0) {
-    throw new Error(`fold ${op.summaryId} would shadow seqs ${missing.join(', ')} without citing them`)
-  }
-}
-
-/**
  * Append one fold as a metered transaction.
+ *
+ * The session validates the provenance of the replacement node, so nothing here
+ * re-proves that the op lands where it says: {@link assertProvenance} resolves the
+ * range positionally against the live surface — fold nodes carry late
+ * replacement-message seqs while sitting at early positions, so a seq-value range
+ * would be wrong — and refuses a range that names a node the op did not cite.
  *
  * Provenance comes from the route the runtime was opened with; re-resolving it
  * here would fabricate an empty options bag and write `''` into the fold
  * message's model source, which session seed validation rejects on fork and
- * replay.
+ * replay. A `RequestContext` carries that route whole, so the caller hands over
+ * the session's own.
  *
  * The bracket id and the fold node's compaction id are the same, as the protocol
  * requires, which is also how the node identifies the recollection it stands for
@@ -60,9 +48,8 @@ export function applyFold(
   op: FoldOp,
   turn: number | null,
   step: number,
-  route: { provider: string; model: string },
+  route: RequestContext,
 ): CompactionResult {
-  assertLands(session.surface.nodes, op)
   const compactionId = CompactionId(foldCompactionId(op.summaryId))
   const summary = foldBlocks(op.summary)
   const startSeq = session.append('compaction/start', { compactionId, turn }).seq
