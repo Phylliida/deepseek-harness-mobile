@@ -27,7 +27,7 @@ import type {
 } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { RequestContext, Session } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import { applyFold } from './apply.ts'
 import { createBridge } from './bridge.ts'
@@ -211,8 +211,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // that has not routed has no budget and no route, and a session whose route
     // advertises no window has no budget either. Opening a runtime first would
     // turn the same state into a thrown error, so the guard comes first.
-    const budget = this.computeBudget(agent)
-    const route = routeOf(agent)
+    const routed = agent.session.requestContext()
+    const budget = this.computeBudget(routed?.contextWindow)
+    const route = routeOf(agent, routed)
     if (budget === undefined || route === undefined) return null
     const runtime = await this.runtimeFor(agent, route)
     const { session } = agent
@@ -295,7 +296,8 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   private kickTick(runtime: Runtime, session: Session): void {
     runtime.tickChain = runtime.tickChain
       .then(() => runtime.manager.tick())
-      .catch((error: unknown) => { this.warn(`memory formation failed: ${describe(error)}`) })      .then(() => {
+      .catch((error: unknown) => { this.warn(`memory formation failed: ${describe(error)}`) })
+      .then(() => {
         // The session may have been disposed while the tick ran.
         if (this.runtimes.has(session.id)) this.appendMemory(runtime, session)
       })
@@ -312,10 +314,6 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    */
   private appendMemory(runtime: Runtime, session: Session): void {
     const mint = this.newestMint(runtime)
-    // The attempt counter only moves when a call formed a memory, so a tick that
-    // minted nothing and formed nothing is at the attempt the log already
-    // records. Reading that off the log leaves no counter to drift, and saying
-    // it anyway would append an identical record on every pass forever.
     if (mint === undefined && runtime.progress.attempt <= attemptFromLog(session)) return
     const usage = runtime.progress.usage
     delete runtime.progress.usage
@@ -382,8 +380,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * response allowance; prompt overhead is not subtracted here because the
    * estimator's calibration multiplier already accounts for it.
    */
-  private computeBudget(agent: CompactionAgentContext): TokenBudget | undefined {
-    const window = agent.session.requestContext()?.contextWindow
+  private computeBudget(window: number | undefined): TokenBudget | undefined {
+    // A window the route never advertised is not a window of zero and not one of
+    // the cap either: the budget is unknown until the session routes.
     if (window === undefined) return undefined
     const maxTokens = Math.min(window, this.config.operatingWindowTokens ?? OPERATING_WINDOW_CAP)
       - this.config.reserveTokens
@@ -424,25 +423,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // thinking, overstating every such pair the planner weighs.
       carrierPolicy: 'live-strip',
     })
-    // The manager prices its own store; it is not handed an estimator. Its
-    // default is density-aware and its calibration reports against the wire, and
-    // the local fixed-density one would only overwrite the first of those. Its
-    // two open-time fields are filled in the order the library requires: the
-    // membrane at open, the strategy after.
-    const attempt = attemptFromLog(agent.session)
-    const runtime: Runtime = {
-      manager: undefined as unknown as ContextManager,
-      strategy: undefined as unknown as AutobiographicalStrategy,
-      store,
-      seqOf: seed.seqOf,
-      cursor: agent.session.events.at(-1)?.seq ?? -1,
-      known: seed.known,
-      announced: new Set(seed.known.keys()),
-      progress: { attempt, active: false },
-      lastFedSeq: -1,
-      tickChain: Promise.resolve(),
-    }
-    runtime.manager = await ContextManager.open({
+    const progress: Runtime['progress'] = { attempt: attemptFromLog(agent.session), active: false }
+    // No estimator is handed over: the manager's own default is density-aware
+    // and its calibration reports against the wire, so a fixed-density one here
+    // would only overwrite the first of those.
+    const manager = await ContextManager.open({
       // The store is duck-typed by the library at runtime — nothing there
       // `instanceof`-checks it — but its published type is the Chronicle native
       // class, which cannot be implemented structurally and cannot be imported
@@ -456,11 +441,21 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         llm: this.ctx.llm,
         provider: route.provider,
         warn: (message) => { this.warn(message) },
-        onText: (delta, done, usage) => { this.captureText(runtime, delta, done, usage) },
+        onText: (delta, done, usage) => { this.captureText(progress, delta, done, usage) },
       }),
     })
-    runtime.strategy = runtime.manager.getStrategy() as AutobiographicalStrategy
-    return runtime
+    return {
+      manager,
+      strategy: manager.getStrategy() as AutobiographicalStrategy,
+      store,
+      seqOf: seed.seqOf,
+      cursor: agent.session.events.at(-1)?.seq ?? -1,
+      known: seed.known,
+      announced: new Set(seed.known.keys()),
+      progress,
+      lastFedSeq: -1,
+      tickChain: Promise.resolve(),
+    }
   }
 
   /**
@@ -469,21 +464,26 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * the counter and usage belong to. Bookkeeping must never kill a compression
    * call, hence the swallow: the session can close mid-call.
    */
-  private captureText(runtime: Runtime, delta: string, done: boolean, usage: TokenUsage | undefined): void {
+  private captureText(
+    progress: Runtime['progress'],
+    delta: string,
+    done: boolean,
+    usage: TokenUsage | undefined,
+  ): void {
     try {
-      runtime.progress.active ||= delta.length > 0
+      progress.active ||= delta.length > 0
       // A call that never streamed text formed no memory, and usage without text
       // is not one either — leave the counter alone so the next tick writes no
       // record. The terminal flush's own delta is always empty, so the verdict
       // comes from the mid-call flushes this flag accumulated.
-      if (!done || !runtime.progress.active) return
-      runtime.progress.attempt++
-      runtime.progress.active = false
+      if (!done || !progress.active) return
+      progress.attempt++
+      progress.active = false
       // `exactOptionalPropertyTypes`: absent and `undefined` are not the same
       // property, and a call that reported no usage must not leave the previous
       // call's in place for `appendMemory` to bill twice.
-      delete runtime.progress.usage
-      if (usage !== undefined) runtime.progress.usage = usage
+      delete progress.usage
+      if (usage !== undefined) progress.usage = usage
     } catch {
       // The session closed under a compression call; the call is already lost.
     }
@@ -498,14 +498,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 }
 
 /**
- * Compile against the budget, reporting whether the layout reached it. The
- * picker refuses when it cannot: it wants more folds than one pass commits, so
- * the excess is the work still queued rather than a failure. The pass ends
- * there and the next one commits the next fold.
- *
- * A refusal measured from the route's advertised window is retried once at the
- * size the strategy could actually reach, because a window larger than the
- * operating point affords it headroom the budget is not claiming.
+ * Compile against the budget, reporting whether the layout reached it. A
+ * refusal measured from the route's advertised window is retried once at the
+ * size the strategy could actually reach.
  */
 async function compileFolds(
   runtime: Runtime,
@@ -518,23 +513,24 @@ async function compileFolds(
     return true
   } catch (error: unknown) {
     if (!(error instanceof OverBudgetError)) throw error
-    // The one retry is at the size the strategy could actually reach, because a
-    // window larger than the operating point affords it headroom the budget is
-    // not claiming. It is worth taking only when that size exceeds the budget.
+    // Worth one retry only when the size the strategy could actually reach
+    // exceeds the budget being claimed.
     const affordable = error.actual + reserveTokens
-    if (affordable <= budget.maxTokens) {
-      warn(`folding is ${String(error.actual)} tokens over budget ${String(budget.maxTokens)}; folding again next step`)
-      return false
-    }
+    if (affordable <= budget.maxTokens) return over(error, budget.maxTokens, warn)
     try {
       await runtime.manager.compile({ maxTokens: affordable, reserveForResponse: reserveTokens })
       return true
     } catch (retry: unknown) {
       if (!(retry instanceof OverBudgetError)) throw retry
-      warn(`folding is ${String(retry.actual)} tokens over budget ${String(retry.budget)}; folding again next step`)
-      return false
+      return over(retry, retry.budget, warn)
     }
   }
+}
+
+/** The picker wants more folds than one pass commits; the excess is the queue. */
+function over(error: OverBudgetError, budget: number, warn: (message: string) => void): false {
+  warn(`folding is ${error.actual} tokens over budget ${budget}; folding again next step`)
+  return false
 }
 
 /** The provider and model a compression call is routed to. */
@@ -544,8 +540,7 @@ interface Route {
 }
 
 /** The session's current route: the newest durable request, else the agent's options. */
-function routeOf(agent: CompactionAgentContext): Route | undefined {
-  const routed = agent.session.requestContext()
+function routeOf(agent: CompactionAgentContext, routed: RequestContext | undefined): Route | undefined {
   if (routed !== undefined) return { provider: routed.provider, model: routed.model }
   const { provider, model } = agent.options
   if (!provider || !model) return undefined
