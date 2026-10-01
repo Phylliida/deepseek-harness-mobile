@@ -23,6 +23,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { MessageId, StoredMessage, SummaryEntry } from '@animalabs/context-manager'
 import { MESSAGES_STATE } from './store.ts'
 import type { LogStore } from './store.ts'
+import type { RecollectionRange } from './types.ts'
 import { estimateTokens } from './types.ts'
 import { resolveRange } from './seed.ts'
 
@@ -57,7 +58,7 @@ export interface PlanInputs {
   /** Minted recollections, for the content a fold renders. */
   readonly summaries: readonly SummaryEntry[]
   /** Log seq coverage per recollection seeded from the log. */
-  readonly seeded: ReadonlyMap<string, { first: number; last: number }>
+  readonly seeded: ReadonlyMap<string, RecollectionRange>
   /** Log seq behind each mirrored message id. */
   readonly seqOf: ReadonlyMap<string, number>
 }
@@ -188,7 +189,7 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
 /** Whether a recollection's coverage takes in one log seq. */
 function standsOver(inputs: PlanInputs, summary: SummaryEntry, seq: number): boolean {
   const range = rangeOf(inputs, summary)
-  return range !== undefined && range.first <= seq && range.last >= seq
+  return range !== undefined && range.firstSeq <= seq && range.lastSeq >= seq
 }
 
 /**
@@ -197,12 +198,15 @@ function standsOver(inputs: PlanInputs, summary: SummaryEntry, seq: number): boo
  * at mint time, the resolved one is what the entry's own sources say now, and a
  * recollection that has since absorbed more ground is the wider of the two.
  */
-function rangeOf(inputs: PlanInputs, summary: SummaryEntry): { first: number; last: number } | undefined {
-  const seeded = inputs.seeded.get(summary.id)
+function rangeOf(inputs: PlanInputs, summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined {
+  const seeded = inputs.seeded.get(summary.id)?.covered
   const resolved = resolveRange(inputs.seqOf, summary)
   if (seeded === undefined) return resolved
   if (resolved === undefined) return seeded
-  return { first: Math.min(seeded.first, resolved.first), last: Math.max(seeded.last, resolved.last) }
+  return {
+    firstSeq: Math.min(seeded.firstSeq, resolved.firstSeq),
+    lastSeq: Math.max(seeded.lastSeq, resolved.lastSeq),
+  }
 }
 
 /**

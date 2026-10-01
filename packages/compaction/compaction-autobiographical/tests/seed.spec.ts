@@ -69,6 +69,22 @@ function seededSummaries(store: LogStore): SummaryEntry[] {
   return store.getStateJson(slots().summaries.id) as SummaryEntry[]
 }
 
+/** A fold node for a recollection minted before the log recorded ranges. */
+function foldNode(live: Session, id: string, ground: readonly number[], turn = 0): number {
+  live.append('autobio/memory', tick({ id }))
+  return live.append('assistant/message', {
+    turn,
+    step: 1,
+    message: createAssistantMessage({
+      content: [{ type: 'text', text: `[Recall ${id}] ground` }],
+      source: { provider: 'test', model: 'test-model', compactionId: `autobio-session-legacy-${id}` },
+    }),
+  }, {
+    surfaceOp: { op: 'replace', start: ground.at(0) as number, end: ground.at(-1) as number },
+    sourceEventSeqs: [...ground],
+  }).seq
+}
+
 describe('seedFromLog', () => {
   it('registers every slot the strategy will address', () => {
     const store = new LogStore()
@@ -117,9 +133,23 @@ describe('seedFromLog', () => {
   it('cites child recollections as the sources of a summary above them', () => {
     const store = new LogStore()
     const { session: live, ask, answer } = session('seed-parent')
-    live.append('autobio/memory', tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: answer } }))
-    live.append('autobio/memory', tick({ id: 'L1-1', range: { firstSeq: answer, lastSeq: answer } }))
-    live.append('autobio/memory', tick({ id: 'L2-0', level: 2, range: { firstSeq: ask, lastSeq: answer } }))
+    // Two children with a fold node each, because that is what membership is read
+    // from: a mint alone records the ground it stood for, never where it landed, and
+    // a parent finds its children by the nodes those children landed on.
+    const first = foldNode(live, 'L1-0', [ask, answer])
+    // A second exchange, because the first one's nodes are no longer on the surface
+    // for a later fold to name.
+    const later = live.append('assistant/message', {
+      turn: 1,
+      step: 0,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: 'later' }],
+        source: { provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+    const second = foldNode(live, 'L1-1', [later], 1)
+    // The parent's own interval, spanning both nodes, in the order the log holds them.
+    live.append('autobio/memory', tick({ id: 'L2-0', level: 2, range: { firstSeq: first, lastSeq: second } }))
 
     seedFromLog(store, live)
 
@@ -145,16 +175,18 @@ describe('seedFromLog', () => {
   it('recovers a legacy recollection\'s range from the fold node that landed it', () => {
     const store = new LogStore()
     const { session: live, ask, answer } = session('seed-legacy-headless')
-    // A pre-rewrite mint: the recollection is recorded, but nothing in the event
-    // says what ground it stood for. The fold node is the only surviving record,
-    // and its header is what ties it back to the recollection.
+    // A pre-rewrite mint, in the shape the old engine actually wrote: nothing in
+    // the event says what ground it stood for, and the node that landed it names
+    // the recollection only in its text. The id form matters — the old engine
+    // never wrote `autobio:` into the source, so this fixture covers the reader
+    // that has to fall back to the header.
     live.append('autobio/memory', tick({ id: 'L1-0' }))
     live.append('assistant/message', {
       turn: 0,
       step: 0,
       message: createAssistantMessage({
         content: [{ type: 'text', text: '[Recall L1-0] the ground this stands for' }],
-        source: { provider: 'test', model: 'test-model', compactionId: 'autobio:L1-0' },
+        source: { provider: 'test', model: 'test-model', compactionId: 'autobio-session-legacy-1' },
       }),
     }, { surfaceOp: { op: 'replace', start: ask, end: answer }, sourceEventSeqs: [ask, answer] })
 

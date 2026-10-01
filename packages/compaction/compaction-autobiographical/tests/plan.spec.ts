@@ -16,6 +16,7 @@ import type { ContentBlock as MembraneBlock } from '@animalabs/membrane'
 import { describe, expect, it } from 'vitest'
 import { DivergenceError, foldBlocks, foldIdOf, planFolds } from '../src/plan.ts'
 import type { FoldOp, PlanInputs } from '../src/plan.ts'
+import type { RecollectionRange } from '../src/types.ts'
 import { SessionEvent } from '@deepseek-ai/dsh-session'
 import { seedFromLog } from '../src/seed.ts'
 import { LogStore, MESSAGES_STATE } from '../src/store.ts'
@@ -85,7 +86,12 @@ function foldNode(live: Session, id: string, sources: number[]): SessionEvent {
 }
 
 /** A store seeded from the log, as the engine's open path builds it. */
-function seeded(live: Session): { store: LogStore; seqOf: Map<string, number>; known: Map<string, { first: number; last: number }> } {
+/** A seeded recollection whose covered and cited spans are the same interval. */
+function span(firstSeq: number, lastSeq: number): RecollectionRange {
+  return { covered: { firstSeq, lastSeq }, cited: { firstSeq, lastSeq } }
+}
+
+function seeded(live: Session): { store: LogStore; seqOf: Map<string, number>; known: Map<string, RecollectionRange> } {
   const store = new LogStore()
   const { seqOf, known } = seedFromLog(store, live)
   return { store, seqOf, known }
@@ -104,7 +110,7 @@ function mirrored(store: LogStore): string[] {
 function resolvedBy(
   seqOf: ReadonlyMap<string, number>,
   summaries: readonly SummaryEntry[],
-  ranges: ReadonlyMap<string, { first: number; last: number }>,
+  ranges: ReadonlyMap<string, RecollectionRange>,
   ids: readonly string[],
 ): Map<string, number> {
   const out = new Map<string, number>()
@@ -113,7 +119,7 @@ function resolvedBy(
     if (seq === undefined) continue
     for (const entry of summaries) {
       const range = ranges.get(entry.id)
-      if (range !== undefined && range.first <= seq && range.last >= seq) {
+      if (range !== undefined && range.covered.firstSeq <= seq && range.covered.lastSeq >= seq) {
         out.set(id, entry.level)
         break
       }
@@ -136,7 +142,7 @@ function plan(
     store?: LogStore
     seqOf?: Map<string, number>
     /** Log-derived ranges to override, keyed by recollection id. */
-    ranges?: Map<string, { first: number; last: number }>
+    ranges?: Map<string, RecollectionRange>
     level?: number
     resolutions?: Map<string, number>
     summaries?: SummaryEntry[]
@@ -147,10 +153,12 @@ function plan(
   const seqOf = opts.seqOf ?? base.seqOf
   const seqs = mirrored(store).flatMap(id => seqOf.get(id) ?? [])
   const summaries = opts.summaries ?? []
-  const coverage = opts.ranges ?? new Map(summaries.map(entry => [entry.id, {
-    first: Math.min(...seqs),
-    last: Math.max(...seqs),
-  }]))
+  // A fixture's recollections are seeded from the log's own fold events, so the
+  // ground they stand over and the interval they cite are the same span here.
+  const coverage = opts.ranges ?? new Map(summaries.map((entry) => {
+    const span = { firstSeq: Math.min(...seqs), lastSeq: Math.max(...seqs) }
+    return [entry.id, { covered: span, cited: span }]
+  }))
   const inputs: PlanInputs = {
     // Derived rather than declared: a resolution lands on the messages a
     // recollection covered, so a fixture that names both independently could
@@ -233,13 +241,13 @@ describe('planFolds', () => {
     const { store, seqOf, known } = seeded(live)
     const rows = store.getStateJson(MESSAGES_STATE) as Record<string, unknown>[]
     // Every message is resolved, so the only reason to fold nothing is metadata.
-    const resolutions = resolvedBy(seqOf, [summary('L1-0', 1)], new Map([['L1-0', { first: 1, last: 2 }]]), mirrored(store))
+    const resolutions = resolvedBy(seqOf, [summary('L1-0', 1)], new Map([['L1-0', span(1, 2)]]), mirrored(store))
     const withMetadata = (metadata: Record<string, unknown>, at: number): FoldOp[] => {
       store.setStateJson(MESSAGES_STATE, rows.map((row, index) => index === at ? { ...row, metadata } : row))
       return planFolds(store, live, {
         resolutions,
         summaries: [summary('L1-0', 1)],
-        seeded: new Map([...known, ['L1-0', { first: 1, last: 2 }]]),
+        seeded: new Map([...known, ['L1-0', span(1, 2)]]),
         seqOf,
       })
     }
@@ -274,7 +282,7 @@ describe('planFolds', () => {
         summary('L1-1', 1, { mergedInto: 'L2-0' } as Partial<SummaryEntry>),
         summary('L1-2', 1),
       ],
-      ranges: new Map([['L1-2', { first: ask, last: answer }]]),
+      ranges: new Map([['L1-2', span(ask, answer)]]),
     })
 
     expect(ops.map(op => op.summaryId)).toEqual(['L1-2'])
@@ -288,7 +296,7 @@ describe('planFolds', () => {
     // Two L1s at one level: only the one whose coverage holds the message counts.
     const ops = plan(live, {
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
-      ranges: new Map([['L1-1', { first: ask, last: answer }]]),
+      ranges: new Map([['L1-1', span(ask, answer)]]),
     })
 
     expect(ops.map(op => op.summaryId)).toEqual(['L1-1'])
@@ -308,7 +316,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1], [ids[2]!, 2]]),
       summaries: [summary('L1-0', 1), summary('L1-1', 2)],
-      seeded: new Map([...known, ['L1-0', { first: ask, last: answer }], ['L1-1', { first: reply, last: reply }]]),
+      seeded: new Map([...known, ['L1-0', span(ask, answer)], ['L1-1', span(reply, reply)]]),
       seqOf,
     })
 
@@ -327,7 +335,7 @@ describe('planFolds', () => {
       store,
       seqOf,
       summaries: [summary('L1-0', 1)],
-      ranges: new Map([...known, ['L1-0', { first: ask, last: answer }]]),
+      ranges: new Map([...known, ['L1-0', span(ask, answer)]]),
     })
 
     expect(ops).toEqual([])
@@ -345,7 +353,7 @@ describe('planFolds', () => {
 
     const ops = plan(live, {
       summaries: [summary('L1-0', 1)],
-      ranges: new Map([['L1-0', { first: ask, last: ask + 1 }]]),
+      ranges: new Map([['L1-0', span(ask, ask + 1)]]),
     })
 
     expect(ops[0]?.shadowedSeqs).toEqual([ask, ask + 1])
@@ -362,7 +370,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: result, last: result }]]),
+      seeded: new Map([['L1-0', span(result, result)]]),
       seqOf,
     })
 
@@ -382,7 +390,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: ask, last: answer }]]),
+      seeded: new Map([['L1-0', span(ask, answer)]]),
       seqOf,
     })
 
@@ -397,7 +405,7 @@ describe('planFolds', () => {
 
     const ops = plan(live, {
       summaries: [summary('L1-0', 1)],
-      ranges: new Map([['L1-0', { first: ask, last: call }]]),
+      ranges: new Map([['L1-0', span(ask, call)]]),
     })
 
     expect(ops[0]?.endSeq).toBe(result)
@@ -439,7 +447,7 @@ describe('planFolds', () => {
 
     const ops = plan(live, {
       summaries: [summary('L1-0', 1)],
-      ranges: new Map([['L1-0', { first: ask, last: call }]]),
+      ranges: new Map([['L1-0', span(ask, call)]]),
     })
 
     // The span covers the round's own result and stops short of the mixed node.
@@ -456,7 +464,7 @@ describe('planFolds', () => {
 
     const ops = plan(live, {
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
-      ranges: new Map([['L1-0', { first: askA, last: a.call }], ['L1-1', { first: askB, last: b.call }]]),
+      ranges: new Map([['L1-0', span(askA, a.call)], ['L1-1', span(askB, b.call)]]),
     })
 
     expect(ops.find(op => op.summaryId === 'L1-0')?.shadowedSeqs).toEqual([askA, a.call, a.result])
@@ -475,7 +483,7 @@ describe('planFolds', () => {
       store,
       seqOf,
       summaries: [summary('L1-0', 1)],
-      ranges: new Map([...known, ['L1-0', { first: ask, last: answer }]]),
+      ranges: new Map([...known, ['L1-0', span(ask, answer)]]),
     })
 
     // The landed node stands in its ground's place, so the op takes it along with
@@ -549,7 +557,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[2]!, 1], [ids[3]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: second.call, last: second.result }]]),
+      seeded: new Map([['L1-0', span(second.call, second.result)]]),
       seqOf,
     })
 
@@ -571,8 +579,8 @@ describe('planFolds', () => {
       resolutions: new Map([]),
       summaries: [summary('L3-0', 3), summary('L2-0', 2)],
       seeded: new Map([
-        ['L3-0', { first: ask, last: answer }],
-        ['L2-0', { first: ask, last: answer }],
+        ['L3-0', span(ask, answer)],
+        ['L2-0', span(ask, answer)],
       ]),
       seqOf,
     })
@@ -594,7 +602,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[mirrored(store)[0]!, 1], [mirrored(store)[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: ask, last: answer }]]),
+      seeded: new Map([['L1-0', span(ask, answer)]]),
       seqOf,
     })
 
@@ -612,7 +620,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[mirrored(store)[0]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: ask, last: ask }]]),
+      seeded: new Map([['L1-0', span(ask, ask)]]),
       seqOf,
     })
 
@@ -636,7 +644,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: ask, last: answer }]]),
+      seeded: new Map([['L1-0', span(ask, answer)]]),
       seqOf,
     })
 
@@ -655,7 +663,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: ask, last: answer }]]),
+      seeded: new Map([['L1-0', span(ask, answer)]]),
       seqOf,
     })
 
@@ -678,8 +686,8 @@ describe('planFolds', () => {
       resolutions: new Map([[ids[0]!, 1], [ids[2]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
       seeded: new Map([
-        ['L1-0', { first: ask, last: result }],
-        ['L1-1', { first: call, last: result }],
+        ['L1-0', span(ask, result)],
+        ['L1-1', span(call, result)],
       ]),
       seqOf,
     })
@@ -704,8 +712,8 @@ describe('planFolds', () => {
       resolutions: new Map([[ids[0]!, 1], [ids[2]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
       seeded: new Map([
-        ['L1-0', { first: ask, last: ask }],
-        ['L1-1', { first: answer, last: answer }],
+        ['L1-0', span(ask, ask)],
+        ['L1-1', span(answer, answer)],
       ]),
       seqOf,
     })
@@ -728,7 +736,7 @@ describe('planFolds', () => {
     const ops = planFolds(store, live, {
       resolutions: new Map([[ids[0]!, 1]]),
       summaries: [summary('L1-0', 1)],
-      seeded: new Map([['L1-0', { first: ask, last: ask }]]),
+      seeded: new Map([['L1-0', span(ask, ask)]]),
       seqOf,
     })
 

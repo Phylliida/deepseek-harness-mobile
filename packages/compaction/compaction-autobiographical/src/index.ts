@@ -36,7 +36,7 @@ import { planFolds } from './plan.ts'
 import { appendSurfaceNode, resolveRange, seedFromLog } from './seed.ts'
 import { createStore } from './store.ts'
 import type { LogStore } from './store.ts'
-import type { AutobiographicalCompactionConfig, AutobiographicalMemoryMint } from './types.ts'
+import type { AutobiographicalCompactionConfig, AutobiographicalMemoryMint, RecollectionRange } from './types.ts'
 
 export type {
   AutobiographicalCompactionConfig,
@@ -63,7 +63,7 @@ interface Runtime {
   store: LogStore
   strategy: AutobiographicalStrategy
   /** Log seq coverage per seeded recollection. */
-  known: Map<string, { first: number; last: number }>
+  known: Map<string, RecollectionRange>
   /** Log seq behind each mirrored message id. */
   seqOf: Map<string, number>
   /**
@@ -344,14 +344,14 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // rather than written down ungrounded.
       if (range === undefined) continue
       runtime.announced.add(summary.id)
-      runtime.known.set(summary.id, range)
+      runtime.known.set(summary.id, { covered: range, cited: range })
       return {
         id: summary.id,
         level: summary.level,
         content: summary.content,
         tokens: summary.tokens,
         created: summary.created,
-        sourceRange: { firstSeq: range.first, lastSeq: range.last },
+        sourceRange: range,
       }
     }
     return undefined

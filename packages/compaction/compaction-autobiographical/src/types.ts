@@ -41,6 +41,28 @@ export interface ResolvedAutobiographicalConfig {
   strategy: AutobiographicalOptions
 }
 
+/**
+ * What a recollection stands for, in log-seq terms.
+ *
+ * Two spans rather than one because they answer different questions and are not
+ * the same interval. `covered` is the ground the recollection stands over, which
+ * is what the planner compares a surface node against. `cited` is the interval its
+ * fold node named, which is what a higher recollection's interval takes in — the
+ * nodes that landed a child sit outside the interval that child cites, so nesting
+ * on `covered` finds no children at all.
+ */
+export interface RecollectionRange {
+  readonly covered: { readonly firstSeq: number; readonly lastSeq: number }
+  readonly cited: { readonly firstSeq: number; readonly lastSeq: number }
+  /**
+   * Log seq of the node a fold landed on, absent for a recollection whose fold
+   * never landed. This is where a higher recollection's interval finds it: a
+   * parent cites the child nodes it shadows, so membership is a question about
+   * nodes rather than about the ground they stand for.
+   */
+  readonly at?: number
+}
+
 /** The recollection one memory-formation call minted. */
 export interface AutobiographicalMemoryMint {
   id: string

@@ -27,6 +27,7 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import { foldIdOf } from './plan.ts'
 import { LogStore, slots } from './store.ts'
+import type { RecollectionRange } from './types.ts'
 
 /** A recollection as the log records it. */
 interface LoggedMemory {
@@ -51,7 +52,7 @@ interface LoggedMemory {
  */
 export function seedFromLog(store: LogStore, session: Session): {
   readonly seqOf: Map<string, number>
-  readonly known: Map<string, { first: number; last: number }>
+  readonly known: Map<string, RecollectionRange>
 } {
   const ids = slots()
   store.registerState(ids.messages)
@@ -75,20 +76,26 @@ export function seedFromLog(store: LogStore, session: Session): {
   // `recallCurveLeafIds` checks before it will treat an entry as a leaf.
   const surface = [...idAtSeq].sort((a, b) => a[0] - b[0])
 
-  const known = new Map<string, { first: number; last: number }>()
+  const known = new Map<string, RecollectionRange>()
   let counter = 0
 
   for (const memory of readMemoryLog(session)) {
-    const range = memory.range ?? legacyRange(session, memory.id)
+    const legacy = legacyRange(session, memory.id)
+    const range = memory.range ?? legacy?.range
     if (range === undefined) continue
     const { firstSeq, lastSeq } = range
+    // A minted range is recorded by the mint itself, so the node that landed it is
+    // the only one that could have: no reader needed.
+    const landedAt = legacy?.at
 
-    // Message ids when nothing folded the ground, and the ids still on the
-    // surface when something did — an L1 above a fold is not a leaf the recall
+    // Message ids when nothing has folded the ground, and the ids still on the
+    // surface when something has — an L1 above a fold is not a leaf the recall
     // curve can walk. Child recollections when the ground is summaries.
     const covered = memory.level === 1
       ? slice(surface, firstSeq, lastSeq).map(([, id]) => id)
-      : [...known].filter(([, child]) => child.first >= firstSeq && child.last <= lastSeq).map(([id]) => id)
+      : [...known]
+        .filter(([, child]) => child.at !== undefined && child.at >= firstSeq && child.at <= lastSeq)
+        .map(([id]) => id)
 
     // Skipped, not stubbed: an entry citing ground that does not exist would have
     // no sources to resolve and no range to cover, and `recallCurveLeafIds`
@@ -96,7 +103,21 @@ export function seedFromLog(store: LogStore, session: Session): {
     // A non-empty list always has both bounds, so these two stand in for it.
     const first = covered.at(0)
     const last = covered.at(-1)
+    // A recollection naming nothing is left out of `known` as well as out of the
+    // store: an entry with no sources would have no covered span, and the planner
+    // reads that span to decide what ground is already spoken for.
     if (first === undefined || last === undefined) continue
+
+    // Two spans, because a recollection needs both and they are not the same one.
+    // `covered` is the ground it stands over, which is what the planner has to
+    // compare a surface node against. `cited` is the interval its fold node named,
+    // and `at` is where that node landed. A higher recollection finds its children
+    // by `at`: it cites the child nodes it shadows, so membership is a question
+    // about nodes. Measured against the red-lemma log, which has 27 landed level-2
+    // recollections, that reading places children under 23 of them and adopts 117,
+    // where nesting on the cited intervals places 18 and adopts 55.
+    // Both bounds resolve — every id in `covered` came out of `surface`.
+    const coveredSeq = { firstSeq: seqOf.get(first) as number, lastSeq: seqOf.get(last) as number }
 
     store.appendToStateJson(ids.summaries.id, {
       id: memory.id,
@@ -109,7 +130,7 @@ export function seedFromLog(store: LogStore, session: Session): {
       created: memory.created,
     } satisfies SummaryEntry)
 
-    known.set(memory.id, { first: firstSeq, last: lastSeq })
+    known.set(memory.id, { covered: coveredSeq, cited: { firstSeq, lastSeq }, ...(landedAt === undefined ? {} : { at: landedAt }) })
     counter = Math.max(counter, Number(/-(\d+)$/.exec(memory.id)?.[1] ?? -1) + 1)
   }
 
@@ -121,10 +142,10 @@ export function seedFromLog(store: LogStore, session: Session): {
  * A recollection minted after seeding records message ids, not log seqs, so its
  * range is resolved through the messages it names.
  */
-export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: SummaryEntry): { first: number; last: number } | undefined {
+export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined {
   const known = summary.sourceIds.flatMap(id => seqOf.get(id)).filter(seq => seq !== undefined)
   if (known.length === 0) return undefined
-  return { first: Math.min(...known), last: Math.max(...known) }
+  return { firstSeq: Math.min(...known), lastSeq: Math.max(...known) }
 }
 
 /**
@@ -192,23 +213,48 @@ function slice(surface: ReadonlyArray<readonly [number, string]>, firstSeq: numb
  *
  * The pre-rewrite engine stamped no `sourceRange` on its `autobio/memory`
  * events, so the only surviving record of what a fold took is the fold node's
- * own `sourceEventSeqs`. `foldIdOf` names the recollection from the compaction
- * id the node landed under — reading the prose header instead would report a
- * range for whichever recollection the text happened to mention. Unlanded mints
- * are dropped: nothing in the log says what ground they stood for.
+ * own `sourceEventSeqs`. Naming the node is the whole difficulty, and it takes
+ * two readers because the identity moved: a node the old engine landed carries
+ * no `compactionId` in its source and is named only by the `[Recall id]` header
+ * in its text, while a node this engine lands carries the id in
+ * `source.compactionId` and needs no prose. Unlanded mints are dropped: nothing
+ * in the log says what ground they stood for.
  */
-function legacyRange(session: Session, id: string): { firstSeq: number; lastSeq: number } | undefined {
+function legacyRange(session: Session, id: string): { range: { firstSeq: number; lastSeq: number }; at: number } | undefined {
   for (const event of session.events) {
-    if (!isReplacementSurfaceEvent(event) || foldIdOf(event) !== id) continue
+    if (!isReplacementSurfaceEvent(event)) continue
+    // A node that names an id in its source is read only there: the prose is a
+    // fallback for nodes that name nothing, never a second opinion.
+    if ((foldIdOf(event) ?? recallHeaderId(event)) !== id) continue
     // A replacement always cites every node it shadowed, so there is always a
     // list here to bound: the session refuses a replace that names no ground.
     const sources = event.sourceEventSeqs ?? []
-    return { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) }
+    return { range: { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) }, at: event.seq }
+  }
+  return undefined
+}
+
+/** The recollection a pre-rewrite fold node names in its text, if it names one. */
+function recallHeaderId(event: SessionEvent): string | undefined {
+  if (event.type !== 'assistant/message') return undefined
+  for (const block of event.data.message.content) {
+    if (block.type !== 'text') continue
+    const id = RECALL_HEADER.exec(block.text)?.[1]
+    if (id !== undefined) return id
   }
   return undefined
 }
 
 const LEVEL_PREFIX = /^L(\d+)-/
+
+/**
+ * The header a fold node's text leads with, as {@link foldBlocks} writes it. The
+ * id is matched without whitespace or a closing bracket so a recollection the
+ * body happens to mention cannot be mistaken for the one the node stands for —
+ * this reader only ever runs as the fallback for a node that names no id of its
+ * own.
+ */
+const RECALL_HEADER = /^\[Recall ([^\]\s]+)\]/
 
 /**
  * The recollections one log records, keyed by id and deduplicated, in mint order.
