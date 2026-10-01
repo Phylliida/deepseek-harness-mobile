@@ -455,6 +455,43 @@ describe('planFolds', () => {
     expect(ops[0]?.shadowedSeqs).not.toContain(mixed)
   })
 
+  it('stops widening over a result that answers nothing it is looking for', () => {
+    const live = started('plan-unanswered')
+    const ask = userEvent(live, 'ask')
+    const call = live.append('assistant/message', {
+      turn: 0,
+      step: 1,
+      message: createAssistantMessage({
+        content: [
+          { type: 'text', text: 'let me look' },
+          { type: 'tool-call', id: CallId('call-open'), name: 'read', arguments: '{}' },
+        ],
+        source: ROUTE,
+      }),
+    }, { surfaceOp: 'append' }).seq
+    // A result the fold is not waiting for — another round's, whose own call sits
+    // outside the span. The walk is looking for `call-open`, so this node answers
+    // nothing and it stops here: a fold is a contiguous run of ground one
+    // recollection owns, and a node it cannot answer is somebody else's.
+    const foreign = live.append('tool/result', {
+      turn: 0,
+      step: 2,
+      message: createToolResultMessage({
+        callId: CallId('call-elsewhere'),
+        content: [{ type: 'text', text: 'ok' }],
+        isError: false,
+      }),
+    }, { surfaceOp: 'append' }).seq
+
+    const ops = plan(live, {
+      summaries: [summary('L1-0', 1)],
+      ranges: new Map([['L1-0', span(ask, call)]]),
+    })
+
+    expect(ops[0]?.shadowedSeqs).toEqual([ask, call])
+    expect(ops[0]?.shadowedSeqs).not.toContain(foreign)
+  })
+
   it('stops widening where the next node belongs to a sibling fold', () => {
     const live = started('plan-shadow')
     const askA = userEvent(live, 'a')

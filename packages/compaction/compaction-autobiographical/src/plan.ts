@@ -17,7 +17,7 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical/plan
  */
 
-import { deriveEventMessage, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+import { deriveEventMessage } from '@deepseek-ai/dsh-session/surface'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { MessageId, StoredMessage, SummaryEntry } from '@animalabs/context-manager'
@@ -25,7 +25,7 @@ import { MESSAGES_STATE } from './store.ts'
 import type { LogStore } from './store.ts'
 import type { RecollectionRange } from './types.ts'
 import { estimateTokens } from './types.ts'
-import { resolveRange } from './seed.ts'
+import { resolveRange, surfaceGround } from './seed.ts'
 
 /** One planned fold: shadow `startSeq..endSeq` with a single recollection node. */
 export interface FoldOp {
@@ -160,8 +160,10 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
     ops.push({
       summaryId: summary.id,
       level: summary.level,
-      startSeq: surface[from]?.seq ?? 0,
-      endSeq: surface[to]?.seq ?? 0,
+      // Both offsets exist: `from` is a `findIndex` hit and `to` only ever moves
+      // inside the surface.
+      startSeq: (surface[from] as SurfaceNode).seq,
+      endSeq: (surface[to] as SurfaceNode).seq,
       shadowedSeqs: surface.slice(from, to + 1).map(node => node.seq),
       shadowedTokens: tokens,
       summary,
@@ -221,37 +223,28 @@ function standingFor(
  */
 function annotateSurface(session: Session): SurfaceNode[] {
   const events = new Map(session.events.map(event => [event.seq, event]))
-  const cache = new Map<number, readonly number[]>()
-
-  /** Original append seqs a node stands for, with every fold node it cites expanded. */
-  const coverageOf = (seq: number, seen: Set<number>): readonly number[] => {
-    const cached = cache.get(seq)
-    if (cached !== undefined) return cached
-    // A fold citing itself would recurse forever; the log forbids it, and this is
-    // cheaper than proving it.
-    if (seen.has(seq)) return [seq]
-    seen.add(seq)
-    const event = events.get(seq)
-    const sources = event !== undefined && isReplacementSurfaceEvent(event) ? event.sourceEventSeqs : undefined
-    const coverage = sources?.length ? sources.flatMap(source => coverageOf(source, seen)) : [seq]
-    cache.set(seq, coverage)
-    return coverage
-  }
+  const coverage = surfaceGround(session)
 
   return session.surface.nodes.map((seq) => {
+    // A surface node is a seq into this log by construction, so the lookup is
+    // total and a miss means the surface and the events have been desynchronized.
     const event = events.get(seq)
+    /* v8 ignore next -- unreachable: both maps are built from this session's own
+       events, and a desynchronized surface is the bug this asserts on rather than
+       a state to keep planning through. */
+    if (event === undefined) throw new DivergenceError(`surface node ${seq} has no event in the log`)
     const calls: string[] = []
     const results: string[] = []
     let text = ''
-    for (const block of (event === undefined ? undefined : deriveEventMessage(event)?.content) ?? []) {
+    for (const block of deriveEventMessage(event)?.content ?? []) {
       if (block.type === 'tool-call') calls.push(block.id)
       if (block.type === 'tool-result') results.push(block.toolCallId)
       if (block.type === 'text') text += block.text
     }
     return {
       seq,
-      foldId: event === undefined ? undefined : foldIdOf(event),
-      coverage: coverageOf(seq, new Set()),
+      foldId: foldIdOf(event),
+      coverage: coverage.get(seq) as readonly number[],
       calls,
       results,
       tokens: estimateTokens(text),
@@ -263,13 +256,12 @@ function annotateSurface(session: Session): SurfaceNode[] {
  * Widen each fold over the tool nodes it would otherwise orphan. Visibility is
  * judged against the final layout — a node is visible after this pass iff no
  * fold shadows it — which is what lets sibling folds cooperate.
+ *
+ * Widening needs no record of what earlier ops claimed: one node answers to one
+ * recollection, so the spans the walk produced are already disjoint, and a node
+ * a sibling owns is not inside this range for {@link planFolds} to have taken.
  */
 function widen(ops: FoldOp[], surface: SurfaceNode[]): FoldOp[] {
-  // Surface positions of the nodes earlier ops claimed. One node belongs to one
-  // fold, and ops arrive in plan order, so the first fold to reach a node keeps
-  // it and a later one treats it as a boundary.
-  const taken = new Set<number>()
-
   return ops.map((op) => {
     const { from: start, to: end } = op.span
     let from = start
@@ -280,7 +272,7 @@ function widen(ops: FoldOp[], surface: SurfaceNode[]): FoldOp[] {
     // one node of reach is all there is.
     const covered = surface.slice(start, end + 1)
     const results = new Set(covered.flatMap(node => node.results))
-    const before = taken.has(start - 1) ? undefined : surface[start - 1]
+    const before = surface[start - 1]
     if (before !== undefined && before.calls.some(id => results.has(id))) from = start - 1
 
     // Forward: results the fold leaves standing, taken as one contiguous run so
@@ -288,7 +280,7 @@ function widen(ops: FoldOp[], surface: SurfaceNode[]): FoldOp[] {
     const pending = new Set(
       surface.slice(from, to + 1).flatMap(node => node.calls).filter(id => !results.has(id)),
     )
-    while (to + 1 < surface.length && pending.size > 0 && !taken.has(to + 1)) {
+    while (to + 1 < surface.length && pending.size > 0) {
       const next = surface[to + 1] as SurfaceNode
       const answers = next.results.filter(id => pending.has(id))
       if (answers.length === 0 || next.calls.length > 0) break
@@ -297,12 +289,11 @@ function widen(ops: FoldOp[], surface: SurfaceNode[]): FoldOp[] {
     }
 
     const widened = surface.slice(from, to + 1)
-    widened.forEach((_, offset) => taken.add(from + offset))
     if (from === start && to === end) return op
     return {
       ...op,
-      startSeq: surface[from]?.seq ?? op.startSeq,
-      endSeq: surface[to]?.seq ?? op.endSeq,
+      startSeq: (surface[from] as SurfaceNode).seq,
+      endSeq: (surface[to] as SurfaceNode).seq,
       shadowedSeqs: widened.map(node => node.seq),
       shadowedTokens: widened.reduce((total, node) => total + node.tokens, 0),
       span: { from, to },
