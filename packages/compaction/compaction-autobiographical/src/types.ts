@@ -55,6 +55,17 @@ export interface RecollectionRange {
   readonly covered: { readonly firstSeq: number; readonly lastSeq: number }
   readonly cited: { readonly firstSeq: number; readonly lastSeq: number }
   /**
+   * The message ids the ground bottoms out in, in store-position order. A
+   * recollection's `sourceRange` holds their ends, and a parent reads them to bound
+   * its own range, so a level above resolves without walking the pyramid again.
+   *
+   * Written by seeding, which rebuilds the whole pyramid from one log and needs
+   * every level's leaves to do it. A recollection minted live records its `covered`
+   * span alone: its leaves are the span of the messages it resolved, which is what
+   * its own `sourceRange` holds in the store.
+   */
+  readonly leaves?: readonly string[]
+  /**
    * Log seq of the node a fold landed on, absent for a recollection whose fold
    * never landed. This is where a higher recollection's interval finds it: a
    * parent cites the child nodes it shadows, so membership is a question about

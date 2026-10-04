@@ -142,10 +142,10 @@ describe('seedFromLog', () => {
   it('cites child recollections as the sources of a summary above them', () => {
     const store = new LogStore()
     const { session: live, ask, answer } = session('seed-parent')
-    // Two children with a fold node each, because that is what membership is read
-    // from: a mint alone records the ground it stood for, never where it landed, and
-    // a parent finds its children by the nodes those children landed on.
-    const first = foldNode(live, 'L1-0', [ask, answer])
+    // Two children with a fold node each. What places a child inside the parent above
+    // it is the ground the child stands over, which is what the parent's own range is
+    // built from: resolving a child's id through the pyramid yields its ground.
+    foldNode(live, 'L1-0', [ask, answer])
     // A second exchange, because the first one's nodes are no longer on the surface
     // for a later fold to name.
     const later = live.append('assistant/message', {
@@ -156,16 +156,50 @@ describe('seedFromLog', () => {
         source: { provider: 'test', model: 'test-model' },
       }),
     }, { surfaceOp: 'append' }).seq
-    const second = foldNode(live, 'L1-1', [later], 1)
-    // The parent's own interval, spanning both nodes, in the order the log holds them.
-    live.append('autobio/memory', tick({ id: 'L2-0', level: 2, range: { firstSeq: first, lastSeq: second } }))
+    foldNode(live, 'L1-1', [later], 1)
+    // The parent's own interval: the union of the ground its children stand over. It
+    // reaches forward from the first child's exchange to the message the second one
+    // distilled.
+    live.append('autobio/memory', tick({ id: 'L2-0', level: 2, range: { firstSeq: ask, lastSeq: later } }))
 
     seedFromLog(store, live)
 
     const byId = new Map(seededSummaries(store).map(summary => [summary.id, summary]))
     expect(byId.get('L2-0')?.sourceIds).toEqual(['L1-0', 'L1-1'])
     expect(byId.get('L2-0')?.sourceLevel).toBe(1)
-    expect(byId.get('L2-0')?.sourceRange).toEqual({ first: 'L1-0', last: 'L1-1' })
+    // The messages its children stand for, not the children: upstream stamps a merge
+    // with the leaves under its first and last source, and `recallCurveLeafIds` reads
+    // a range naming anything else as an entry whose leaves are not walkable.
+    expect(byId.get('L2-0')?.sourceRange).toEqual({
+      first: 'record-000000000000',
+      last: 'record-000000000002',
+    })
+  })
+
+  it('keeps both layers when a parent cites a recollection that only re-took its child', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('seed-equal-spans')
+    // A legacy fold whose node cites its one child's node and nothing older, so the
+    // ground it stands over is exactly that child's. That makes the two of them equal
+    // rather than nested, and a parent reaching that ground takes both: reading one as
+    // the other's layer would drop a recollection the parent's own interval covers.
+    const child = foldNode(live, 'L1-0', [ask, answer])
+    live.append('autobio/memory', tick({ id: 'L2-0', level: 2 }))
+    live.append('assistant/message', {
+      turn: 1,
+      step: 2,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '[Recall L2-0] the same ground again' }],
+        source: { provider: 'test', model: 'test-model', compactionId: 'autobio-session-legacy-L2-0' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: child, end: child }, sourceEventSeqs: [child] })
+
+    seedFromLog(store, live)
+
+    const byId = new Map(seededSummaries(store).map(summary => [summary.id, summary]))
+    expect(byId.get('L1-0')?.sourceIds).toEqual(['record-000000000000', 'record-000000000001'])
+    expect(byId.get('L2-0')?.sourceIds).toEqual(['L1-0'])
+    expect(byId.get('L2-0')?.sourceRange).toEqual({ first: 'record-000000000000', last: 'record-000000000001' })
   })
 
   it('drops a recollection whose ground no longer exists rather than stubbing it', () => {
@@ -351,7 +385,7 @@ describe('seedFromLog', () => {
     const bounds = new Map(
       (store.getStateJson(slots().summaries.id) as SummaryEntry[]).map(entry => [entry.id, entry.sourceRange]),
     )
-    expect(bounds.get('L2-0')).toEqual({ first: 'L1-0', last: 'L1-0' })
+    expect(bounds.get('L2-0')).toEqual({ first: 'record-000000000000', last: 'record-000000000001' })
     expect(child).toBeGreaterThan(answer)
   })
 
@@ -396,9 +430,11 @@ describe('seedFromLog', () => {
     expect(store.getStateJson(slots().counter.id)).toBe(0)
   })
 
-  it('keeps the first mint of an id a pre-rewrite log recorded twice', () => {
+  it('keeps the newest mint of an id a pre-rewrite log recorded twice', () => {
     const store = new LogStore()
     const { session: live, ask, answer } = session('seed-duplicate')
+    // Two mints of one id, both carrying a range: only one recollection ever had
+    // this name, and the newest account of it is the one the log ends with.
     const first = tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: ask } })
     const second = { ...tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: answer } }) }
     ;(second.memory as AutobiographicalMemoryMint).content = 'rewritten'
@@ -409,7 +445,43 @@ describe('seedFromLog', () => {
 
     const summaries = seededSummaries(store)
     expect(summaries).toHaveLength(1)
-    expect(summaries[0]?.content).toBe('content of L1-0')
+    expect(summaries[0]?.content).toBe('rewritten')
+    expect(summaries[0]?.sourceRange).toEqual({ first: 'record-000000000000', last: 'record-000000000001' })
+  })
+
+  it('lets a mint that states its range displace an earlier one that does not', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('seed-duplicate-ranged')
+    // A log that records one id twice, the second time with the range the first
+    // omitted. Keeping the first would leave ground the log does state uncited, and
+    // seeding drops what it cannot place — the recollection would come back with no
+    // coverage on the reopen that reads this log.
+    const bare = tick({ id: 'L1-0' })
+    const stated = { ...tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: answer } }) }
+    ;(stated.memory as AutobiographicalMemoryMint).content = 'the mint that states its range'
+    live.append('autobio/memory', bare)
+    live.append('autobio/memory', stated)
+
+    seedFromLog(store, live)
+
+    const summaries = seededSummaries(store)
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]?.content).toBe('the mint that states its range')
+    expect(summaries[0]?.sourceIds).toEqual(['record-000000000000', 'record-000000000001'])
+  })
+
+  it('never lets a later range-less mint displace a ranged one', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('seed-duplicate-late-bare')
+    const stated = tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: answer } })
+    live.append('autobio/memory', stated)
+    live.append('autobio/memory', tick({ id: 'L1-0' }))
+
+    seedFromLog(store, live)
+
+    const summaries = seededSummaries(store)
+    expect(summaries).toHaveLength(1)
+    expect(summaries[0]?.sourceIds).toEqual(['record-000000000000', 'record-000000000001'])
   })
 
   it('ignores an unrelated event that shares the memory event\'s shape', () => {
@@ -435,6 +507,24 @@ describe('seedFromLog', () => {
 
     // One past the highest index, so a resumed run cannot re-issue an id.
     expect(store.getStateJson(slots().counter.id)).toBe(5)
+  })
+
+  it('counts the recollections seeding drops, because they own their ids', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('seed-counter-dropped')
+    live.append('autobio/memory', tick({ id: 'L1-0', range: { firstSeq: ask, lastSeq: answer } }))
+    // A recollection the log names but nothing on the surface accounts for: seeding
+    // drops it, and it still holds its index. Advancing the counter only over what
+    // survives would put the next mint back on `L1-5`, writing a second recollection
+    // under a name the log already used — and the deduplication that reads this log
+    // back would then keep whichever record it prefers.
+    live.append('autobio/memory', tick({ id: 'L1-5', range: { firstSeq: ask + 900, lastSeq: answer + 900 } }))
+    live.append('autobio/memory', tick({ id: 'L1-1', range: { firstSeq: ask, lastSeq: answer } }))
+
+    seedFromLog(store, live)
+
+    expect(seededSummaries(store).map(entry => entry.id)).toEqual(['L1-0', 'L1-1'])
+    expect(store.getStateJson(slots().counter.id)).toBe(6)
   })
 
   it('stores the library\'s block vocabulary, not the harness\'s', () => {

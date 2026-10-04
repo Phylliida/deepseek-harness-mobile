@@ -10,8 +10,11 @@
  *    and asks for no fold there, which is what keeps a replay from re-minting
  *    everything a previous run folded.
  * 2. Memory replay — every `autobio/memory` event becomes a `SummaryEntry`. A
- *    recollection cannot be derived (minting calls a model), so the event
- *    payload *is* the archive: content, level, and the seq range it covered.
+ *    recollection cannot be derived (minting calls a model), so the event payload
+ *    *is* the archive: content, level, and the seq range it covered. Replay also
+ *    rebuilds the pyramid's links: each entry names the recollections it stands over,
+ *    and every one of those is stamped with the parent that took it, which is what a
+ *    later open reads to tell its frontier from what the pyramid already consolidated.
  *
  * Both passes store the library's block vocabulary rather than the harness's,
  * because the library reads its own names only — see {@link toMembraneBlock}.
@@ -95,53 +98,58 @@ export function seedFromLog(store: LogStore, session: Session): {
   const surface = [...idAtSeq].sort((a, b) => a[0] - b[0])
 
   const known = new Map<string, RecollectionRange>()
-  const coverage = surfaceGround(session)
-  let counter = 0
+  const folds = foldNodes(session)
+  const children = new Map<string, string[]>()
+  const logged = readMemoryLog(session)
 
-  for (const memory of readMemoryLog(session)) {
-    const legacy = legacyRange(session, coverage, memory.id)
-    const range = memory.range ?? legacy?.covered
+  for (const memory of logged) {
+    const landed = folds.get(memory.id)
+    const range = memory.range ?? landed?.covered
     if (range === undefined) continue
     const { firstSeq, lastSeq } = range
-    // A minted range is recorded by the mint itself, so the node that landed it is
-    // the only one that could have: no reader needed.
-    const landedAt = legacy?.at
-    // The interval a child's node has to fall inside. For a minted range that is
-    // the range itself; for a legacy fold it is the envelope its node cited, which
-    // is where its children's nodes sit — the expanded ground starts at the events
-    // underneath them.
-    const widened = legacy?.cited ?? range
+    // Two spans, because a recollection needs both and they are not the same one.
+    // `range` is what the entry says it stood for: a mint's own stamp, which is the
+    // union of the ground its children stand over, or the ground a legacy fold took.
+    // `cited` is the envelope its node named, which is where its children's nodes sit;
+    // an unlanded mint cites nothing and its range is the whole of it.
+    const cited = landed?.cited ?? range
 
-    // Message ids when nothing has folded the ground, and the ids still on the
-    // surface when something has — an L1 above a fold is not a leaf the recall
-    // curve can walk. Child recollections when the ground is summaries.
-    const covered = memory.level === 1
+    // Message ids when nothing has folded the ground, and the ids still on the surface
+    // when something has — an L1 above a fold is not a leaf the recall curve can walk.
+    // Every level above names recollections, and the ones it names are the outermost
+    // inside its interval.
+    const sources = memory.level === 1
       ? slice(surface, firstSeq, lastSeq).map(([, id]) => id)
-      : [...known]
-        .filter(([, child]) => child.at !== undefined && child.at >= widened.firstSeq && child.at <= widened.lastSeq)
-        .map(([id]) => id)
+      : childrenOf([...known].filter(([, child]) => child.covered.firstSeq >= firstSeq && child.covered.lastSeq <= lastSeq))
 
-    // Skipped, not stubbed: an entry citing ground that does not exist would have
-    // no sources to resolve and no range to cover, and `recallCurveLeafIds`
-    // rejects it anyway (its `sourceRange` could not bound its `sourceIds`).
-    // A non-empty list always has both bounds, so these two stand in for it.
-    const first = covered.at(0)
-    const last = covered.at(-1)
-    // A recollection naming nothing is left out of `known` as well as out of the
-    // store: an entry with no sources would have no covered span, and the planner
-    // reads that span to decide what ground is already spoken for.
+    // Skipped, not stubbed: an entry citing ground that does not exist would have no
+    // sources to resolve and no range to cover, and `recallCurveLeafIds` rejects it
+    // anyway (its `sourceRange` could not bound its `sourceIds`). A non-empty list
+    // always has both bounds, so these two stand in for it. A recollection naming
+    // nothing is left out of `known` as well: an entry with no sources would have no
+    // covered span, and the planner reads that span to decide what ground is spoken for.
+    const first = sources.at(0)
+    const last = sources.at(-1)
     if (first === undefined || last === undefined) continue
 
-    // Two spans, because a recollection needs both and they are not the same one.
-    // `covered` is the ground it stands over, which is what the planner has to
-    // compare a surface node against. `cited` is the interval its fold node named,
-    // and `at` is where that node landed. A higher recollection finds its children
-    // by `at`: it cites the child nodes it shadows, so membership is a question
-    // about nodes. Measured against the red-lemma log, which has 27 landed level-2
-    // recollections, that reading places children under 23 of them and adopts 117,
-    // where nesting on the cited intervals places 18 and adopts 55.
-    // Both bounds resolve — every id in `covered` came out of `surface`.
-    const coveredSeq = { firstSeq: seqOf.get(first) as number, lastSeq: seqOf.get(last) as number }
+    // The messages the sources bottom out in, which is what `sourceRange` holds:
+    // upstream stamps a merge with the leaves under its first and last source, and
+    // `recallCurveLeafIds` reads a range naming anything else as an entry with no
+    // walkable leaves. A source that is a message is its own leaf, and one naming a
+    // recollection is that recollection's leaves, so both bounds resolve: every source
+    // is a message id out of `surface` or an id `known` already holds.
+    const leaves = sources.flatMap(id => leavesOf(id, known))
+    const leafFirst = leaves.at(0) as string
+    const leafLast = leaves.at(-1) as string
+
+    // The ground it stands over, which is what the planner compares a surface node
+    // against and what the recollection above it finds it inside. The log seqs its
+    // leaves came from — that is the reading a source naming a recollection cannot give,
+    // since a recollection is a pyramid entry rather than a mirrored message.
+    const ground = {
+      firstSeq: seqOf.get(leafFirst) as number,
+      lastSeq: seqOf.get(leafLast) as number,
+    }
 
     store.appendToStateJson(ids.summaries.id, {
       id: memory.id,
@@ -149,16 +157,51 @@ export function seedFromLog(store: LogStore, session: Session): {
       content: memory.content,
       tokens: memory.tokens,
       sourceLevel: memory.level - 1,
-      sourceIds: covered,
-      sourceRange: { first, last },
+      sourceIds: sources,
+      sourceRange: { first: leafFirst, last: leafLast },
       created: memory.created,
     } satisfies SummaryEntry)
 
-    known.set(memory.id, { covered: coveredSeq, cited: widened, ...(landedAt === undefined ? {} : { at: landedAt }) })
-    counter = Math.max(counter, Number(/-(\d+)$/.exec(memory.id)?.[1] ?? -1) + 1)
+    for (const child of sources) {
+      const parented = children.get(child)
+      if (parented === undefined) children.set(child, [memory.id])
+      else parented.push(memory.id)
+    }
+    known.set(memory.id, {
+      covered: ground,
+      cited,
+      leaves,
+      ...(landed === undefined ? {} : { at: landed.at }),
+    })
   }
 
-  store.setStateJson(ids.counter.id, counter)
+  // A merged child is what makes its parent the entry standing over that ground:
+  // the library reads the pointer (`getSummaryParentId`) to decide what is left to
+  // consolidate, and reads `mergedInto` directly on the merge ladder. Left unset, a
+  // seeded pyramid looks like an unmerged backlog and opening it repopulates the
+  // merge queue over children it already merged — one compression call per reopen.
+  // The deepest parent is the one that stands, because a parent minted after a
+  // child absorbed it is the node the pyramid narrowed to.
+  for (const [child, parents] of children) {
+    const rows = store.getStateJson(ids.summaries.id) as SummaryEntry[]
+    const at = rows.findIndex(entry => entry.id === child)
+    /* v8 ignore next -- unreachable: a child is named by an entry this loop wrote
+       into the slot, and nothing between the two writes removes one. */
+    if (at < 0) continue
+    store.editStateItem(
+      ids.summaries.id,
+      at,
+      Buffer.from(JSON.stringify({ ...rows[at] as SummaryEntry, mergedInto: parents.at(-1) as string })),
+    )
+  }
+
+  // One past the highest index the log holds, whether or not that recollection
+  // reached the store: one seeding drops still owns its id, and a run that reissued
+  // it would write two mints under the same name.
+  store.setStateJson(ids.counter.id, 1 + logged.reduce(
+    (highest, memory) => Math.max(highest, Number(/-(\d+)$/.exec(memory.id)?.[1] ?? -1)),
+    -1,
+  ))
   return { seqOf, known }
 }
 
@@ -414,11 +457,26 @@ function slice(surface: ReadonlyArray<readonly [number, string]>, firstSeq: numb
  * session refuses a citation that is not strictly earlier than the node citing it
  * (`sourceEventSeqs must reference earlier events`), so every expansion step
  * descends in seq and the walk terminates.
+ *
+ * Expanded once per seq and remembered, because the same nodes are reached again
+ * from every fold above them.
  */
-function groundOf(events: ReadonlyMap<number, SessionEvent>, seq: number): readonly number[] {
+function groundOf(
+  events: ReadonlyMap<number, SessionEvent>,
+  seq: number,
+  expanded: Map<number, readonly number[]>,
+): readonly number[] {
+  const remembered = expanded.get(seq)
+  /* v8 ignore next -- the memo hit: a seq reached twice in one walk is what the map
+     is for, and it answers with what the expansion below would recompute. */
+  if (remembered !== undefined) return remembered
   const event = events.get(seq)
   const sources = event !== undefined && isReplacementSurfaceEvent(event) ? event.sourceEventSeqs : undefined
-  return sources?.length ? sources.flatMap(source => groundOf(events, source)) : [seq]
+  const ground = sources?.length
+    ? sources.flatMap(source => groundOf(events, source, expanded))
+    : [seq]
+  expanded.set(seq, ground)
+  return ground
 }
 
 /**
@@ -434,54 +492,121 @@ function groundOf(events: ReadonlyMap<number, SessionEvent>, seq: number): reado
 export function surfaceGround(session: Session): Map<number, readonly number[]> {
   const events = new Map(session.events.map(event => [event.seq, event]))
   const coverage = new Map<number, readonly number[]>()
-  for (const seq of session.surface.nodes) coverage.set(seq, groundOf(events, seq))
+  const expanded = new Map<number, readonly number[]>()
+  for (const seq of session.surface.nodes) coverage.set(seq, groundOf(events, seq, expanded))
   return coverage
 }
 
+/** Where one fold node landed, and the ground it took. */
+interface FoldNode {
+  readonly covered: { readonly firstSeq: number; readonly lastSeq: number }
+  readonly cited: { readonly firstSeq: number; readonly lastSeq: number }
+  /** Log seq of the node itself. */
+  readonly at: number
+}
+
 /**
- * The ranges of a recollection minted before the log recorded one.
- *
- * `covered` is the ground the fold took, which is what the planner compares a
- * surface node against. It is the cited seqs *expanded* through
- * {@link surfaceGround}: a pre-rewrite node cites the child fold nodes it shadows
- * as readily as it cites raw events, and reading those citations as seqs reports
- * the interval the parent named rather than the ground it took. The two are not
- * the same interval — `L2-6` cites `6709..54199` while the ground it stands over
- * is `249..49115`, which is ground its own child already owned.
- *
- * `cited` is that unexpanded envelope, and it is the one a higher recollection's
- * interval has to be measured against: a child is found by the seq its own node
- * landed on, and those nodes sit at the cited bounds. Collapsing the two loses
- * the children in exactly the fold-over-fold case that matters.
+ * Every fold node in the log, by the recollection it names. Read once per replay
+ * because each recollection asks for its own node and each answer is a scan of the
+ * whole log otherwise.
  *
  * The node is named by the `[Recall id]` header in its text: a pre-rewrite node
  * carries a `compactionId` of its own form (`autobio-session-<id>-<n>`, which
  * `foldIdOf` does not match — measured on the red-lemma log, all 160 fold nodes
  * name themselves the old way), so the header answers for the whole legacy set.
- * Unlanded mints are dropped: nothing in the log says what ground they stood
- * for.
+ * A node that names an id in its source is read only there: the prose is a
+ * fallback for nodes that name nothing, never a second opinion. The first node to
+ * answer for an id wins, because a recollection is landed once.
+ *
+ * `covered` is the ground the fold took, which is what the planner compares a
+ * surface node against. It is the cited seqs *expanded* the way {@link groundOf}
+ * expands any node: a pre-rewrite node cites the child fold nodes it shadows as readily
+ * as it cites raw events, and reading those citations as seqs reports the interval the
+ * parent named rather than the ground it took — the two are not the same interval, and
+ * `L2-6` on the red-lemma log cites `6709..54199` for ground of `249..49115`. `cited` is
+ * that unexpanded envelope, and it is the one the entry reports as the interval it named.
  */
-function legacyRange(
-  session: Session,
-  coverage: ReadonlyMap<number, readonly number[]>,
-  id: string,
-): { covered: { firstSeq: number; lastSeq: number }; cited: { firstSeq: number; lastSeq: number }; at: number } | undefined {
+function foldNodes(session: Session): Map<string, FoldNode> {
+  const folds = new Map<string, FoldNode>()
+  const events = new Map(session.events.map(event => [event.seq, event]))
+  const expanded = new Map<number, readonly number[]>()
   for (const event of session.events) {
     if (!isReplacementSurfaceEvent(event)) continue
-    // A node that names an id in its source is read only there: the prose is a
-    // fallback for nodes that name nothing, never a second opinion.
-    if ((foldIdOf(event) ?? recallHeaderId(event)) !== id) continue
+    const id = foldIdOf(event) ?? recallHeaderId(event)
+    if (id === undefined || folds.has(id)) continue
     // A replacement cites every node it shadowed or it does not land, so the list
     // to bound is always here: the session refuses a replace that names no ground.
     const sources = event.sourceEventSeqs as number[]
-    const ground = sources.flatMap(seq => coverage.get(seq) ?? [seq])
-    return {
+    const ground = sources.flatMap(seq => groundOf(events, seq, expanded))
+    folds.set(id, {
       covered: { firstSeq: Math.min(...ground), lastSeq: Math.max(...ground) },
       cited: { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) },
       at: event.seq,
-    }
+    })
   }
-  return undefined
+  return folds
+}
+
+/**
+ * The recollections one recollection of recollections stands over.
+ *
+ * These are the outermost of the recollections inside it: an intermediate one carries
+ * its own children's ground, so it is the layer the level above consolidated, and the
+ * ones beneath it stay its own. Measured against the red-lemma log, which has 27
+ * landed level-2 recollections, that reading places children under 23 of them and
+ * adopts 117, where reading the interval a landed fold cites places 18 and adopts 55.
+ *
+ * Order is the pyramid's own, so the ids come out in the order the leaves they stand
+ * over were laid down — `recallCurveLeafIds` reads a parent's leaves as the
+ * concatenation of its children's, and a child out of place puts its leaves out of
+ * order there.
+ *
+ * @param inside - the recollections whose ground falls inside the interval being read,
+ * oldest first.
+ * @returns the ids of the layer, as the parent cites them.
+ */
+function childrenOf(inside: ReadonlyArray<readonly [string, RecollectionRange]>): string[] {
+  const layer: Array<readonly [string, RecollectionRange]> = []
+  for (const [id, child] of inside) {
+    const nested = layer.some(([, kept]) => again(kept.covered, child.covered))
+    /* v8 ignore next -- the `if` branch: both outcomes are ordinary, and the one that
+       pushes is the common case a log of layers is made of. */
+    if (!nested) layer.push([id, child])
+  }
+  return layer.map(([id]) => id)
+}
+
+/**
+ * Whether one recollection's ground holds another's, the two being distinct entries.
+ *
+ * Equal spans count as neither: a recollection whose ground is exactly its child's stands
+ * over that child, which is what a fold whose node cited only the one child it reached
+ * leaves behind, and both are layers of the interval above them — the ground one takes
+ * is not what separates one layer from the next.
+ *
+ * @param outer - the ground of the recollection already in the layer.
+ * @param inner - the ground of the recollection being placed.
+ * @returns whether `inner` sits strictly inside `outer`.
+ */
+function again(outer: { firstSeq: number; lastSeq: number }, inner: { firstSeq: number; lastSeq: number }): boolean {
+  /* v8 ignore next 4 -- the second bound and the `lastSeq` disjunct: a candidate whose
+     ground starts inside the parent's always ends inside it too, because a span is the
+     union of the spans beneath it. Equal spans are the legacy fold that re-took one child
+     whole, and they reach the disjunct's left half. */
+  return inner.firstSeq >= outer.firstSeq
+    && inner.lastSeq <= outer.lastSeq
+    && (inner.firstSeq > outer.firstSeq || inner.lastSeq < outer.lastSeq)
+}
+
+/**
+ * The message ids one source bottoms out in.
+ *
+ * A message is its own leaf; a recollection's are its own sources', which is how
+ * `recallCurveLeafIds` expands it. Every source seeding writes is one or the other,
+ * so the empty answer is for an archive that has drifted out from under the log.
+ */
+function leavesOf(id: string, known: ReadonlyMap<string, RecollectionRange>): readonly string[] {
+  return known.get(id)?.leaves ?? [id]
 }
 
 /** The recollection a pre-rewrite fold node names in its text, if it names one. */
@@ -511,9 +636,12 @@ const RECALL_HEADER = /^\[Recall ([^\]\s]+)\]/
  * coverage from the mint event's own stamp — the log holds no other record of
  * which surface a mint replaced.
  *
- * Duplicate ids are dropped rather than merged: a pre-rewrite log can hold
- * several mints of one recollection id, and the first is the one whose recorded
- * range matches the content kept.
+ * One record per id: a pre-rewrite log can hold several mints of one recollection,
+ * and the copy that carries a range is the one whose content seeding can place. A
+ * later range-less mint never displaces an earlier ranged one, and a ranged mint
+ * replaces a range-less one of the same id — the reverse order would leave the
+ * ground of a recollection the log does state uncited, and seeding drops what it
+ * cannot place.
  *
  * Exported for the replay tests: a mint's level is a property of the event, and
  * asserting it here keeps the case from being entangled with how the store
@@ -529,7 +657,8 @@ export function readMemoryLog(session: Session): LoggedMemory[] {
   for (const event of session.events) {
     if (event.type !== 'autobio/memory') continue
     const mint = event.data.memory
-    if (!mint || memories.has(mint.id)) continue
+    if (!mint) continue
+    if (mint.sourceRange === undefined && memories.get(mint.id)?.range !== undefined) continue
     memories.set(mint.id, {
       id: mint.id,
       level: mint.level || Number(LEVEL_PREFIX.exec(mint.id)?.[1] ?? 1),

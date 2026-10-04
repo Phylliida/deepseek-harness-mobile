@@ -126,16 +126,21 @@ describe('seeding is a function of the log', () => {
     const { known } = seedFromLog(store, live)
 
     expect([...known.keys()].sort()).toEqual(['L1-0', 'L1-1'])
-    // Three fields, and the differences between them are the whole point. The ground
-    // it stands over is the second exchange; the interval it cites reaches forward to
-    // the node that landed it, because the first fold's ground was gone from the
-    // surface and that node was all there was left to name for it; and `at` is the
-    // seq of the node that landed it, which is how a higher recollection finds this
-    // one. `at` is not inside `cited`: a fold lands after the ground it names, so the
-    // node is always past the interval it cites.
+    // Three fields, and the differences between them are the whole point. The ground it
+    // stands over is both exchanges, because the node it cites stands for the first one
+    // and expanding a citation is how the ground underneath a node is read. The interval
+    // it cites reaches forward to that node, because the first fold's ground was gone
+    // from the surface and the node was all there was left to name for it. And `at` is
+    // the seq of the node that landed this one, which is how a higher recollection finds
+    // it. `at` is not inside `cited`: a fold lands after the ground it names, so the node
+    // is always past the interval it cites.
     expect(known.get('L1-1')).toEqual({
-      covered: { firstSeq: second.ask, lastSeq: second.answer },
+      covered: { firstSeq: first.ask, lastSeq: second.answer },
       cited: { firstSeq: second.ask, lastSeq: firstNode },
+      // The messages its sources bottom out in, which is what a range above it bounds
+      // itself by: the first fold's node resolves back to the exchange it stands for,
+      // so a parent reads ground rather than the node standing in for it.
+      leaves: ['record-000000000000', 'record-000000000001', 'record-000000000002', 'record-000000000003'],
       at: landed,
     })
     expect(landed).toBeGreaterThan(firstNode)
@@ -152,24 +157,21 @@ describe('seeding is a function of the log', () => {
     }
   })
 
-  it('stands a higher recollection over the children whose nodes its interval takes in', () => {
-    // A level-2 fold comes out of the log citing the child nodes it shadowed, so a
-    // parent adopts the children those nodes landed — membership is a question about
-    // nodes, not about the ground they stand for. Measured on the red-lemma log,
-    // where 27 level-2 recollections landed, this reading places children under 23 of
-    // them and adopts 117, against 18 and 55 for nesting on the cited intervals.
+  it('stands a higher recollection over the children whose ground its interval takes in', () => {
+    // A parent finds the layer beneath it by what each recollection stands over, and a
+    // child it cannot account for stays its own entry. Measured on the red-lemma log,
+    // where 27 level-2 recollections landed, that reading places children under 23 of
+    // them and adopts 117.
     const live = Session.create(SessionId('acceptance-levels'))
     const first = exchange(live, 0)
     fold(live, 'L1-0', 'first ground', [first.ask, first.answer])
     const between = exchange(live, 1)
     fold(live, 'L1-1', 'second ground', [between.ask, between.answer], 1)
 
-    // Minted with no range of its own, so the interval its own node cites is the only
-    // thing that can place it — the child-derived path, not a second level-1 run.
-    live.append('autobio/memory', tick('L2-0', 2))
-    // A replace cannot name a node the surface no longer holds, so this one reaches
-    // back no further than the second child's node — the furthest back the surface
-    // still goes. `assertProvenance` wants every node the replace shadows named.
+    // Minted with a range of its own that reaches only the second exchange, which is
+    // the ground it was distilled from. Its own node lands on the child node the
+    // surface still holds, because a replace cannot name a node that is gone.
+    live.append('autobio/memory', tick('L2-0', 2, { firstSeq: between.ask, lastSeq: between.answer }))
     const parentStart = live.events.at(-2)?.seq as number
     const shadowed = live.events.filter(event => event.seq >= parentStart && event.type === 'assistant/message')
     live.append('assistant/message', {
@@ -188,11 +190,8 @@ describe('seeding is a function of the log', () => {
     const { known } = seedFromLog(store, live)
 
     expect([...known.keys()].sort()).toEqual(['L1-0', 'L1-1', 'L2-0'])
-    // Child nodes land at 5 and 11 and the parent's replace names only 11, because the
-    // surface no longer holds anything older. So the parent's interval takes in the
-    // second child and not the first, and cites recollections rather than messages —
-    // which is the harder half of the rule: a parent stands over what its own interval
-    // reaches, and a child it cannot account for stays its own entry.
+    // The parent's interval takes in the second child's ground and not the first's, so
+    // it cites recollections rather than messages — the harder half of the rule.
     expect(seededSummaries(store).at(-1)?.sourceIds).toEqual(['L1-1'])
     expect(seededSummaries(store).at(-1)?.sourceLevel).toBe(1)
   })
