@@ -510,13 +510,11 @@ interface FoldNode {
  * because each recollection asks for its own node and each answer is a scan of the
  * whole log otherwise.
  *
- * The node is named by the `[Recall id]` header in its text: a pre-rewrite node
- * carries a `compactionId` of its own form (`autobio-session-<id>-<n>`, which
- * `foldIdOf` does not match — measured on the red-lemma log, all 160 fold nodes
- * name themselves the old way), so the header answers for the whole legacy set.
- * A node that names an id in its source is read only there: the prose is a
- * fallback for nodes that name nothing, never a second opinion. The first node to
- * answer for an id wins, because a recollection is landed once.
+ * The node is named the way {@link foldIdOf} reads it: by the `compactionId` its
+ * message source carries, or — for a node written before that convention landed,
+ * whose `autobio-session-<id>-<n>` id matches no prefix — by the `[Recall <id>]`
+ * header in its text. The first node to answer for an id wins, because a
+ * recollection is landed once.
  *
  * `covered` is the ground the fold took, which is what the planner compares a
  * surface node against. It is the cited seqs *expanded* the way {@link groundOf}
@@ -532,7 +530,7 @@ function foldNodes(session: Session): Map<string, FoldNode> {
   const expanded = new Map<number, readonly number[]>()
   for (const event of session.events) {
     if (!isReplacementSurfaceEvent(event)) continue
-    const id = foldIdOf(event) ?? recallHeaderId(event)
+    const id = foldIdOf(event)
     if (id === undefined || folds.has(id)) continue
     // A replacement cites every node it shadowed or it does not land, so the list
     // to bound is always here: the session refuses a replace that names no ground.
@@ -609,26 +607,7 @@ function leavesOf(id: string, known: ReadonlyMap<string, RecollectionRange>): re
   return known.get(id)?.leaves ?? [id]
 }
 
-/** The recollection a pre-rewrite fold node names in its text, if it names one. */
-function recallHeaderId(event: SessionEvent): string | undefined {
-  if (event.type !== 'assistant/message') return undefined
-  const texts = event.data.message.content.flatMap(block => (block.type === 'text' ? [block.text] : []))
-  return texts.map(text => RECALL_HEADER.exec(text)?.[1]).find(id => id !== undefined)
-}
-
 const LEVEL_PREFIX = /^L(\d+)-/
-
-/**
- * The header a fold node's text leads with, as {@link foldBlocks} writes it. The
- * id is matched without whitespace or a closing bracket so a recollection the
- * body happens to mention cannot be mistaken for the one the node stands for —
- * this reader only ever runs as the fallback for a node that names no id of its
- * own.
- *
- * Exported for the replay tests, which read the header a pre-rewrite log names
- * its folds with.
- */
-const RECALL_HEADER = /^\[Recall ([^\]\s]+)\]/
 
 /**
  * The recollections one log records, keyed by id and deduplicated, in mint order.

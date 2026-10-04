@@ -29,10 +29,13 @@ import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { RequestContext, Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+// Type-only: resolves the token meter's Context declaration, which the planner's
+// node price comes from.
+import type {} from '@deepseek-ai/dsh-token-meter'
 import { applyFold } from './apply.ts'
 import { createBridge } from './bridge.ts'
 import { resolveConfig } from './config.ts'
-import { planFolds } from './plan.ts'
+import { planFolds, priceSurfaceNode } from './plan.ts'
 import { appendSurfaceNode, recollectionRows, resolveRange, seedFromLog } from './seed.ts'
 import { createStore } from './store.ts'
 import type { LogStore } from './store.ts'
@@ -48,7 +51,7 @@ export type {
 export const name = 'compaction-autobiographical'
 
 /** Services this engine needs before it can fold anything. */
-export const inject = ['llm']
+export const inject = ['llm', 'tokenMeter']
 
 /** Streamed characters buffered before one live record is appended: a record per chunk would put a token-size row in the durable log. */
 const PROGRESS_FLUSH_CHARS = 1000
@@ -236,11 +239,18 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 
     const turn = currentTurn(session)
     const { resolutions, summaries } = internals(runtime.strategy)
+    // One op per pass until the multi-op loop lands: planning and applying are
+    // correct for several — the spans come out disjoint and `applyFolds` lands
+    // each in its own bracket — but taking one keeps a pass's cost and its
+    // bracket count predictable while that loop is still being built.
     const [op] = planFolds(runtime.store, session, {
       resolutions,
       summaries,
       seeded: runtime.known,
       seqOf: runtime.seqOf,
+      // The fold's shadow price is the meter's own node price, so the surface
+      // delta it is delta-accounted against is measured with one estimator.
+      price: priceSurfaceNode,
     })
     if (op === undefined) return null
     this.ctx.logger.info(

@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import AutobiographicalCompactionEngine from '../src/index.ts'
 import { describeJsonFailures } from '../src/index.ts'
 import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
-import { build, contextOf, summarizer } from './harness.ts'
+import { build, contextOf, provideTokenMeter, summarizer } from './harness.ts'
 
 /** Let the fire-and-forget tick chain finish. It is never awaited by a pass. */
 async function settled(): Promise<void> {
@@ -398,6 +398,7 @@ describe('memory formation behind the pass', () => {
     session.append('autobio/memory', { ...stats, attempt: 4 })
     const ctx = new Context()
     ctx.provide('llm', summarizer([]) as never)
+    provideTokenMeter(ctx)
     const engine = new AutobiographicalCompactionEngine(ctx, {
       operatingWindowTokens: 700,
       reserveTokens: 128,

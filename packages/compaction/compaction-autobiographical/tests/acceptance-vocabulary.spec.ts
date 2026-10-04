@@ -21,7 +21,7 @@ import { describe, expect, it, vi } from 'vitest'
 import AutobiographicalCompactionEngine from '../src/index.ts'
 import { seedFromLog } from '../src/seed.ts'
 import { createStore } from '../src/store.ts'
-import { summarizer } from './harness.ts'
+import { provideTokenMeter, summarizer } from './harness.ts'
 
 const ROUTE = { provider: 'test', model: 'test-model' }
 
@@ -81,6 +81,7 @@ async function driven(session: Session): Promise<GenerateOptions[]> {
   const calls: GenerateOptions[] = []
   const ctx = new Context()
   ctx.provide('llm', summarizer(calls) as never)
+  provideTokenMeter(ctx)
   const engine = new AutobiographicalCompactionEngine(ctx, {
     operatingWindowTokens: 700,
     reserveTokens: 128,

@@ -4,12 +4,16 @@
  */
 
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { SummaryEntry } from '@animalabs/context-manager'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
-import { applyFold } from '../src/apply.ts'
+import { applyFold, applyFolds } from '../src/apply.ts'
 import { OPERATING_WINDOW_CAP, resolveConfig } from '../src/config.ts'
+import { DivergenceError } from '../src/plan.ts'
 import type { FoldOp } from '../src/plan.ts'
+
+const ROUTE = { provider: 'test', model: 'test-model' }
 
 /** A session holding one user and one assistant append. */
 function live(): { session: Session; ask: number; answer: number } {
@@ -35,9 +39,7 @@ function op(overrides: Partial<FoldOp> & Pick<FoldOp, 'startSeq' | 'endSeq' | 's
     summaryId: 'L1-0',
     level: 1,
     shadowedTokens: 10,
-    // The cases that care about surface order set this; the rest fold the
-    // log-seq order, where position and seq agree.
-    span: { from: overrides.startSeq, to: overrides.endSeq },
+    coveredNodes: overrides.shadowedSeqs,
     summary: {
       id: 'L1-0',
       level: 1,
@@ -104,26 +106,63 @@ describe('applyFold', () => {
     expect(node?.type === 'assistant/message' && node.data.turn).toBe(0)
   })
 
-  // The two refusals below belong to the session, which resolves a replacement's
-  // range positionally against its own live surface and refuses a range that
-  // names a node the op did not cite. Applying does not re-prove either, so these
-  // pin that the session still catches them.
-  it('refuses a range that does not resolve on the live surface', () => {
+  // Everything below is refused before the first bracket event reaches the log.
+  // The session would refuse these mid-bracket otherwise, and a refused replace
+  // leaves a `compaction/start` no `compaction/end` ever closes: the compaction
+  // invariant then rejects every later bracket and turn boundary, so the session
+  // is wedged for good rather than merely unfolded.
+  it('refuses a span naming a node the live surface does not hold', () => {
     const { session, ask, answer } = live()
-    const before = session.surface.nodes.length
+    const before = session.events.length
 
-    expect(() => applyFold(session, op({ startSeq: ask + 900, endSeq: answer, shadowedSeqs: [] }), null, 0, { provider: 'test', model: 'test-model' }))
-      .toThrow(/not found in surface/)
-    // The refusal comes from the replacement node, so the bracket and the
-    // metered summary are already down. What must not exist is the node itself:
-    // no node landed, so the surface is exactly as it was.
-    expect(session.surface.nodes.length).toBe(before)
+    expect(() => applyFold(session, op({ startSeq: ask + 900, endSeq: answer, shadowedSeqs: [ask + 900, answer] }), null, 0, ROUTE))
+      .toThrow(DivergenceError)
+    expect(session.events.length).toBe(before)
+    expect(session.events.filter(event => event.type.startsWith('compaction/'))).toEqual([])
   })
 
-  it('refuses a range that would silently swallow an uncited node', () => {
+  it('refuses a span that does not cover the nodes the op cites', () => {
     const { session, ask, answer } = live()
 
-    expect(() => applyFold(session, op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask] }), null, 0, { provider: 'test', model: 'test-model' }))
-      .toThrow(new RegExp(`must include every shadowed surface node; missing ${answer}`))
+    // The session resolves a replacement's range positionally and refuses a range
+    // that names a node the op did not cite, so an op whose span and citations
+    // disagree is a plan that cannot land.
+    expect(() => applyFold(session, op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask], coveredNodes: [ask] }), null, 0, ROUTE))
+      .toThrow(/spans 0..1 but covers 0/)
+    expect(session.events.filter(event => event.type.startsWith('compaction/'))).toEqual([])
+  })
+
+  it('refuses two folds claiming one surface node', () => {
+    const { session, ask, answer } = live()
+    const before = session.events.length
+    const held = op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask, answer] })
+
+    // Two nodes cannot replace one position, so the pair is refused as a batch:
+    // the first op's bracket is never opened, which is what keeps the refusal
+    // from stranding it.
+    expect(() => applyFolds(session, [held, { ...held, summaryId: 'L1-1' }], null, 0, ROUTE))
+      .toThrow(/two folds claim surface node/)
+    expect(session.events.length).toBe(before)
+  })
+
+  it('refuses fold content the session log cannot store', () => {
+    const { session, ask, answer } = live()
+    const before = session.events.length
+    // The strategy keeps whatever the provider streamed and the fold replays it
+    // verbatim, so a captured carrier is the one part of a fold this package does
+    // not build. The log accepts lossless JSON only, and the refusal has to happen
+    // before the bracket opens for the same reason as the range refusals.
+    const captured = [{
+      type: 'reasoning',
+      text: 'private thinking',
+      signature: { unserializable: true, toJSON: undefined, render: () => 'x' },
+    }] as unknown as ContentBlock[]
+    const held = { ...op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask, answer] }) }
+
+    expect(() => applyFold(session, {
+      ...held,
+      summary: { ...held.summary, responseContent: captured as never },
+    }, null, 0, ROUTE)).toThrow(/content the session log cannot store/)
+    expect(session.events.length).toBe(before)
   })
 })

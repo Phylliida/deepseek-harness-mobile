@@ -11,10 +11,12 @@
 import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { deriveEventMessage } from '@deepseek-ai/dsh-session/surface'
+import { estimateMessage } from '@deepseek-ai/dsh-token-meter/src/estimate.ts'
 import type { SummaryEntry } from '@animalabs/context-manager'
 import type { ContentBlock as MembraneBlock } from '@animalabs/membrane'
 import { describe, expect, it } from 'vitest'
-import { DivergenceError, foldBlocks, foldIdOf, planFolds } from '../src/plan.ts'
+import { DivergenceError, foldBlocks, foldIdOf, planFolds, priceSurfaceNode } from '../src/plan.ts'
 import type { FoldOp, PlanInputs } from '../src/plan.ts'
 import type { RecollectionRange } from '../src/types.ts'
 import { SessionEvent } from '@deepseek-ai/dsh-session'
@@ -72,6 +74,31 @@ function toolRound(live: Session, id: string, step = 0): { call: number; result:
     message: createToolResultMessage({ callId: CallId(id), content: [{ type: 'text', text: 'ok' }], isError: false }),
   }, { surfaceOp: 'append' }).seq
   return { call, result }
+}
+
+/**
+ * One parallel tool round: the assistant declares two calls on one node, and
+ * each result lands on its own node after it. The shape a fan-out takes, and the
+ * one whose results a recollection can start in the middle of.
+ */
+function parallelRound(live: Session, ids: readonly string[], step = 1): { call: number; results: number[] } {
+  const call = live.append('assistant/message', {
+    turn: 0,
+    step,
+    message: createAssistantMessage({
+      content: [
+        { type: 'text', text: 'let me look twice' },
+        ...ids.map(id => ({ type: 'tool-call' as const, id: CallId(id), name: 'read', arguments: '{}' })),
+      ],
+      source: ROUTE,
+    }),
+  }, { surfaceOp: 'append' }).seq
+  const results = ids.map(id => live.append('tool/result', {
+    turn: 0,
+    step,
+    message: createToolResultMessage({ callId: CallId(id), content: [{ type: 'text', text: 'ok' }], isError: false }),
+  }, { surfaceOp: 'append' }).seq)
+  return { call, results }
 }
 
 /**
@@ -173,6 +200,9 @@ function plan(
     summaries,
     seeded: coverage,
     seqOf,
+    // The fixture's surface is priced the way the engine prices it, so a test
+    // that reads a token count reads the meter's own number.
+    price: priceSurfaceNode,
   }
   return planFolds(store, live, inputs)
 }
@@ -210,6 +240,35 @@ describe('foldBlocks', () => {
     expect(foldBlocks(summary('L1-0', 1))).toEqual([
       { type: 'text', text: '[Recall L1-0]\n\ncontent of L1-0' },
     ])
+  })
+})
+
+describe('priceSurfaceNode', () => {
+  it('prices a tool round the way the token meter prices the same nodes', () => {
+    const live = started('plan-price')
+    const ask = userEvent(live, 'ask')
+    const round = toolRound(live, 'call-price', 1)
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
+    const [op] = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map(ids.map(id => [id, 1])),
+      summaries: [summary('L1-0', 1)],
+      seeded: new Map([['L1-0', span(ask, round.result)]]),
+      seqOf,
+    })
+
+    // What the meter prices the shadowed nodes at, node for node.
+    const events = new Map(live.events.map(event => [event.seq, event]))
+    const priced = (op?.shadowedSeqs ?? []).reduce((total, seq) => {
+      const event = events.get(seq)
+      return total + estimateMessage((event === undefined ? null : deriveEventMessage(event)) as never)
+    }, 0)
+    // Exactly the meter's own reading of the same nodes, because the fold's
+    // shadow price is subtracted from a surface the meter priced: a cheaper claim
+    // would report every fold as a shrinkage it did not achieve, and the old
+    // text-only price put a tool round at a fraction of this.
+    expect(op?.shadowedTokens).toBe(priced)
   })
 })
 
@@ -253,6 +312,7 @@ describe('planFolds', () => {
         summaries: [summary('L1-0', 1)],
         seeded: new Map([...known, ['L1-0', span(1, 2)]]),
         seqOf,
+        price: priceSurfaceNode,
       })
     }
 
@@ -274,23 +334,27 @@ describe('planFolds', () => {
     expect(() => plan(live, { level: 2, summaries: [summary('L1-0', 1)] })).toThrow(DivergenceError)
   })
 
-  it('passes over a recollection the pyramid has already merged upward', () => {
-    const live = started('plan-pick')
+  it('lets a merged recollection stand until the fold of its parent lands', () => {
+    const live = started('plan-merged-unlanded')
     const ask = userEvent(live, 'ask')
     const answer = textEvent(live, 'answer')
 
+    // `mergedInto` records formation, not representation: the parent's fold has
+    // not landed, so the child's node is still what the surface shows for this
+    // ground, and passing the child over would throw where a fold is exactly
+    // right. The case pins both pointer spellings, because the library writes
+    // `mergedInto` (deprecated) live and reads `parentId` as the alias.
     const ops = plan(live, {
       level: 1,
       summaries: [
         summary('L1-0', 1, { parentId: 'L2-0' }),
         // oxlint-disable-next-line typescript/no-deprecated -- the legacy alias this case pins
         summary('L1-1', 1, { mergedInto: 'L2-0' }),
-        summary('L1-2', 1),
       ],
-      ranges: new Map([['L1-2', span(ask, answer)]]),
+      ranges: new Map([['L1-1', span(ask, answer)]]),
     })
 
-    expect(ops.map(op => op.summaryId)).toEqual(['L1-2'])
+    expect(ops.map(op => op.summaryId)).toEqual(['L1-1'])
   })
 
   it('takes the recollection that stands over the message, not the level alone', () => {
@@ -319,6 +383,7 @@ describe('planFolds', () => {
     const { store, seqOf, known } = seeded(live)
     const ids = mirrored(store)
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1], [ids[2]!, 2]]),
       summaries: [summary('L1-0', 1), summary('L1-1', 2)],
       seeded: new Map([...known, ['L1-0', span(ask, answer)], ['L1-1', span(reply, reply)]]),
@@ -373,6 +438,7 @@ describe('planFolds', () => {
     // The recollection landed on the result alone — the call is a node the fold
     // begins after, and taking the result without it would leave half a round.
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(result, result)]]),
@@ -393,6 +459,7 @@ describe('planFolds', () => {
     // The picker resolved both messages at level 1 and remembered them as one
     // recollection, so the two runs coalesce rather than folding twice.
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(ask, answer)]]),
@@ -497,20 +564,180 @@ describe('planFolds', () => {
     expect(ops[0]?.shadowedSeqs).not.toContain(foreign)
   })
 
+  // Two recollections stand over one message: the later one is the entry the
+  // level resolves to, and both of them claim the same run. Only one node can
+  // replace a position, so the first op takes the ground and the second one —
+  // whose run is that same ground — has nothing left to fold.
+  // One recollection's claim reaches into the other's ground: the picker resolved
+  // one message to each of them, while the older one's range still covers both.
+  // Only the ground each op holds is folded — the shared message goes to the op
+  // that resolved it, and the older one keeps what is left.
+  it('folds the part of its run a sibling holds', () => {
+    const live = started('plan-shadow-overlap')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+
+    const ops = plan(live, {
+      summaries: [summary('L1-0', 1), summary('L1-1', 1)],
+      ranges: new Map([['L1-0', span(ask, answer)], ['L1-1', span(answer, answer)]]),
+    })
+
+    expect(ops.map(op => [op.summaryId, op.shadowedSeqs])).toEqual([
+      ['L1-0', [ask]],
+      ['L1-1', [answer]],
+    ])
+  })
+
+  it('yields a run a sibling already owns', () => {
+    const live = started('plan-shadow-slack')
+    const ask = userEvent(live, 'ask')
+
+    const ops = plan(live, {
+      summaries: [summary('L1-0', 1), summary('L1-1', 1)],
+      ranges: new Map([['L1-0', span(ask, ask)], ['L1-1', span(ask, ask)]]),
+    })
+
+    expect(ops.map(op => [op.summaryId, op.shadowedSeqs])).toEqual([['L1-1', [ask]]])
+  })
+
+  // The sibling boundary the widening pass has to respect from the other side:
+  // the second recollection's round is its own, and the first op stops at its
+  // ask rather than widening over it.
   it('stops widening where the next node belongs to a sibling fold', () => {
     const live = started('plan-shadow')
     const askA = userEvent(live, 'a')
     const a = toolRound(live, 'call-a', 1)
     const askB = userEvent(live, 'b')
     const b = toolRound(live, 'call-b', 2)
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
 
-    const ops = plan(live, {
+    // Each recollection resolves its own round, so the two folds are one op each
+    // and neither is the other's to take.
+    const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map([
+        [ids[0]!, 1], [ids[1]!, 1], [ids[3]!, 1], [ids[4]!, 1],
+      ]),
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
-      ranges: new Map([['L1-0', span(askA, a.call)], ['L1-1', span(askB, b.call)]]),
+      seeded: new Map([['L1-0', span(askA, a.call)], ['L1-1', span(askB, b.call)]]),
+      seqOf,
     })
 
-    expect(ops.find(op => op.summaryId === 'L1-0')?.shadowedSeqs).toEqual([askA, a.call, a.result])
-    expect(ops.find(op => op.summaryId === 'L1-1')?.shadowedSeqs).toEqual([askB, b.call, b.result])
+    // The first recollection stands over the ask alone and the second over the
+    // whole round: the first op takes its own ground and its round, and the
+    // second the rest — no node is folded twice.
+    expect(ops.map(op => [op.summaryId, op.shadowedSeqs])).toEqual([
+      ['L1-0', [askA, a.call, a.result]],
+      ['L1-1', [askB, b.call, b.result]],
+    ])
+  })
+
+  // Two recollections can stand over one run at one level: they resolve their own
+  // messages and the planner picks the standing entry from the level. Only one
+  // node can replace a position, so the later op yields its whole claim rather
+  // than fold part of it — a partial fold leaves the rest of that ground standing
+  // behind a node claiming all of it.
+  it('yields the whole claim to the op that owns it', () => {
+    const live = started('plan-two-owners')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const reply = userEvent(live, 'reply')
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
+
+    // Two recollections of one level over adjacent ground, both resolving their
+    // own messages: nothing overlaps, so both folds land, in plan order.
+    const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1], [ids[2]!, 1]]),
+      summaries: [summary('L1-0', 1), summary('L1-1', 1)],
+      seeded: new Map([['L1-0', span(ask, answer)], ['L1-1', span(reply, reply)]]),
+      seqOf,
+    })
+
+    expect(ops.map(op => [op.summaryId, op.shadowedSeqs])).toEqual([
+      ['L1-0', [ask, answer]],
+      ['L1-1', [reply]],
+    ])
+  })
+
+  // The parallel round P1 is about: one node asks for two tools, the results land
+  // on two nodes after it. A recollection covering the second result is half a
+  // round, and its call node is two nodes back rather than the one the old
+  // one-node reach looked at.
+  it('reaches the call node two nodes back for a parallel round', () => {
+    const live = started('plan-parallel')
+    const { call, results } = parallelRound(live, ['c1', 'c2'])
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
+    const second = results[1] as number
+
+    // Only the second result resolves: the picker covered the tail of the round.
+    const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map([[ids[2] as string, 1]]),
+      summaries: [summary('L1-0', 1)],
+      seeded: new Map([['L1-0', span(second, second)]]),
+      seqOf,
+    })
+
+    // Both calls, both results and the node declaring them, so the landed fold
+    // leaves no call visible without its tool message.
+    expect(ops[0]?.shadowedSeqs).toEqual([call, results[0], second])
+  })
+
+  // A pre-rewrite fold names its recollection in the text alone — its
+  // `autobio-session-*` compaction id matches no prefix — so a reader that only
+  // consults the source reads the node as ground and folds it a second time.
+  // A fold node belongs to the recollection it names, so taking one is the claim
+  // that this recollection stands over the ground that node stands for — with it,
+  // the nodes underneath, not just the node's place on the surface. Without those
+  // the replacement names ground no node of the surface covers, and the session
+  // refuses it.
+  it('names the ground under the sibling fold node it takes', () => {
+    const live = started('plan-foreign-node')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const { store, seqOf } = seeded(live)
+    // A recollection that landed over the ask before this planner ran.
+    const landed = foldNode(live, 'L1-9', [ask])
+
+    const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map([[mirrored(store)[0]!, 1], [mirrored(store)[1]!, 1]]),
+      summaries: [summary('L1-0', 1)],
+      seeded: new Map([['L1-0', span(ask, answer)]]),
+      seqOf,
+    })
+
+    expect(ops[0]?.shadowedSeqs).toEqual([landed.seq, answer])
+    expect(ops[0]?.coveredNodes).toEqual([landed.seq, ask, answer])
+  })
+
+  it('reads a pre-rewrite fold node off the header its text leads with', () => {
+    const live = started('plan-legacy')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const { store, seqOf } = seeded(live)
+    live.append('assistant/message', {
+      turn: 0,
+      step: 0,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: '[Recall L1-0] the ground this stands for' }],
+        source: { ...ROUTE, compactionId: 'autobio-session-L1-0-3' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: ask, end: answer }, sourceEventSeqs: [ask, answer] })
+
+    const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map([[mirrored(store)[0]!, 1], [mirrored(store)[1]!, 1]]),
+      summaries: [summary('L1-0', 1)],
+      seeded: new Map([['L1-0', span(ask, answer)]]),
+      seqOf,
+    })
+
+    expect(ops).toEqual([])
   })
 
   it('expands a landed fold to the ground it replaced', () => {
@@ -576,6 +803,7 @@ describe('planFolds', () => {
     // folding the message into a recollection that does not cover it, and beats
     // dropping it silently.
     const plan = (): FoldOp[] => planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[mirrored(store)[0]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map(),
@@ -597,6 +825,7 @@ describe('planFolds', () => {
     // result whose call sits one node before it — half a round, and the only
     // reason backward reach exists.
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[2]!, 1], [ids[3]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(second.call, second.result)]]),
@@ -618,6 +847,7 @@ describe('planFolds', () => {
     const { store, seqOf } = seeded(live)
 
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([]),
       summaries: [summary('L3-0', 3), summary('L2-0', 2)],
       seeded: new Map([
@@ -642,6 +872,7 @@ describe('planFolds', () => {
     const { store, seqOf } = seeded(live)
 
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[mirrored(store)[0]!, 1], [mirrored(store)[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(ask, answer)]]),
@@ -660,6 +891,7 @@ describe('planFolds', () => {
     const { store, seqOf } = seeded(live)
 
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[mirrored(store)[0]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(ask, ask)]]),
@@ -684,6 +916,7 @@ describe('planFolds', () => {
     const ids = mirrored(store)
 
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(ask, answer)]]),
@@ -703,6 +936,7 @@ describe('planFolds', () => {
     store.setStateJson(MESSAGES_STATE, rows.map((row, index) => (index === 1 ? { ...row, metadata: {} } : row)))
 
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(ask, answer)]]),
@@ -725,6 +959,7 @@ describe('planFolds', () => {
     // arrive in plan order, so the first takes the message it resolved and the
     // second owns the round rather than both widening over the same nodes.
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1], [ids[2]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
       seeded: new Map([
@@ -751,6 +986,7 @@ describe('planFolds', () => {
     // the message between, and it stands for the last one too — so its ids
     // arrive as two runs that fold as one.
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1], [ids[2]!, 1], [ids[1]!, 1]]),
       summaries: [summary('L1-0', 1), summary('L1-1', 1)],
       seeded: new Map([
@@ -776,6 +1012,7 @@ describe('planFolds', () => {
     // Nothing precedes the fold's first node, so there is no half round to take
     // back and the span is the recollection's own.
     const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
       resolutions: new Map([[ids[0]!, 1]]),
       summaries: [summary('L1-0', 1)],
       seeded: new Map([['L1-0', span(ask, ask)]]),
