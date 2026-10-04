@@ -45,6 +45,35 @@ in an untested path.
 - File:line references are against the baseline tree above and will drift as
   parts land; locate by symbol, not by line.
 
+## Addendum — findings from the Part 1/2 audits (binding on Parts 3–5)
+
+- **E12 is a demonstrated defect, not a decision.** A session riding its
+  budget wedges memory formation entirely: compile refuses → no tick → merges
+  starve (`pendingMerges` stuck at 1 across 10 passes in a live engine run).
+  Part 4 kicks the tick even when compile refuses; no discussion needed.
+- **The planner's `mergedInto` skip was wrong and has been removed** (Part 2
+  audit remediation, in `plan.ts` `standing()`): the pointer records
+  formation, not representation — until the parent's fold lands, the merged
+  child is still what the surface shows and its messages still resolve at the
+  child's level. Do not reintroduce the skip; `plan.spec.ts` pins the rule.
+- **Live-vs-load merge-gate asymmetry (record for Part 5/upstream):** merges
+  fire live through picker pressure, but the reload path repopulates the queue
+  only via `checkMergeThreshold` → `contiguousMergeCandidates`, which needs
+  `>= mergeThreshold` unmerged entries at one level, positions resolving
+  through rebuilt chunks, and the *same strategy options* the live run had.
+  Exactly-at-threshold pyramids and option drift silently queue nothing.
+  Deferred work, not lost work — but acceptance fixtures must use realistic
+  pyramid shapes (threshold-plus remainder) to observe re-merge behavior.
+- **Test-hollowness lesson (applies to every part's tests):** the original
+  engine-driven reopen test built its "second process" over a fresh empty
+  session, so an empty calls array proved nothing. Every acceptance test that
+  claims a zero-cost or refusal property must be shown to fail when the thing
+  it tests is broken — the audit step is part of the definition of done.
+- Part 1/2 notes: tool-bearing fixtures must log a `request/header` with tool
+  definitions (the strategy defers tool-bearing chunks otherwise); the reopen
+  helper in `tests/harness.ts` builds a second engine sharing nothing but the
+  log — use it for any reopen acceptance case.
+
 ## Process
 
 Five sequential parts. One fresh subagent implements each part; the parent
