@@ -236,9 +236,8 @@ describe('a pyramid replayed from the log', () => {
     // leaves is the realistic shape: a three-level pyramid with every level
     // landed, not a frontier of exactly one merge's worth of recollections
     // (which the reload gate does not re-queue, stamped or not, and so proves
-    // nothing with). The window is wide because a pass whose compile refuses
-    // kicks no tick, and memory formation — the merges this run lives on — is
-    // tick work.
+    // nothing with). The window leaves the compile room to reach budget, so
+    // the run folds and forms the way a session under ordinary pressure does.
     const first = build(8, 'reopen-cost', {
       operatingWindowTokens: 900,
       strategy: { recentWindowTokens: 0, targetChunkTokens: 150, minChunkCharsForLLM: 0, mergeThreshold: 2 },

@@ -1,7 +1,11 @@
 # Log-native Connectome: rebuild plan
 
-Status: design agreed in discussion, pre-implementation. This doc captures the
-decisions, the evidence behind them, and the pre-build verification list.
+Status: implemented. This doc keeps the decision, its evidence, and the
+pre-build verification list as the record of why the rebuild was shaped this
+way. It is not the description of the shipped code: where the implementation
+diverged, the divergence is marked inline below, and
+[`CONNECTOME-LOG-NATIVE-IMPLEMENTATION.md`](CONNECTOME-LOG-NATIVE-IMPLEMENTATION.md)
+carries the built reality.
 
 ## Problem
 
@@ -61,7 +65,7 @@ native deps).
 | Seed + live replay | ~130 | On open: replay surface events into the `messages` slot (reusing the existing block-mapping direction), replay `autobio/memory` events into the `summaries` slot, set the id counter to max. Then append new events live. No watermark: open = full replay. |
 | Engine | ~220 | Per-session runtime, `agent/pre-step` fold pass: sync → background tick → compile → plan → apply. Config: 3 harness knobs (operating window, reserve, `auto`) plus a pass-through strategy bag. Never blocks a turn (see Behavior changes). |
 | Frontier planner + widening | ~90 | Reads `strategy.resolutions` after `compile()`; groups per-message levels into runs; maps each run to its summary; widens spans to pair-safe boundaries (bounded, chain-free); emits one replace op per run. Divergence throws. |
-| Fold apply | ~60 | Preflight assert + bracket events + one single-node replace per fold. Cannot make a pairing mistake — planning owns that. |
+| Fold apply | ~60 | Preflight assert + bracket events + one single-node replace per fold. Cannot make a pairing mistake — planning owns that. Built as one bracket per op under the fold's own `autobio:<summaryId>` compaction id. |
 | Bridge | ~110 | Library `complete()` ↔ `ctx.llm.stream()`. Forwards `request.tools` (fixes the crippled refusal ladder, below). Uses the library's exported `splitMixedToolMessages` instead of the hand-rolled split. Keeps thinking-strip pricing (a fold must never cost more than the span it replaces) and usage on the done flush. |
 | Types/config | ~50 | Schemastery schema for the harness knobs + loose strategy passthrough. |
 
@@ -140,6 +144,12 @@ is then pure mechanics that cannot make a pairing mistake. The current
 applicator's complexity came from chaining against message shapes the harness
 never produces.
 
+**Built as**: widening walks the contiguous run of results that answers a call
+inside the span backward to the node declaring it, and forward while the span
+still waits on results. Sibling visibility is a shared set of claimed surface
+positions built before any walk runs, so a walk stops in front of ground a
+sibling already owns instead of reasoning about nodes a sibling might take.
+
 Both simpler alternatives were considered and rejected: span-repair with
 refusals (the status quo — bursty folding, skipped passes) and boundary stub
 blocks (the library's render-side answer — creates stub-obligation
@@ -184,6 +194,12 @@ provider's overflow recovery remains the terminal path. The catch-up loop on
 the inference thread — the mechanism that stalled the red-lemma session for
 hours — is not rebuilt.
 
+**Built as**, and deliberately: every passing tick kicks a background tick after
+its compile attempt, refusal included, because the strategy cuts its
+compression queue inside layout selection and a session over budget that stops
+forming memory never improves its floor. A refusal the retry cannot fit warns
+and leaves the surface for the next step; nothing waits on a tick.
+
 ### What stays ours, deliberately
 
 Checked and confirmed to have no library equivalent: the shim (no in-memory
@@ -196,7 +212,7 @@ retry, and usage accounting with the harness adapters.
 
 ## What gets deleted
 
-- Mirror write path, watermark recovery, `dshSeq` stamping
+- Mirror write path, watermark recovery
 - `inheritForkArchive` (fork copies the log; store state inherits for free)
 - Checkpoint-on-close lifecycle, `closeRuntimes`' durability role, LOCK files
 - `.dsh/autobio` stores, Chronicle + membrane native dependencies
@@ -205,6 +221,12 @@ retry, and usage accounting with the harness adapters.
 - Applicator repair/chaining/refusal subsystem
 - The catch-up wait loop
 
+**Not deleted, contrary to this list as first written: the `dshSeq` stamp.**
+Seeding writes it as the mirrored message's `metadata.dshSeq`, the live path
+passes it to `manager.addMessage`, and planning reads it to place a resolved
+message on the surface ([implementation](CONNECTOME-LOG-NATIVE-IMPLEMENTATION.md#seedts--open-time-seeding--live-sync)).
+Dropping it would break the message-id-to-log-seq mapping every fold is planned
+against.
 ## Behavior changes vs. today
 
 1. Folding never blocks a turn (above).
@@ -212,7 +234,9 @@ retry, and usage accounting with the harness adapters.
    calls. Crash = nothing lost. The regeneration loop is structurally
    impossible.
 3. Resolutions are not seeded; on reopen the picker replans from the pyramid
-   and the applicator's coarser-than-plan rules absorb divergence.
+   and the plan skips the ground the surface already covers. **As built**, a
+   surface coarser than the plan keeps its coarser node, and any other
+   plan/surface divergence throws out of the pass rather than absorbing.
 4. Old sessions: seeded from their existing `autobio/memory` events; landed
    folds recover ranges from fold nodes; unlanded mints from the Chronicle
    era are dropped. Old `.dsh/autobio` dirs become deletable garbage.

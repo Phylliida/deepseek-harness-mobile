@@ -1,14 +1,14 @@
 # Log-native Connectome: implementation detail
 
-Companion to `CONNECTOME-LOG-NATIVE-PLAN.md` (the *why*). This doc is the
-*what*: module layout, every call point, and pseudocode for each piece. No
-code here is final; it exists to make the build mechanical and to expose
-design gaps before they cost a rewrite.
+Companion to [`CONNECTOME-LOG-NATIVE-PLAN.md`](CONNECTOME-LOG-NATIVE-PLAN.md)
+(the *why*). This doc is the *what*: module layout, call points, and the shape
+of each piece, as built. Where the build diverged from the sketch this doc
+started as, the text below is the built form; the pseudocode blocks keep their
+original shape only where the code still matches it.
 
 Conventions below: `session` is a DSH `Session`; `manager`/`strategy` are the
 library's `ContextManager`/`AutobiographicalStrategy`; `shim` is our
-in-memory `JsStore` stand-in. Pseudocode is TypeScript-shaped but elides
-types where they don't carry meaning.
+in-memory `JsStore` stand-in.
 
 ## File layout
 
@@ -18,36 +18,35 @@ file rewritten:
 ```
 packages/compaction/compaction-autobiographical/src/
   index.ts    — engine: plugin entry, runtime cache, fold pass, tick chain
-  store.ts    — in-memory JsStore shim
-  seed.ts     — open-time seeding + live sync from the session log
+  store.ts    — in-memory JsStore shim, wrapped in the drift Proxy
+  seed.ts     — open-time seeding + live sync + surface-ground expansion
   plan.ts     — partition resolved messages by recollection → FoldOp list
-  apply.ts    — fold execution: preflight + bracket/memory events + replaces
+  apply.ts    — preflight, then one bracket per op
   bridge.ts   — membrane complete() ↔ ctx.llm.stream
   config.ts   — schema + resolution
-  types.ts    — FoldOp, RuntimeEntry, config types
+  types.ts    — config, mint and memory-progress record types, RecollectionRange
+  invariant.ts — the registered no-op companion
 ```
 
-Deleted in the same change: `mirror.ts`, `membrane.ts`, `applicator.ts`,
-`command-autobio` package, the autobio UI conversation nodes, and every
-`inheritForkArchive`/watermark/checkpoint code path. `invariant.ts` stays: it
-is a registered no-op installer, and `verify-package-invariants` requires one
-companion per package.
+The per-section line counts below are the shape each file has, stated in code
+lines — the prose in these files is half their length, and counting `wc -l`
+makes every one of them read as three times over budget.
 
-The per-section line counts below are the shape each file should have, stated
-in code lines — the prose in these files is half their length, and counting
-`wc -l` makes every one of them read as three times over budget.
-
-Measured against the tree as it stands, code lines only: `apply` 47,
-`config` 16, `invariant` 8, `store` 120, `seed` 156, `plan` 173, `bridge` 180,
-`index` 322, `types` 41. That is **1063 code lines against the ~660 the plan
-targeted**, with a further 1083 comment lines and 147 blank. The overage is
-concentrated in `index` (322 vs ~230) and `bridge` (180 vs ~110), and it is
-carried by capability this sketch predates: replay-seeded mint detection with
-a per-runtime cursor and attempt watermark, the calibration seq high-water,
-the `OverBudgetError` retry arithmetic in `compileFolds`, and tool-definition
-sync. It is not padding — the JSDoc is enforced by `verify-export-jsdoc` and
-the coverage gate is `perFile: true` at 100% on all four metrics. Trimming to
-660 would mean dropping one of those behaviours, not shortening these files.
+Measured against the tree as it stands, code lines only: `apply` 93, `config`
+16, `invariant` 8, `store` 134, `seed` 284, `plan` 258, `bridge` 186, `index`
+434, `types` 49. That is **1462 code lines against the ~660 the plan
+targeted**, with a further 1641 comment lines and 185 blank. The overage is
+concentrated in `index` (434 vs ~230), `seed` (284 vs ~130) and `plan` (258 vs
+~170), and it is carried by capability this sketch predates: replay-seeded mint
+detection with a per-runtime cursor and attempt watermark, live
+`autobio/memory-progress` streaming, the `Ranges` chain resolver that reaches
+through a pyramid above L2, the calibration seq high-water, the `OverBudgetError`
+retry arithmetic in `compileFolds`, tool-definition and system-prompt sync,
+whole-pass widening against sibling claims, and the preflight that refuses a
+plan before a bracket opens. It is not padding — the JSDoc is enforced by
+`verify-export-jsdoc` and the coverage gate is `perFile: true` at 100% on all
+four metrics. Trimming to 660 would mean dropping one of those behaviours, not
+shortening these files.
 
 ## The one-paragraph architecture
 
@@ -71,9 +70,12 @@ user/message      { content: ContentBlock[] }
 assistant/message { message: { content, source, ... }, usage?: TokenUsage }
 tool/result       { message: { content: [tool-result blocks] } }
 
-// fold nodes (surfaceOp: { op: 'replace', start, end }): always a single
-//   assistant/message with text "[Recall <summaryId>]\n\n<content>",
-//   carrying sourceEventSeqs = shadowed seqs (coverage chain).
+// fold nodes (surfaceOp: { op: 'replace', start, end }): a single
+//   assistant/message whose source carries compactionId "autobio:<summaryId>",
+//   carrying sourceEventSeqs = the EXPANDED ground it took (coverage chain).
+//   Its text leads with "[Recall <summaryId>]" only on the text fallback: a
+//   recollection replayed from stored `responseContent` carries the captured
+//   blocks verbatim, with no header to prepend.
 // INVARIANT: every landed fold is tool-pair-safe (see plan.ts), so the live
 // surface is always pair-safe and fold nodes never participate in straddles.
 
@@ -81,21 +83,28 @@ tool/result       { message: { content: [tool-result blocks] } }
 autobio/memory {
   ...strategyStats,
   attempt: number,
-  memory: { id, level, content, tokens,
-            sourceRange: { firstSeq, lastSeq } }   // ← NEW FIELD, this change
+  memory: { id, level, content, tokens, created,
+            sourceRange: { firstSeq, lastSeq } },   // the surface span replaced
+  usage?: TokenUsage,
 }
+
+// live progress (log-only) — one record per streamed flush, keyed to the call
+// by `attempt`, and the terminal flush that closes it (success or failure):
+autobio/memory-progress { attempt, delta, done?, error? }
 ```
 
-### The shim's internal model
+### The store's internal model
 
 ```
-class ShimStore {
-  regs    = Map<stateId, { strategy: 'append_log' | 'snapshot' }>
-  arrays  = Map<stateId, unknown[]>          // append_log slots
-  scalars = Map<stateId, unknown>            // snapshot slots
-  seq     = 0                                // global record sequence
-  closed  = false
+class LogStore {
+  registrations = Map<stateId, { id, strategy }>   // registerState; cadence fields ignored
+  arrays        = Map<stateId, unknown[]>          // append_log slots
+  scalars       = Map<stateId, unknown>            // snapshot slots
+  branch        = { name: 'main' }                 // one stable object
+  seq           = 0                                // next append position
 }
+// createStore() wraps an instance in the Proxy that answers everything else
+// with the drift thrower, or with absence for the probed names.
 ```
 
 Slot ids the strategy uses (all under ns `default/` unless configured):
@@ -106,11 +115,15 @@ Slot ids the strategy uses (all under ns `default/` unless configured):
 `kvunified:presentation-receipt`. We never enumerate these; the strategy
 registers what it needs at `initialize()` and the shim registers blindly.
 
-## store.ts — the shim (~120 lines of code, ~270 with rationale)
+## store.ts — the shim (~170 lines of code, ~280 lines with rationale)
 
 Every method the library calls, verified by grep against
-`ref/context-manager/src`. Anything else throws `Error('shim: <method> not
-implemented')` — that throw is the upstream-drift alarm.
+`ref/context-manager/src`. Anything else throws
+`LogStore.<method>() called: the context-manager library moved a code path onto
+it` — that throw is the upstream-drift alarm. Three names are answered with
+absence instead, because the library `typeof`-probes them as capability checks:
+`registerStateFieldIndex`, `queryStateIndexRange`, `queryStateIndexEq`, and the
+`then`/`toJSON` a value meets outside the library.
 
 ```
 registerState(reg):
@@ -156,15 +169,19 @@ redactStateItems(id, s, e):
   if (id === messagesSlotId) throw Error('shim: messages slot is append-only')
   arrays.get(id).splice(s, e - s)
 
-currentBranch():    return this.branch          // one stable OBJECT: callers
-                                                 // compare it by identity, and a
-                                                 // fresh object per call reads as a
-                                                 // branch switch and wipes the token cache
+currentBranch():    return this.branch          // one stable OBJECT, whose `name`
+                                                 // the library compares everywhere it
+                                                 // asks about the branch (message-store
+                                                 // caches key on .name; getChannelTokenStats
+                                                 // keys on .id); a fresh object per call
+                                                 // would read as a branch switch and wipe
+                                                 // the caches
 currentSequence():  return this.seq - 1          // the HEAD of the log, not its
                                                  // length; -1 before the first write
-isClosed()/close(): trivial                        // never fire (WeakMap gen 0)
+updateStateStrategy(reg): regs.set(reg.id, reg)  // ContextManager.open feature-detects it
+isClosed()/close(): trivial                        // nothing is held open
 sync():             no-op   // NOTHING TO CHECKPOINT. the log is the fsync.
-compactState(id):   no-op
+compactState(id):   no-op   // returns null
 listStates():       [...regs entries]
 
 // loud throws — unused in our config, and we want to know if that changes:
@@ -189,7 +206,7 @@ getStateTail / recovery
 `getStore()` exposure on the manager returns the shim; nothing in our code
 calls it.
 
-## seed.ts — open-time seeding + live sync (~130 lines)
+## seed.ts — open-time seeding + live sync (~284 lines)
 
 ### Seeding (runs once per session open, before `ContextManager.open`)
 
@@ -206,7 +223,8 @@ function buildSeededShim(session, blockMap): ShimStore
     shim.appendToStateJsonWithIdentity('messages', {
       participant: participantOf(event),         // 'user' | 'assistant'
       content: blocks,
-      timestamp: event.time,
+      timestamp: event.time,                     // epoch millis, as Chronicle stores
+      metadata: { dshSeq: event.seq },
     }, 'id', 'sequence')
     // record the seq mapping — messageId → dshSeq — for planning:
     seqByMessageId.set(lastId, event.seq)
@@ -221,14 +239,20 @@ function buildSeededShim(session, blockMap): ShimStore
       id: m.id, level: m.level, content: m.content, tokens: m.tokens,
       sourceLevel: m.level - 1,
       sourceIds:  level == 1 ? messageIdsInRange(range) : childIds(range),
-      sourceRange: { first: msgId(range.firstSeq), last: msgId(range.lastSeq) },
-      created: event.time,
+      sourceRange: { first: leafFirst, last: leafLast },   // LEAF message ids, not
+                                                          // the child recollections
+      created: m.created,           // the mint's own clock, not the event's
     })
-  rebuildPyramidLinks(summaries)   // set parentId: each L_k's children are
-                                   // the L_{k-1}s whose ranges partition its
-                                   // range; bottom-up, one pass
+  linkPyramid(summaries)           // set mergedInto on every child: the entry the
+                                   // log names as its parent is what the library
+                                   // reads to tell its frontier from consolidated
+                                   // ground; unset, a reopen re-merges children it
+                                   // already merged — one call per reopen
   shim.arrays.set('default/autobio:summaries', summaries)
-  shim.scalars.set('default/autobio:counter', maxNumericSuffix(summaries) + 1)
+  shim.scalars.set('default/autobio:counter', 1 + maxNumericSuffix(loggedIds))
+  // The counter advances over EVERY logged recollection id, dropped or not: a
+  // seeding that drops an entry still owns its id, and a reissued id would put
+  // two mints under one name.
   // chunks slot left EMPTY on purpose: the library's lazy migration rebuilds
   // chunk records from L1 sourceIds (autobiographical.ts ~1735). mergeQueue,
   // quarantines, resolutions, calibration: not seeded — self-healing state.
@@ -236,11 +260,19 @@ function buildSeededShim(session, blockMap): ShimStore
 
 resolveRange(m):
   if m.sourceRange present: return it                       // new events
-  // legacy events: only landed folds are recoverable — the fold node carries
-  // "[Recall <id>]" and sourceEventSeqs:
-  fold = session.events.find(e => isReplacement(e) && recallHeader(e) == m.id)
-  return fold ? { firstSeq: min(fold.sourceEventSeqs), lastSeq: max(...) } : null
+  // legacy events: recover the range from the fold node that landed the mint.
+  // The node is read the way foldIdOf reads it — the compactionId its message
+  // source carries, or the "[Recall <id>]" header a pre-rewrite node leads with
+  // — and the range is its cited seqs EXPANDED through the fold nodes they name,
+  // because a node can cite an earlier fold's node rather than raw events.
+  fold = foldNodes(session).get(m.id)
+  return fold ? { firstSeq: fold.covered.firstSeq, lastSeq: fold.covered.lastSeq } : null
 ```
+
+Above L1 the sources are the recollections' ids, resolved to the leaf messages
+they bottom out in, so `sourceRange` always names messages; `recallCurveLeafIds`
+rejects an entry whose range names anything else. A recollection whose ground is
+not in the store is skipped rather than stubbed, and left out of `known` too.
 
 ### Live sync (every fold pass; the shim is rebuilt per open, so the cursor is
 ### process-local state, not a durability mechanism)
@@ -248,127 +280,154 @@ resolveRange(m):
 ```
 function syncNewEvents(runtime, session):
   for event of session.events where event.seq > runtime.cursor:
-    if isAppendSurfaceEvent(event):
-      blocks = blockMap.toMembrane(event)
-      if blocks.length: runtime.manager.addMessage(participantOf(event), blocks, { dshSeq: event.seq })
     runtime.cursor = event.seq
+    if isAppendSurfaceEvent(event):
+      id = runtime.manager.addMessage(participantOf(event), blocks, { dshSeq: event.seq })
+      runtime.seqOf.set(id, event.seq)
 
 function syncToolDefinitions(runtime, session):
+  // Both halves are pushed on IDENTITY change: the header is one object per
+  // request header the log holds, so `tools !== runtime.declaredTools` is the
+  // whole change check, and the system prompt is pushed the same way.
   tools = session.requestHeader()?.tools
-  if tools changed since last push:
-    runtime.manager.setToolDefinitions(tools.map(schemaMapping))  // same as today
+  if tools !== runtime.declaredTools: runtime.manager.setToolDefinitions(tools.map(schemaMapping))
+  system = session.requestHeader()?.system
+  if system !== runtime.declaredSystem: runtime.manager.setSystemPrompt(system)
+  // A declaration set the session drops is not retracted: the library's own
+  // setter ignores an empty list.
 ```
 
 Note `addMessage` goes through the manager (not the shim directly) so the
 strategy's `onNewMessage` fires — with `autoTickOnNewMessage: false` that
-hook only does bookkeeping, never a tick.
+hook only does bookkeeping, never a tick — and so the write version the
+message index revalidates against is bumped.
 
-## engine.ts — the plugin (~230 lines)
+## index.ts — the plugin (~434 lines)
 
 ```
 class AutobiographicalCompactionEngine extends CompactionEngine:
-  inject = ['llm', 'compaction']
-  runtimes = Map<SessionId, Promise<RuntimeEntry>>   // open-once cache
-  // RuntimeEntry = { manager, strategy, shim, cursor, tickChain, route }
+  inject = ['llm', 'tokenMeter']
+  // tokenMeter is the fixed node estimator a fold's shadow price is measured
+  // with; llm is the stream the compression calls ride.
+  runtimes = Map<SessionId, Promise<Runtime>>   // open-once cache
+  // Runtime = { manager, strategy, store, route, known, seqOf, walked,
+  //             progress, cancellation, declaredTools, declaredSystem,
+  //             recorded, calibrated, tickChain }
 
   constructor(ctx, config):
     this.config = resolveConfig(config)              // 3 knobs + strategy bag
-    if config.auto: registerAutomaticFolding()
-    ctx.on('agent/disposed', ({agent}) => dropAndClose(agent.session.id))
-    ctx.effect(function* { yield () => this.closeAll() })
-    // closeAll is hygiene only (manager.close() releases library resources).
-    // NO durability role — there is nothing to checkpoint.
+    if this.config.auto: registerAutomaticFolding()  // the RESOLVED default, not `config.auto`
+    ctx.on('agent/disposed', ({agent}) => this.runtimes.delete(agent.session.id))
+    ctx.effect(() => () => this.runtimes.clear())
+    // Dropping the map entry is the whole of disposal: the store is memory the
+    // map was holding, not an artifact to close.
 
   // ── call point 1: automatic path ──────────────────────────────
   registerAutomaticFolding():
     ctx.on('agent/pre-step', async ({agent, turn, step, signal}, next) => {
-      if (!signal.aborted):
-        try { await this.foldPass(agent, signal, turn, step) }
-        catch (e) { warn(`folding failed: ${e}; continuing the turn`) }
+      try { await this.foldPass(agent, { turn, step, signal }) }
+      catch (e) { warn(`folding failed: ${e}; continuing the turn`) }
       return next()
     })
 
   // ── call point 2: /compact (manual) ───────────────────────────
   compactNow(agent, signal, _cmd):
-    return agent.runMaintenance(s =>
-      this.foldPass(agent, AbortSignal.any([signal, s]), null, 0))
+    claimed = agent.runMaintenance(s =>
+      this.foldPass(agent, { turn: null, step: 0, signal: AbortSignal.any([s, signal]) }))
+    // A claim the agent refuses is the busy case (ManualCompactionError('busy')),
+    // a thrown pass is classified by manualFailure (see below).
 
   // ── call point 3: explicit region — still rejected ────────────
   compactRegion(): return Promise.reject(ManualCompactionError('summary', …))
 
   // ── the pass ──────────────────────────────────────────────────
-  async foldPass(agent, signal, turn, step):
-    session = agent.session
-    rt = await this.runtimeFor(agent)     // open+seed on first touch
-    syncNewEvents(rt, session)
-    syncToolDefinitions(rt, session)
-    this.kickTick(rt, session)            // background; NEVER awaited here
+  async foldPass(agent, pass):
+    routed = agent.session.requestContext()
+    if routed?.contextWindow == null: return null   // unrouted: skip
+    budget = this.computeBudget(routed.contextWindow)
+    if budget == null: return null                  // reserve ≥ window: skip
 
-    this.feedCalibration(rt, session)     // BEFORE compile (arm ordering)
+    rt = await this.runtimeFor(agent, routed)       // open+seed on first touch
+    syncSurface(rt, session)                        // walk the log since `walked`
+    syncToolDefinitions(rt, session)                // tools + system prompt, on change
+    feedCalibration(rt, session)                    // BEFORE compile (arm ordering)
 
-    budget = this.computeBudget(session)  // below
-    if budget == null: return null        // unrouted session: skip
+    reached = await compileFolds(rt, budget, config.reserveTokens, warn)
 
-    // over-budget-at-floor handling, without previewContext:
-    try {
-      await rt.manager.compile(budget)
-    } catch (e) {
-      if e is OverBudgetError and typeof e.actual == 'number':
-        // pyramid mid-formation: land the floor layout instead of stranding
-        await rt.manager.compile({ maxTokens: e.actual + budget.reserveForResponse,
-                                   reserveForResponse: budget.reserveForResponse })
-      else { warn(...); return null }     // genuinely no layout: proceed raw
+    this.kickTick(rt, session, pass.signal)         // AFTER the compile attempt, refusal
+                                                    // included; never awaited
+    if (!reached) return null
+
+    ops = planFolds(rt.store, session, { resolutions, summaries, seeded: rt.known,
+                                         seqOf: rt.seqOf, price: priceSurfaceNode })
+    if (ops.length == 0) return null
+    return applyFolds(session, ops, pass.turn, pass.step, rt.route).at(-1)
+
+  compileFolds(rt, budget, reserveTokens, warn):
+    try { await rt.manager.compile(budget); return true }
+    catch (e) {
+      if not OverBudgetError: rethrow
+      // The size the strategy could reach, converted back into a total budget:
+      // `actual` is measured against the usable budget, total less the allowance.
+      affordable = e.actual + reserveTokens
+      try { await rt.manager.compile({ maxTokens: affordable,
+                                       reserveForResponse: reserveTokens }); return true }
+      catch (retry) {
+        if not OverBudgetError: rethrow
+        warn(`folding is ${retry.actual} tokens over budget ${retry.budget}; folding again next step`)
+        return false
+      }
     }
-    signal.throwIfAborted()
 
-    ops = planFolds(session, rt)          // plan.ts
-    if ops == null: { warn('plan diverged; skipping pass'); return null }
-    if ops.length == 0: return null
-    return applyFolds(session, ops, turn, step, rt)   // apply.ts
-
-  computeBudget(session):
-    routed = session.requestContext()
-    if routed?.contextWindow == null: return null
-    window = config.operatingWindowTokens ?? min(routed.contextWindow, 65_536)
-    return { maxTokens: window - config.reserveTokens,
-             reserveForResponse: config.reserveTokens }
-    // NOTE: no promptOverhead subtraction. system-prompt/tool/reasoning
-    // overhead is absorbed by the library's calibration multiplier instead.
+  computeBudget(window):
+    // The reserve is subtracted here and again by the library as the response
+    // allowance, so the live ceiling is the smaller of the route's window and
+    // the configured one, less twice the reserve. No promptOverhead: the
+    // calibration multiplier absorbs the envelope instead.
+    maxTokens = min(window, config.operatingWindowTokens) - config.reserveTokens
+    return maxTokens <= 0 ? null : { maxTokens, reserveForResponse: config.reserveTokens }
 
   feedCalibration(rt, session):
     // armed-once-per-compile inside the strategy; feeding when unarmed is a
-    // no-op, so once per pass is exactly right. Feed the newest usage that
-    // POSTDATES the previous compile — i.e. the request built from it.
-    usage = newest assistant/message usage in session.events after rt.lastFedSeq
-    if usage:
-      rt.strategy.reportRealInputTokens(
-        usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0))
-      rt.lastFedSeq = thatEvent.seq
+    // no-op, so once per pass is exactly right. `calibrated` is the seq
+    // high-water, so one usage sample is reported once and a step that
+    // reported none leaves the mark where it is.
+    sized = newest assistant/message with usage in session.events
+    if sized == null or sized.seq <= rt.calibrated: return
+    rt.calibrated = sized.seq
+    rt.strategy.reportRealInputTokens(
+      usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0))
 
-  kickTick(rt, session):
-    rt.tickChain = rt.tickChain.then(async () => {
-      known = new Set(rt.manager.getSummariesInRange({}).map(s => s.id))
-      await rt.manager.tick()             // → bridge.complete() → ctx.llm
-      // mint detection is an id set-diff ONLY — no stats comparison:
-      minted = rt.manager.getSummariesInRange({}).filter(s => !known.has(s.id))
-      for m of minted:
-        session.append('autobio/memory', {
-          ...rt.strategy.getStats(),
-          attempt: <attempt counter>,
-          memory: { id: m.id, level: m.level, content: m.content,
-                    tokens: m.tokens,
-                    sourceRange: { firstSeq: seqOf(m.sourceRange.first),
-                                   lastSeq:  seqOf(m.sourceRange.last) } },
-        })
-    }).catch(e => warn(`memory formation failed: ${e}`))
-    // one tick in flight per session; errors quarantine library-side
+  kickTick(rt, session, signal):
+    rt.cancellation.signal = signal      // read per call by the bridge, which starts
+                                         // after the pass that armed it returned
+    settle = () => { if this.runtimes.has(session.id) this.appendMemory(rt, session) }
+    rt.tickChain = rt.tickChain
+      .then(() => rt.manager.tick())     // → bridge.complete() → ctx.llm
+      .then(() => settle(), error => { settle(); warn(`memory formation failed: ${error}`) })
+    // ONE tick in flight per session. `settle` writes the record on the failure
+    // path too, and before the failure is reported: the attempt counter advances
+    // inside the compression call, so a tick that failed after that advance holds
+    // a count the log can only learn from its record.
+
+  appendMemory(rt, session):
+    // The record is written when the tick minted a recollection OR the attempt
+    // counter moved; otherwise it would append an identical event every pass.
+    // `progress.usage` sums every call the tick settled, not the last one.
+    // A record the log refuses is reported whole (the log's error, an isJsonValue
+    // verdict, the bounded JSON) and NOT written: `recorded` and `known` move
+    // only once the record is durable, so a refused record is retried next pass
+    // instead of leaving a recollection announced forever and absent from the
+    // archive.
 ```
 
-`runtimeFor(agent)` = open-once cache; on open:
+`runtimeFor(agent, route)` = open-once cache; a failed open is dropped (but not
+one opened since, which the identity comparison tells apart). On open:
 
 ```
 async openRuntime(session, route):
-  shim  = buildSeededShim(session, blockMap)
+  store = createStore()
+  seed  = seedFromLog(store, session)   // registers the slots, replays, links
   strat = new AutobiographicalStrategy({
     ...config.strategy,                  // the passthrough bag — upstream knobs
     compressionModel: route.model,       // voice = the session's own model
@@ -379,9 +438,12 @@ async openRuntime(session, route):
     carrierPolicy: 'live-strip',         // price folds at stripped render
   })
   manager = await ContextManager.open({
-    store: shim,                         // ← THE WHOLE POINT
+    store: store as never,               // ← THE WHOLE POINT. Duck-typed by the
+                                         // library; its published type is the
+                                         // Chronicle native class, so one cast
+                                         // states the mismatch.
     strategy: strat,
-    membrane: bridge,
+    membrane: createBridge({ llm, provider, warn, signal: () => cancellation.signal, onText }),
     // NO tokenEstimator. Giving the manager one REPLACES its default rather
     // than layering on it, and the default is better than a flat /4: it
     // samples the first 2000 chars and picks 2.9 or 2.3 chars/token by density
@@ -391,10 +453,15 @@ async openRuntime(session, route):
     // which scales one estimate uniformly and cannot tell prose from code. A
     // flat /4 would misprice every pick and stay mispriced.
   })
-  return { manager, strategy: strat, shim, cursor: session.events.at(-1)?.seq ?? -1, … }
+  recorded = attemptFromLog(session)     // the count a reopen resumes from
+  return { manager, strategy: manager.getStrategy(), store, route,
+           known: seed.known, seqOf: seed.seqOf,
+           walked: session.events.length - 1, progress, cancellation,
+           declaredTools: undefined, declaredSystem: undefined,
+           recorded, calibrated: 0, tickChain: Promise.resolve() }
 ```
 
-## plan.ts — partition by recollection, then widen (~170 lines)
+## plan.ts — partition by recollection, then widen (~258 lines)
 
 Replaces `applicator.ts` wholesale. No entry parsing, no `previewContext`,
 no repair chains. Two hardening rules, deliberate:
@@ -417,150 +484,209 @@ ground no single recollection owns. Partitioning by the entry that stands over
 each resolved message is what makes the fold's span well defined.
 
 ```
-function planFolds(store, session, {resolutions, summaries, seeded, seqOf})
+function planFolds(store, session, {resolutions, summaries, seeded, seqOf, price})
   ranges   = standing()          // per level, live recollections and their
                                  // coverage (seeded ∪ resolved, both unioned),
-                                 // in mint order
-  surface  = annotateSurface(session)
+                                 // in mint order. A merged child is NOT skipped:
+                                 // `mergedInto` records formation, not
+                                 // representation — until the parent's fold
+                                 // lands, the child's node is what the surface
+                                 // shows for that ground.
+  place    = {}                  // log seq → the surface position holding it
+  surface  = annotateSurface(session, price, place)
              // per node { seq, coverage (sourceEventSeqs expansion through
              // fold nodes, memoized in seed.ts as surfaceGround), foldId
              // (compactionId, autobio: prefix), calls, results, tokens }
+             // The FIRST node holding a seq owns its position in `place`.
 
   // pass 1 — partition the resolved messages by the recollection standing over
   // them, which is the fold each one belongs to.
-  claimed = {}
+  claims = {}
   for msg of messages slot, in order:
     level = resolutions.get(msg.id) ?? 0
     if level == 0 or msg has no sane dshSeq: continue
     summary = standingFor(ranges, level, msg.dshSeq) ?? throw Divergence
-    claimed[summary.id] ∪= { first: min, last: max }     // coverage only widens
+    claims[summary.id].keys ∪= seq
+    if place[seq] != null: claims[summary.id].claimed ∪= place[seq]
 
-  for { summary, first, last } of claimed:
-    covers(node) = node.foldId != summary.id
-                   and node.coverage overlaps [first, last]
-    from = first node that covers ?? continue    // already carried, or nothing
-    to   = last node in the contiguous run that covers
-    ops.push({ summaryId, level, startSeq, endSeq, shadowedSeqs,
-               shadowedTokens, summary, span: { from, to } })
+  ordered = claims with a non-empty claim, in first-claimed-position order
+  taken   = {}                   // surface positions an op has landed on
+  ops     = []
+  for op of ordered:
+    run   = every position from op's first claim to its last
+    span  = run up to the first position in `taken`   // sibling ground is a wall
+    if span is settled (every position holds this recollection's own node): continue
+    widen(op, taken)             // below
+    recompute span; drop the positions a sibling took
+    ops.push({ summaryId, level, startSeq, endSeq, shadowedSeqs, shadowedTokens,
+               summary, coveredNodes })
+               // coveredNodes = the span's nodes plus, under each landed fold
+               // node this op's claim covers, the nodes that node stands for
+    taken ∪= span                // what a fold replaces is ground spoken for
 
   // pass 2 — pair-safe widening, against FINAL visibility (a node is visible
   // after this pass iff no op shadows it). Both directions are provably
   // chain-free because calls and results never share a node in the DSH event
   // model (calls: assistant/messages; results: tool/result events —
   // agent-loop/src/tool-calls.ts:281).
-  for op of ops (in order):
-    back:   if the node before op.span.from declares calls answered inside
-            op's span → extend from over it.
-            It is one assistant node; it carries no results; done.
-            (A fold node there can't straddle — the invariant.)
-    fwd:    if op's span declares calls whose results STAY VISIBLE after
-            op.span.to → extend to over that contiguous result run, which
-            stops at the first node that asks as well as answers.
-    recompute startSeq, endSeq, shadowedSeqs, shadowedTokens when widened
+  widen(op, taken):
+    back:   while the span's left edge is not a node declaring calls: walk one
+            node back and stop in front of anything in `taken`, in front of a
+            node declaring calls the span does not answer, and in front of a
+            node bringing no result the span is missing; the node that declares
+            the calls is the round's head and the last node the walk takes.
+    fwd:    while the span declares calls whose results are still unanswered:
+            take the next node when it answers the span and declares no calls,
+            else stop.
+    // The walk stops at sibling ground rather than crossing it, which is what
+    // leaves the sibling its own round.
 ```
 
-Widening needs no record of what earlier ops claimed. One node answers to one
-recollection — `covers` excludes a node carrying a different fold id, and
-`syncSurface` never mirrors a fold node, so its seq cannot appear in
-`resolutions` — so the spans the partition produced are already disjoint, and
-nodes sit between a fold's first and last node only when that fold owns them.
-The sibling boundary falls out of the partition rather than being tracked, so
-there is no retract: an op's span cannot reach into a sibling's ground, because
-the run stops at the first node that sibling claimed.
+A later op's walk reads the positions earlier ops landed on, so the spans are
+disjoint by construction: the shared set is built before any walk runs and each
+walk stops in front of ground a sibling already owns. An op whose whole claim a
+sibling took is left out rather than landed over it, and an op that already
+holds its own node across the span is settled — folding again would trade the
+two places forever.
 
 Deliberately absent vs. the old applicator: `parseDesired`, recall-pair
 reconstruction, chaining loops, the absorbed-node set, refusal paths, and
-every silent skip. The one interaction rule (widen against final visibility)
-is the whole sibling-op story.
+every silent skip. Divergence is a `DivergenceError` thrown out of the pass,
+which the engine boundary catches, warns about, and retries next step.
 
-## apply.ts — fold execution (~60 lines)
+## apply.ts — preflight, then one bracket per op (~93 lines)
 
 Pure mechanics: planning (including widening) already happened, so this file
 cannot make a pairing mistake — it just lands ops.
 
 ```
-function applyFolds(session, ops, turn, step, rt): CompactionResult
-  assertFoldOpsApply(session.surface.nodes, ops)   // kept from the old code:
-                                                   // preflight BEFORE the
-                                                   // bracket opens — a bad
-                                                   // plan never strands an
-                                                   // open compaction
-  compactionId = CompactionId(`autobio-${session.id}-${++counter}`)
+function applyFolds(session, ops, turn, step, route): CompactionResult[]
+  assertFoldOpsApply(session, ops)   // preflight BEFORE the first bracket opens:
+                                     // every covered node is on the LIVE surface,
+                                     // the span's edges are the nodes it cites,
+                                     // foldBlocks(op.summary) is JSON-storable, and
+                                     // no two ops claim one position. A refusal has
+                                     // to happen here or not at all — a
+                                     // compaction/start left open strands the lock
+                                     // and the invariant then refuses the next
+                                     // start and every turn boundary.
+  return ops.map(op => land(session, op, turn, step, route))
+
+function land(session, op, turn, step, route): CompactionResult
+  // One bracket per op, and the bracket id IS the fold's identity:
+  compactionId = CompactionId(`autobio:${op.summaryId}`)
   startSeq = session.append('compaction/start', { compactionId, turn }).seq
-
-  for op of ops:
-    session.append('compaction/summary', { compactionId, summary: op.blocks,
-      shadowedRange: { startSeq: op.startSeq, endSeq: op.endSeq },
-      shadowedSeqs: op.shadowedSeqs, shadowedTokenCount: op.shadowedTokens,
-      provider, model })
-    // always a single assistant/message replace node, exactly as today —
-    // planning already widened to pair-safe boundaries, so nothing here
-    // touches pairing at all:
-    session.append('assistant/message', { turn: turn ?? 0, step,
-      message: createMessage({ role: 'assistant',
-        content: [{ type: 'text', text: op.text }],
-        source: { kind: 'model', provider, model, compactionId } }) },
-      { surfaceOp: { op: 'replace', start: op.startSeq, end: op.endSeq },
-        sourceEventSeqs: op.shadowedSeqs })
-
+  summarySeq = session.append('compaction/summary', { compactionId,
+    summary: foldBlocks(op.summary),
+    shadowedRange: { start: op.startSeq, end: op.endSeq },
+    shadowedSeqs: op.shadowedSeqs, shadowedTokenCount: op.shadowedTokens,
+    provider: route.provider, model: route.model }).seq
+  // One node for the whole range, appended synchronously after its metering
+  // event as the shadow-price protocol requires. `step` names where the
+  // recollection belongs — the step the pass is preparing — not a step the
+  // session already holds, and the replacement records 0 when there is no turn.
+  session.append('assistant/message', {
+    turn: turn ?? 0, step,
+    message: createAssistantMessage({ content: foldBlocks(op.summary),
+      source: { provider: route.provider, model: route.model, compactionId } }) },
+    { surfaceOp: { op: 'replace', start: op.startSeq, end: op.endSeq },
+      sourceEventSeqs: op.coveredNodes })    // the EXPANDED ground, not the
+                                             // span's node list
   endSeq = session.append('compaction/end', { compactionId, turn }).seq
   return { compactionId, startSeq, summarySeq, endSeq, summary, … }
 ```
 
+`applyFold` is the single-op form: it calls `applyFolds` with one op, so the
+preflight is the same one. Provenance comes from the route the runtime was
+opened with; re-resolving it at apply time would fabricate an empty options bag
+and write `''` into the fold message's model source, which seed validation
+rejects on replay.
+
 Wire validity rests on the invariant, not on this file: because every landed
 fold is pair-safe, the derived wire always has every `tool_calls` answered by
-its `role:tool` entries. Fold-node recognition on later passes is unchanged:
-`[Recall id]` header + replacement op, coverage via `sourceEventSeqs`.
+its `role:tool` entries. Recognising a fold node on a later pass is
+`foldIdOf`'s job: the `autobio:` compaction id on the message source first —
+which carries no text header at all when the recollection replays stored
+`responseContent` — and the `[Recall <id>]` header it leads with only on the
+text fallback.
 
-## bridge.ts — membrane ↔ ctx.llm (~110 lines)
+## bridge.ts — membrane ↔ ctx.llm (~186 lines)
 
 ```
-class MembraneBridge:                       // duck-typed Membrane
-  constructor({ llm, provider, model, maxTokens?, onText? })
+function createBridge({ llm, provider, maxTokens?, agentParticipant?, warn?, signal?, onText? }): Membrane
+  // Only `complete` is implemented; the rest of the class is streaming, retry
+  // and provider plumbing the harness already owns.
 
   async complete(request: NormalizedRequest):
     // 1. map messages (1:1 vocab: text↔text, thinking↔reasoning,
-    //    tool_use↔tool-call, tool_result↔tool-result; unknown → placeholder)
-    // 2. participant mapping: agentParticipant → 'assistant', else 'user';
-    //    non-user/agent names keep a "Name: " text prefix
-    // 3. splitMixedToolMessages(mapped)        // ← the LIBRARY's helper,
-    //                                          //   replaces our hand-rolled split
+    //    tool_use↔tool-call, tool_result↔tool-result; redacted_thinking maps
+    //    away, an unknown type becomes a loud `[<type> omitted …]` placeholder)
+    // 2. participant mapping: agentParticipant → 'assistant'; a foreign
+    //    participant keeps its name as a text prefix on the block it opens with
+    // 3. tool results are hoisted into tool-result messages of their own,
+    //    ahead of the prose that trailed them, because the wire serializer
+    //    emits a mixed message's text before its tool entries and would orphan
+    //    them from the call they answer. NO split happens here: the library ran
+    //    splitMixedToolMessages and collapseConsecutiveMessages before building
+    //    this request (autobiographical.ts:5517), so a result already arrives
+    //    alone or heads its message.
     // 4. stream:
-    usage = null
+    signal = options.signal?.()        // read at the call: the tick that makes
+                                       // it runs after the pass that armed it
     for await (chunk of llm.stream({
-      provider, model, messages,
+      provider, model: request.config.model,   // the library's resolved voice
+      messages,
       system: request.system,
-      tools: request.tools?.map(schemaMapping),   // ← FORWARDED. the refusal
-                                                  //   ladder needs them on the wire
-      maxTokens: max(request.config.maxTokens, this.maxTokens),
+      tools: request.tools?.map(toHarnessTool),   // ← FORWARDED. the refusal
+                                                   //   ladder needs them on the wire
+      maxTokens: request.config.maxTokens > 0
+        ? max(request.config.maxTokens, maxTokens ?? 0) : maxTokens,  // a FLOOR
       temperature: request.config.temperature,
-      purpose: 'compaction',
+      signal, purpose: 'compaction',
     })):
       if chunk.type == 'text-delta': onText?.(chunk.text, false)
       assembler.push(chunk)
-    onText?.('', true, assembler.usage)             // terminal flush w/ usage
+    // A thrown call and an error/aborted finish both end the attempt with the
+    // failure; the terminal flush closes it either way, which is what gives a
+    // call that streamed nothing a row of its own:
+    onText?.('', true, assembler.usage, failure)
 
-    // 5. thinking-strip pricing: if thinking+text chars > source chars,
-    //    return the response WITHOUT thinking blocks (a fold must never cost
-    //    more than the span it replaces) — kept from the old bridge, ~30 lines
-    // 6. return membrane response shape { content, rawAssistantText,
-    //    stopReason, usage: { inputTokens, outputTokens }, … }
+    // 5. thinking-strip pricing: if thinking+text characters exceed the source
+    //    characters, return the response WITHOUT thinking blocks (a fold must
+    //    never cost more than the span it replaces). A character test, not a
+    //    token account.
+    // 6. return membrane response with { content, rawAssistantText, stopReason,
+    //    usage: { inputTokens, outputTokens }, toolCalls: [], toolResults: [] }
 ```
 
-## config.ts (~50 lines)
+## config.ts (~41 lines)
 
 ```
-Config = z.object({
-  operatingWindowTokens: z.number().step(1).min(1).optional(),  // default:
-                                     // min(routed window, 65_536)
-  reserveTokens:  z.number().step(1).min(0).optional(),         // default 8192
-  auto:           z.boolean().optional(),                       // default true
-  strategy:       z.looseObject({}).optional(),  // PASSTHROUGH — handed to
-                  // AutobiographicalStrategy untouched; upstream knobs flow
+Config = Schema.object({
+  operatingWindowTokens: Schema.number().step(1).min(1).optional(),  // default:
+                                     // the cap below, not the route's window
+  reserveTokens:  Schema.number().step(1).min(0).default(8192),
+  auto:           Schema.boolean().default(true),
+  strategy:       Schema.dict(Schema.any()).default({}),  // PASSTHROUGH — handed
+                  // to AutobiographicalStrategy untouched; upstream knobs flow
                   // with the version bump (kvStableReachTokens,
                   // speculativeProduction, summaryTargetTokens, …)
 })
+
+resolveConfig(config):
+  operatingWindowTokens: config.operatingWindowTokens ?? OPERATING_WINDOW_CAP (65_536)
+  reserveTokens:         config.reserveTokens ?? 8192
+  auto:                  config.auto ?? true
+  strategy:              config.strategy ?? {}
+  // The schema defaults and the resolver agree; the RESOLVED value is what the
+  // constructor's `auto` check reads.
 ```
+
+The strategy keeps the harness's own requirements over the bag: the integration
+sets `compressionModel`, `summaryParticipant`, `adaptiveResolution`,
+`autoTickOnNewMessage: false`, `foldingStrategy: 'kv-stable'` and
+`carrierPolicy: 'live-strip'` after spreading `config.strategy`, so a bag entry
+on one of those names does not win.
 
 Gone vs. today: `storeRoot` (no store), `recentWindowTokens` /
 `headWindowTokens` / `maxMessageTokens` / `targetChunkTokens` /
@@ -573,35 +699,34 @@ knobs; the bag gets a prose note in the README.
 
 | Trigger | Path |
 |---|---|
-| plugin load | `constructor` → register `agent/pre-step` (if `auto`), `agent/disposed`, dispose effect |
-| every agent step | `agent/pre-step` → `foldPass` → sync → `kickTick` (bg) → `feedCalibration` → `compile` → `planFolds` → `applyFolds` |
-| `/compact` | `compactNow` → `agent.runMaintenance` → `foldPass` |
-| `/autobio` (if kept) | `setAutomaticFolding` → register/remove the pre-step listener |
-| memory formation | `manager.tick()` (library) → `bridge.complete()` → `ctx.llm.stream` → mint detected → `autobio/memory` event (with `sourceRange`) |
+| plugin load | `constructor` → register `agent/pre-step` (if the resolved `auto`), `agent/disposed`, dispose effect |
+| every agent step | `agent/pre-step` → `foldPass` → `syncSurface` → `syncToolDefinitions` → `feedCalibration` → `compileFolds` → `kickTick` (bg, refusal included) → `planFolds` → `applyFolds` |
+| `/compact` | `compactNow` → `agent.runMaintenance` → `foldPass` (turn `null`, maintenance and request signals composed) |
+| memory formation | `manager.tick()` (library) → `bridge.complete()` → `ctx.llm.stream` → `appendMemory` writes the `autobio/memory` record for the tick (mint and/or settled attempt) |
 | session fork | *nothing* — the forked log carries the events; the child's first fold pass seeds from them |
 | process restart / kill -9 | *nothing* — next open re-seeds from the log; zero LLM calls |
-| `agent/disposed` / shutdown | drop runtime, `manager.close()` — hygiene only |
+| `agent/disposed` / shutdown | drop the map entry — the store it held is the only thing to release |
 
 ## Sequence walkthroughs
 
 **Cold open of a long session.** First `agent/pre-step` → `runtimeFor` →
-`buildSeededShim` replays N events (~4k surface messages + ~200 summary
-events for the red-lemma session; sub-second) → `ContextManager.open` →
-strategy `initialize()` reads seeded slots, rebuilds chunk records from L1
-`sourceIds` via its lazy-migration path → fold pass proceeds with a complete
-pyramid. No LLM calls.
+`seedFromLog` replays N events (~4k surface messages + ~200 summary events for
+the red-lemma session) → `ContextManager.open` → strategy `initialize()` reads
+the seeded slots, rebuilds chunk records from L1 `sourceIds` via its
+lazy-migration path, and reads the `mergedInto` links sealing the pyramid → the
+fold pass proceeds with a complete pyramid. No LLM calls.
 
-**Steady-state step.** Sync appends the step's new events → background tick
-forms at most one memory → calibration fed from the last usage event →
-`compile(budget)` commits the frontier → walk usually produces zero ops
-(surface already matches) → `next()`.
+**Steady-state step.** `syncSurface` appends the step's new events →
+`compile(budget)` commits the frontier → `kickTick` hands the background chain
+one tick → walk usually produces zero ops (surface already matches) → `next()`.
 
-**Over budget mid-formation.** `compile` throws `OverBudgetError` with
-`actual` = measured floor → retry compile at floor+reserve → land that
-layout. If even that fails: warn, proceed raw, provider overflow recovery
-owns it. The turn NEVER waits on ticks.
+**Over budget mid-formation.** `compile` throws `OverBudgetError` with `actual`
+measured on the library's usable budget → retry compile at `actual + reserve`
+→ land that layout. If even that refuses: warn with both figures, land nothing,
+and try again next step. The turn NEVER waits on ticks, and the tick kicked
+after the refusal is what raises the floor the retry finds.
 
-**kill -9 at an arbitrary point.** Nothing to do. The shim dies; the log is
+**kill -9 at an arbitrary point.** Nothing to do. The store dies; the log is
 untouched; next open is the cold-open path.
 
 **Fork.** Nothing to do. The child's log already contains every
@@ -612,18 +737,21 @@ untouched; next open is the cold-open path.
 1. **Shim conformance**: scripted event log → seed → open → assert
    `summaries`/`messages`/counter contents; open twice, assert byte-identical
    seeds (determinism = the id-injection rule).
-2. **Red-lemma replay**: the real 1.27M-event log → seed → `compile` → walk;
+2. **Red-lemma replay**: a real 1.27M-event log → seed → `compile` → walk;
    assert the planned folds are consistent with the fold nodes the session
-   actually landed (Recall ids match, ranges match).
-3. **No-regeneration proof**: mock bridge whose `complete()` throws; kill and
-   reopen mid-history; assert zero bridge calls and a working plan.
+   actually landed (Recall ids match, ranges match). Deferred: the fixture is
+   scripted to red-lemma *shapes*, not replayed from the real log.
+3. **No-regeneration proof**: drive one engine over a session until it settles,
+   then reopen a second engine that shares nothing but the log; assert zero
+   bridge calls and a working plan.
 4. **Pair-safety invariant tests**: scripted surfaces with call/result
    straddles at both boundaries (including sibling-op adjacency); assert the
    widened ranges leave a pair-safe surface, and serialize the result through
-   the real `serializeMessages` to prove wire validity. Plus a property test:
-   replay real session logs, fold, and assert the surface stays pair-safe.
-5. **Bridge**: tools forwarded; `splitMixedToolMessages` applied; thinking
-   strip triggers when thinking+text > source.
+   the real `serializeMessages` to prove wire validity. The property test over
+   real session logs is deferred with the replay fixture.
+5. **Bridge**: tools forwarded; no split at this layer (the library splits
+   upstream) and a hoisted tool result heads its own message; thinking strip
+   triggers when thinking+text exceeds the source.
 6. **Calibration**: feed synthetic usage; assert one sample consumed per
    compile and out-of-band rejection leaves the multiplier alone.
 
@@ -640,3 +768,39 @@ untouched; next open is the cold-open path.
    store. Acceptable (unused); worth an upstream note.
 5. Session-ownership: confirm two processes can't hold the same live session
    (the archive's LOCK used to answer this for the store).
+
+## Known limitations and deferred work
+
+- **A folded message can keep a stale resolution (P11)** — the library's
+  `selectAdaptive` stages resolution changes only for messages outside the
+  head and tail windows (`autobiographical.ts:7878`:
+  `if (headMessageIds.has(id) || tailMessageIds.has(id)) continue`), and
+  `resolutions` has no delete path anywhere — a map entry is only ever
+  overwritten by a later compile or cleared with the whole map. A message
+  folded into a recollection while it sat in a head/tail window therefore
+  keeps its non-zero resolution when it later leaves that window, and the
+  planner reads it as covered ground: it can fold verbatim ground under a
+  recollection that does not stand over it. Recorded, not fixed — a correct
+  fix needs library-side state this backend cannot read (a resolution's
+  removal, or a per-compile frontier that names only standing entries). The
+  failure direction is premature folding, not an unfolded session.
+- **The session invariant refuses a fold node outside an open step** — with
+  `dsh-invariants` and `packages/core/session/src/invariant.ts` mounted,
+  `requireOpenStep` rejects an `assistant/message` naming turn *t*/step *s*
+  when the open step is `null`, which is exactly the fold a turn-boundary pass
+  lands: `assistant/message names turn 1/step 1 but open is turn 1/step null`.
+  The token meter carries the matching exemption (a message whose source holds
+  a `compactionId` takes no step anchor), the session invariant does not. A
+  deployment that mounts both needs the same exemption there.
+- **A call that streams nothing and reports no failure leaves no row** — the
+  bridge's terminal flush closes an attempt that produced text or an error;
+  a call that succeeds with an empty body is invisible to the chat. Pinned
+  pre-existing behavior, not a regression.
+- **The red-lemma replay fixture and its property test are not built** — both
+  promised above. The acceptance tests use fixtures scripted to red-lemma
+  *shapes* (threshold-plus-remainder pyramids, parallel tool rounds, legacy
+  fold nodes); a real 1.27M-event log replay is a separate acceptance harness.
+- **Upstream asks**: a public `resolutions` accessor (this backend reads the
+  protected field, as connectome-host's own UI does); a documented `JsStore`
+  injection surface; a Chronicle value-import that does not pull the native
+  module transitively; and the P11 resolution-removal path.

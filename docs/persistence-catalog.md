@@ -246,18 +246,18 @@ Source: [`packages/core/session/src/types.ts:273`](../packages/core/session/src/
 'autobio/memory': AutobiographicalMemoryEventData
 ```
 
-Source: [`packages/compaction/compaction-autobiographical/src/types.ts:120`](../packages/compaction/compaction-autobiographical/src/types.ts)
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:137`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 <a id="autobiomemory-progress--log-only"></a>
 
 #### `autobio/memory-progress` — log-only
 
 ```ts persistence-catalog
-/** Live memory-formation text as pre-rewrite builds logged it; read for compatibility, never written. */
+/** Live memory-formation text, and the terminal flush that closes the attempt. */
 'autobio/memory-progress': AutobiographicalMemoryProgressEventData
 ```
 
-Source: [`packages/compaction/compaction-autobiographical/src/types.ts:122`](../packages/compaction/compaction-autobiographical/src/types.ts)
+Source: [`packages/compaction/compaction-autobiographical/src/types.ts:139`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 ### `command/*`
 

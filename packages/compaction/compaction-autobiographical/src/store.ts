@@ -350,9 +350,10 @@ export class LogStore {
   }
 
   /**
-   * One branch, and always the same object: callers compare it by identity, and
-   * a fresh object per call would read as a branch switch and wipe the token
-   * cache.
+   * One branch, and always the same object: the library compares branches by
+   * name, so a stable name is what keeps a replay from reading as a branch
+   * switch and wiping the token cache, and one object is the simplest way to
+   * keep that name stable.
    *
    * @returns The one branch, the same object on every call.
    */

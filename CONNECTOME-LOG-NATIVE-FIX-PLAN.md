@@ -1,15 +1,18 @@
 # Log-native Connectome: fix plan
 
-Status: audit complete, fixes not started. This doc is the spec for fixing every
-finding from a three-pass audit of `packages/compaction/compaction-autobiographical`
-against `CONNECTOME-LOG-NATIVE-PLAN.md` and `CONNECTOME-LOG-NATIVE-IMPLEMENTATION.md`.
-It is written to be handed to a fresh context: the findings inventory is the
-authoritative spec — the two design docs are partly stale (see Doc drift).
+Status: complete. Parts 1–4 landed (`38af78d`, `90034cc`, `80a9006`, `5303fdc`,
+`b2dd5b0`) and Part 5 aligned the documentation and ran the final verification.
+Every finding below is closed except the deferred items listed in
+[Deferred](#deferred--recorded-not-fixed), which are recorded rather than fixed.
+This doc remains the authoritative inventory of what the audit found; where the
+two design docs contradict it, the findings won and the docs were corrected.
 
 ## Working-tree state
 
-Baseline: commit `c04b7dc` plus uncommitted work that must be kept and built
-upon, not reverted:
+Baseline: commit `c04b7dc` plus the uncommitted work the parts had to keep and
+build upon, not revert. That work is now committed; the list is kept because
+every finding below was located against it and the file:line references in the
+findings are against that tree, so locate by symbol rather than by line.
 
 - `src/{index,seed,plan,types}.ts` — live `autobio/memory-progress` streaming,
   JSON-storability guard on the mint record, attempt-counter hardening, and the
@@ -376,6 +379,42 @@ Files: `src/index.ts`, `src/apply.ts`, `src/bridge.ts`, `src/config.ts`,
    optional `error`, written on the terminal flush of a call that failed.** The
    row's node data carries it and `AutobioMemoryNodeView` renders the failed
    state; the event's dead `usage?` field is dropped (G3).
+
+## Deferred — recorded, not fixed
+
+- **E15's session-invariant variant.** The token meter exempts a compaction
+  replacement from step anchoring (a message whose source carries a
+  `compactionId` takes no anchor; `packages/llm/token-meter/src/index.ts:232`).
+  The session invariant does not: `requireOpenStep`
+  (`packages/core/session/src/invariant.ts:42-52`) rejects an
+  `assistant/message` naming turn *t*/step *s* while the open step is `null`,
+  which is exactly the fold a turn-boundary or maintenance pass lands —
+  `assistant/message names turn 1/step 1 but open is turn 1/step null`. A
+  deployment that mounts `dsh-invariants` with the session package therefore
+  refuses every log-native fold at append time. Left unfixed in Part 4 on
+  purpose (E15's spec was the meter, and the reporting session mounted no
+  invariants companion); the same exemption belongs in the session invariant.
+- **P11 — a stale non-zero resolution can fold verbatim ground.** The
+  library's `selectAdaptive` stages resolution changes only outside the head and
+  tail windows (`autobiographical.ts:7878`), and `resolutions` has no delete
+  path: a message folded while it sat in a head/tail window keeps its level
+  after it leaves, so the planner reads ground a landed fold already took. It
+  needs library-side data to fix correctly (a removal, or a frontier naming only
+  standing entries), so it is recorded rather than patched here. Blast radius is
+  premature folding, not an unfolded session.
+- **A successful-but-empty-stream call leaves no row.** The bridge's terminal
+  flush closes an attempt that produced text or an error; a call that succeeds
+  with an empty body is invisible to the chat. Pinned pre-existing behavior
+  (`captureText` returns before opening an attempt), not a regression.
+- **The red-lemma replay fixture and its real-log property test.** Both were
+  promised in the design docs' test plan and neither is built; the acceptance
+  tests use fixtures scripted to red-lemma *shapes* (threshold-plus-remainder
+  pyramids, parallel tool rounds, legacy fold nodes). A real 1.27M-event replay
+  is a separate acceptance harness.
+- **Upstream asks.** A public `resolutions` accessor (this backend reads the
+  protected field, as connectome-host's own UI does); a documented `JsStore`
+  injection surface; a Chronicle value-import that does not pull the native
+  module transitively; and P11's resolution-removal path.
 
 ## Do not "fix" (checked and sound)
 
