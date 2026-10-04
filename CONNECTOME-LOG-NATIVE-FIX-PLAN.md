@@ -253,6 +253,21 @@ Files: `src/index.ts`, `src/apply.ts`, `src/bridge.ts`, `src/config.ts`,
   `turn`/`step` inside a turn; pass `turn: null` for a standalone bracket on an
   idle agent (`applyFold` already supports it; `compaction-basic` is the
   reference). Also fixes the hardcoded `step: 0` (P10).
+- **E15 [high, confirmed live]** The fold node's `assistant/message` trips the
+  token meter's step invariant: the meter requires every `assistant/message`
+  inside a matching open `step/start..step/end`
+  (`packages/llm/token-meter/src/index.ts:221-227`), but the log-native engine
+  lands folds from `runMaintenance` at turn boundaries, outside any step —
+  `token meter: assistant/message at seq N has no matching step/start event`,
+  observed live in a real session. The legacy architecture never hit this
+  because it wrote fold nodes mid-step on the inference thread. Fix in the
+  meter's contract (this is the one Part 4 item outside the package): exempt
+  assistant/messages that are compaction replacements — identified by
+  `message.source.compactionId`, which `applyFold` already sets — from the
+  stepStart requirement; they are priced by the shadow-price adjacency
+  protocol, not by step anchoring. Do not fake a synthetic step (distorts
+  usage accounting) and do not stamp a real turn/step (only possible inside a
+  step, which the design left on purpose).
 - **E2 [medium]** No abort plumbing anywhere: the bridge stream never sets
   `GenerateOptions.signal`, `foldPass` takes no signal, `compactNow` ignores
   the maintenance signal — in-flight compression keeps streaming and paying
