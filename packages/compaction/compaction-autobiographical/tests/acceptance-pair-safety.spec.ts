@@ -14,7 +14,7 @@
 
 import { Context } from '@deepseek-ai/cordis'
 import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { CompactionAgentContext } from '@deepseek-ai/dsh-compaction'
@@ -55,11 +55,26 @@ function round(session: Session, turn: number): { call: number; result: number }
   return { call, result }
 }
 
+/** The one tool every round calls, declared the way a request header declares it. */
+const TOOL: ToolSchema = {
+  name: 'read',
+  description: 'read a file',
+  parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+}
+
 /** A transcript where every turn asks for a tool and is answered. */
 function toolTranscript(id: string, turns: number): { session: Session; pairs: Map<string, { call: number; result: number }> } {
   const session = Session.create(SessionId(id))
   const pairs = new Map<string, { call: number; result: number }>()
   session.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 100_000 })
+  // The header a real session logs, and the only way the strategy learns the
+  // session's tools: with tool blocks in history but no definitions pushed, it
+  // defers every tool-bearing chunk rather than replay a tool transcript without
+  // its tools.
+  session.append('request/header', {
+    header: { config: { provider: 'test', model: 'test-model' }, tools: [TOOL] },
+    reason: 'initial',
+  })
   for (let turn = 0; turn < turns; turn++) {
     session.append('turn/start', { turn })
     session.append('user/message', createUserMessage({
@@ -175,7 +190,7 @@ describe('a fold never splits a tool pair', () => {
   // the result of a round, which is the arrangement that needs widening, and
   // asserts the plan reaches back for the call.
   it('reaches the call of a recollection that starts on a result', () => {
-    const { op, call, result } = foldOver('widen-backward', 9, 14)
+    const { op, call, result } = foldOver('widen-backward', 10, 15)
     expect({ call, result, covered: [op.shadowedSeqs.includes(call), op.shadowedSeqs.includes(result)] })
       .toEqual({ call, result, covered: [true, true] })
   })
@@ -189,15 +204,16 @@ describe('a fold never splits a tool pair', () => {
   // coverage read some other way, and `plan.spec.ts` covers it on a
   // hand-built surface.
   it('takes the result with the call when coverage lands on one', () => {
-    const { op, call, result } = foldOver('pair-atomic', 8, 8)
+    const { op, call, result } = foldOver('pair-atomic', 9, 9)
     expect(op.shadowedSeqs).toEqual([call, result])
   })
 })
 
 /**
  * One fold over a recollection covering log seqs `from..to` of a tool
- * transcript, with the pair that range lands on reported so a case can name what
- * it expects. Round `n` asks on seq `3n + 2` and is answered on `3n + 3`.
+ * transcript, with the pair that range starts on reported so a case can name what
+ * it expects. Round `n` asks on seq `5n + 3`, calls on `5n + 4` and is answered
+ * on `5n + 5`.
  */
 function foldOver(id: string, from: number, to: number): {
   op: NonNullable<ReturnType<typeof planFolds>[number]>
@@ -227,7 +243,7 @@ function foldOver(id: string, from: number, to: number): {
     seqOf,
   })[0]
   if (out === undefined) throw new Error(`fixture ${id} produced no fold`)
-  const [, pair] = [...pairs][Math.floor(from / 3) - 1] ?? []
+  const pair = [...pairs.values()].find(one => one.call === from || one.result === from)
   if (pair === undefined) throw new Error(`fixture ${id} lost the pair at ${from}`)
   return { op: out, call: pair.call, result: pair.result }
 }

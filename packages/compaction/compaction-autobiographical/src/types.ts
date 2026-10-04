@@ -93,10 +93,33 @@ export interface AutobiographicalMemoryEventData extends StrategyStats {
   usage?: TokenUsage
 }
 
+/**
+ * Log-only record of one streamed-text flush from an in-flight
+ * memory-formation call, as builds before the log-native rewrite wrote it.
+ *
+ * This build never appends one: a recollection reaches the transcript through
+ * its fold node instead, and the call's usage rides the tick record. The type
+ * stays in the vocabulary because the read path refuses a log holding a type
+ * outside it, so dropping the declaration would make every session written
+ * before the rewrite unopenable.
+ */
+export interface AutobiographicalMemoryProgressEventData {
+  /** Bridge call number within the session runtime; groups one call's flushes. */
+  attempt: number
+  /** Text streamed since the previous flush; empty on the terminal flush. */
+  delta: string
+  /** Present on the call's terminal flush, success or failure. */
+  done?: boolean
+  /** The call's provider-reported usage on the terminal flush. */
+  usage?: TokenUsage
+}
+
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Log-only record of one memory-formation tick that has news to report. */
     'autobio/memory': AutobiographicalMemoryEventData
+    /** Live memory-formation text as pre-rewrite builds logged it; read for compatibility, never written. */
+    'autobio/memory-progress': AutobiographicalMemoryProgressEventData
   }
 }
 

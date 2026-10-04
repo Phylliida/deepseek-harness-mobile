@@ -31,12 +31,15 @@ export interface SlotKind {
   strategy: string
 }
 
-/** A store record as the library receives it. */
+/**
+ * A store record as the library receives it. Chronicle also carries the
+ * written item as a serialized `payload`; nothing reads it, and building one
+ * would serialize every appended item for no reader (see `LogStore.record`).
+ */
 export interface StoreRecord {
   id: string
   sequence: number
   recordType: string
-  payload: Buffer
   timestamp: number
   causedBy: string[]
   linkedTo: string[]
@@ -65,17 +68,25 @@ export function slots(): { messages: SlotKind; summaries: SlotKind; counter: Slo
 }
 
 /**
- * Capability probes. The library asks whether these exist with `typeof` and
- * takes absence as the answer, so these must resolve to `undefined` rather than
- * to the thrower below — a thrower would be this store claiming a capability it
- * does not have, which is exactly what the library is trying to rule out.
+ * The names the store answers with absence rather than with the thrower below.
+ *
+ * The library asks about the first three with `typeof` and takes absence as the
+ * answer: it skips index registration outright, and the two query names are how
+ * it reports a store it cannot run an indexed query against. Answering those
+ * with a function makes the store claim a capability it does not have, and the
+ * drift thrower then fires from inside the library's own capability check
+ * instead of the library's own unsupported-store path.
  *
  * `registerStateFieldIndex` builds the index behind `MessageStore`'s time-range
  * and channel queries. This store holds plain arrays rebuilt from the log on
  * every open, so there is no persisted slot to index; those queries are not on
  * the path that opens, seeds, plans, or folds.
+ *
+ * `then` and `toJSON` are the same rule for the two probes a value meets
+ * outside the library: a `then` runs the thrower on `await store`, and a
+ * `toJSON` runs it on `JSON.stringify(store)`.
  */
-const PROBED = new Set(['registerStateFieldIndex'])
+const PROBED = new Set(['registerStateFieldIndex', 'queryStateIndexRange', 'queryStateIndexEq', 'then', 'toJSON'])
 
 /**
  * The store `ContextManager` sees. Structurally the library's `JsStore`, and one
@@ -135,8 +146,17 @@ export class LogStore {
   registerState(registration: SlotKind): void {
     if (this.registrations.has(registration.id)) throw new Error(`State with id '${registration.id}' already exists`)
     this.registrations.set(registration.id, registration)
-    if (registration.strategy === 'snapshot') this.scalars.set(registration.id, null)
-    else this.arrays.set(registration.id, [])
+    // A slot can be written before it is registered — `setStateJson` stores a
+    // snapshot for an id it has never seen. The other kind of storage is cleared
+    // here, because a leftover scalar answers every read while appends go to the
+    // array beside it, and the two would never meet.
+    if (registration.strategy === 'snapshot') {
+      this.arrays.delete(registration.id)
+      this.scalars.set(registration.id, null)
+    } else {
+      this.scalars.delete(registration.id)
+      this.arrays.set(registration.id, [])
+    }
   }
 
   /**
@@ -177,7 +197,7 @@ export class LogStore {
     const sequence = this.seq++
     const stored = { ...item as Record<string, unknown>, [idField]: recordId(sequence), [sequenceField]: sequence }
     this.array(stateId).push(stored)
-    return this.record(stateId, stored, sequence)
+    return this.record(stateId, sequence)
   }
 
   /**
@@ -208,14 +228,22 @@ export class LogStore {
    * swap the slot's reference.
    *
    * @param stateId - An append-log slot registered with `registerState`.
-   * @param index - Position within that slot to overwrite.
+   * @param index - Position within that slot to overwrite. The library resolves
+   * it from the entry's id before editing, so a position past the end means the
+   * caller lost its place: assigning there would leave a hole, or append where
+   * the caller meant to replace.
    * @param payload - The entry's new value, as a JSON buffer.
    * @returns The record describing the write.
+   * @throws Error When `index` is outside the slot's entries.
    */
   editStateItem(stateId: string, index: number, payload: Buffer): StoreRecord {
     const value = JSON.parse(payload.toString('utf-8')) as unknown
-    this.array(stateId)[index] = value
-    return this.record(stateId, value, this.seq++)
+    const entries = this.array(stateId)
+    if (index < 0 || index >= entries.length) {
+      throw new Error(`LogStore: editStateItem(${stateId}, ${index}) is outside the slot's ${entries.length} entries`)
+    }
+    entries[index] = value
+    return this.record(stateId, this.seq++)
   }
 
   /**
@@ -237,7 +265,7 @@ export class LogStore {
   redactStateItems(stateId: string, start: number, end: number): StoreRecord {
     if (stateId === MESSAGES_STATE) throw new Error('LogStore: the messages slot is append-only')
     this.array(stateId).splice(start, end - start)
-    return this.record(stateId, { redacted: [start, end] }, this.seq++)
+    return this.record(stateId, this.seq++)
   }
 
   /**
@@ -308,7 +336,7 @@ export class LogStore {
     // with a value its own reader cannot walk.
     if (this.arrays.has(stateId)) this.arrays.set(stateId, stored as unknown[])
     else this.scalars.set(stateId, stored)
-    return this.record(stateId, stored, this.seq++)
+    return this.record(stateId, this.seq++)
   }
 
   /**
@@ -354,18 +382,47 @@ export class LogStore {
     return null
   }
 
+  /**
+   * Chronicle writes its log to disk here. This store holds nothing on disk, so
+   * there is nothing to flush; the library calls it from `ContextManager.sync`.
+   */
+  sync(): void {
+    // Nothing is persisted, so a flush has no work to do.
+  }
+
+  /**
+   * Chronicle releases its file handle here, and `ContextManager` calls it only
+   * when it opened the store itself. This backend always hands its own store in,
+   * so the map holding it is the only thing disposal has to drop.
+   */
+  close(): void {
+    // Nothing is held open, so a close has no work to do.
+  }
+
+  /**
+   * Whether the store has been closed. `ContextManager.isClosed` asks this, and a
+   * store that holds nothing open has no closed state to report.
+   *
+   * @returns Always false.
+   */
+  isClosed(): boolean {
+    return false
+  }
+
   private array(stateId: string): unknown[] {
     const found = this.arrays.get(stateId)
     if (!found) throw new Error(`LogStore: no append-log state "${stateId}" — registerState was never called for it`)
     return found
   }
 
-  private record(stateId: string, payload: unknown, sequence: number): StoreRecord {
+  /** The record a write reports. The written item is already in the slot, and
+   * nothing reads a serialized copy of it, so the record carries the write's
+   * identity alone. */
+  private record(stateId: string, sequence: number): StoreRecord {
     return {
       id: recordId(sequence),
       sequence,
       recordType: `state:${stateId}`,
-      payload: Buffer.from(JSON.stringify(payload)),
       timestamp: Date.now(),
       causedBy: [],
       linkedTo: [],

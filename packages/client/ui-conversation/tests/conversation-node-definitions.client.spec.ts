@@ -5,6 +5,7 @@ import type {
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { ConversationNodeAssembler } from '@deepseek-ai/dsh-client-runtime/client'
 import { assistantDefinition } from '../src/client/conversation-nodes/assistant.ts'
+import { autobioMemoryDefinition } from '../src/client/conversation-nodes/autobio.ts'
 import { chatViewDefinition } from '../src/client/conversation-nodes/chat-snapshot-builder.ts'
 import { commandDefinition } from '../src/client/conversation-nodes/command.ts'
 import { compactionDefinition } from '../src/client/conversation-nodes/compaction.ts'
@@ -28,6 +29,7 @@ const DEFINITIONS: readonly ConversationNodeDefinition[] = [
   toolDefinition,
   commandDefinition,
   compactionDefinition,
+  autobioMemoryDefinition,
   retryDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
@@ -763,18 +765,40 @@ describe('built-in conversation node Definitions', () => {
     expect(node(snapshot(plain), 'compaction')).toBeUndefined()
   })
 
-  it('keeps no chat row for a memory-formation tick', () => {
-    // The tick record is the replay's archive, not chat: a settled
-    // `autobio/memory` event renders nothing, and a malformed one neither
-    // matches nor disturbs the surrounding nodes.
+  it('streams one memory-formation row per bridge call', () => {
+    // The live flushes and the tick record that settles a call report one
+    // attempt, so they collapse into one row: the stream's text while the call
+    // is in flight, the minted recollection once it lands. Malformed records
+    // carry no attempt and match nothing, leaving the surrounding nodes alone.
     const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
       at(3, 'user/message', textMessage('u1', 'hello'), { surfaceOp: 'append' }),
-      at(10, 'autobio/memory', { note: 'not a stats record' }),
-      at(20, 'autobio/memory', 'not even an object'),
+      at(10, 'autobio/memory-progress', { attempt: 1, delta: 'I recall ' }),
+      at(11, 'autobio/memory-progress', { attempt: 1, delta: 'the exchange.' }),
+      at(12, 'autobio/memory', {
+        attempt: 1,
+        chunksTotal: 4,
+        chunksCompressed: 1,
+        compressionCount: 1,
+        l1: 1,
+        l2: 0,
+        l3: 0,
+        pendingMerges: 0,
+        memory: { id: 'L1-0', level: 1, content: 'I recall the exchange.', tokens: 6, created: 1 },
+      }),
+      at(20, 'autobio/memory-progress', { attempt: 2, delta: 'a second call' }),
+      at(30, 'autobio/memory', { note: 'not a stats record' }),
+      at(40, 'autobio/memory-progress', { attempt: 'one', delta: 'x' }),
     ])
-    const nodes = [...snapshot(value).nodes.values()]
-    expect(nodes).toHaveLength(1)
-    expect(nodes[0]?.data).toMatchObject({ seq: 3 })
+    const rows = [...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.data).toMatchObject({ text: 'I recall the exchange.', streaming: false })
+    expect(rows[1]?.data).toMatchObject({ text: 'a second call', streaming: true })
+    // Log-only records carry no turn of their own, so the row is seated by the
+    // seq it lands on rather than by a coordinate its payload declares.
+    expect(rows[0]?.location).toMatchObject({ kind: 'step', turn: { turn: 1 }, step: { step: 1 } })
+    expect(node(snapshot(value), 'user')?.data).toMatchObject({ seq: 3 })
   })
 
   it('ignores legacy retry and code-dispatch events without correlation ids', () => {

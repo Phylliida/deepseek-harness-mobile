@@ -26,13 +26,14 @@ import type {
 } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { RequestContext, Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import { applyFold } from './apply.ts'
 import { createBridge } from './bridge.ts'
 import { resolveConfig } from './config.ts'
 import { planFolds } from './plan.ts'
-import { appendSurfaceNode, resolveRange, seedFromLog } from './seed.ts'
+import { appendSurfaceNode, recollectionRows, resolveRange, seedFromLog } from './seed.ts'
 import { createStore } from './store.ts'
 import type { LogStore } from './store.ts'
 import type { AutobiographicalCompactionConfig, AutobiographicalMemoryMint, RecollectionRange } from './types.ts'
@@ -48,6 +49,9 @@ export const name = 'compaction-autobiographical'
 
 /** Services this engine needs before it can fold anything. */
 export const inject = ['llm']
+
+/** Streamed characters buffered before one live record is appended: a record per chunk would put a token-size row in the durable log. */
+const PROGRESS_FLUSH_CHARS = 1000
 
 /** The live context-manager stack for one session. */
 interface Runtime {
@@ -68,11 +72,12 @@ interface Runtime {
    */
   walked: number
   /**
-   * The attempt counter this runtime has reached, this call's usage, and whether
-   * the call streamed any text — the terminal flush carries an empty delta, so
-   * only the mid-call flushes prove a call produced something.
+   * The attempt counter this runtime has reached, this call's usage, the text it
+   * has streamed since the last live record, and whether the call streamed any
+   * text — the terminal flush carries an empty delta, so only the mid-call
+   * flushes prove a call produced something.
    */
-  progress: { attempt: number; active: boolean; usage?: TokenUsage }
+  progress: { attempt: number; active: boolean; buffer: string; usage?: TokenUsage }
   /**
    * The attempt count the newest record in the log reports. Replay seeds it from
    * the log and every write moves it forward, so a tick that finishes no call
@@ -277,7 +282,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       const event = session.events[index] as SessionEvent
       runtime.walked = index
       if (!isAppendSurfaceEvent(event)) continue
-      const id = appendSurfaceNode(runtime.store, session, event)
+      const id = appendSurfaceNode(runtime.manager, session, event)
       if (id === undefined) continue
       runtime.seqOf.set(id, event.seq)
     }
@@ -319,20 +324,51 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    *
    * A tick that neither minted nor finished a call has nothing to say, and saying
    * it anyway would append an identical record on every pass forever.
+   *
+   * The record carries values this engine does not construct — the strategy's
+   * counters, the recollection the library minted, the call's reported usage — and
+   * the log accepts lossless JSON only. A record that cannot cross that boundary
+   * is reported in full and not written, counters included: it is a bug in what
+   * feeds the record, and the console line is the whole evidence for it. Guessing
+   * at the value would hide the bug and write a record the reader can no longer
+   * trust.
    */
   private appendMemory(runtime: Runtime, session: Session): void {
     const mint = this.newestMint(runtime)
     if (mint === undefined && runtime.progress.attempt <= runtime.recorded) return
     const { progress } = runtime
     const usage = progress.usage
+    const { attempt } = progress
+    // The count this record names is the one a reopen seeds the counter from, so a
+    // record that cannot carry a count is refused here rather than written: storing
+    // it would leave a session that reads back a counter it cannot be resumed from,
+    // and every record after it would inherit the same count.
+    if (!Number.isFinite(attempt)) {
+      this.warn(`refusing to record a call settled at attempt ${String(attempt)}; the counter is not a number`)
+      return
+    }
     delete progress.usage
-    runtime.recorded = progress.attempt
-    session.append('autobio/memory', {
+    const data = {
       ...runtime.strategy.getStats(),
-      attempt: progress.attempt,
+      attempt,
       ...usage === undefined ? {} : { usage },
       ...mint === undefined ? {} : { memory: mint },
-    })
+    }
+    try {
+      session.append('autobio/memory', data)
+    } catch (error: unknown) {
+      // The record is the archive's only account of this tick, so a refusal is
+      // reported whole — what was being written, and which value in it the log
+      // could not store. Dropping one field or writing a coerced one would leave
+      // a record that reads as complete and is not.
+      this.warn(`the memory record for attempt ${attempt} was refused: ${describe(error)}`)
+      for (const line of describeJsonFailures(data)) this.warn(`  unsupported value: ${line}`)
+      this.warn(`  data: ${bounded(JSON.stringify(data))}`)
+      return
+    }
+    // Only a record the log holds is a count a reopen can read back, so the field
+    // moves after the write rather than before it.
+    runtime.recorded = attempt
   }
 
   /**
@@ -345,7 +381,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   private newestMint(runtime: Runtime): AutobiographicalMemoryMint | undefined {
     for (const summary of internals(runtime.strategy).summaries) {
       if (runtime.known.has(summary.id)) continue
-      const range = resolveRange(runtime.seqOf, summary)
+      const range = resolveRange(runtime.seqOf, summary, recollectionRows(runtime.store))
       // A recollection whose ground is not in the store has no coverage to
       // record, and a replayed entry citing nothing is rejected by the strategy's
       // own source validation on the next open, so it is left for a later pass
@@ -422,7 +458,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       carrierPolicy: 'live-strip',
     })
     const recorded = attemptFromLog(agent.session)
-    const progress: Runtime['progress'] = { attempt: recorded, active: false }
+    const progress: Runtime['progress'] = { attempt: recorded, active: false, buffer: '' }
     // No estimator is handed over: the manager's own default is density-aware
     // and its calibration reports against the wire, so a fixed-density one here
     // would only overwrite the first of those.
@@ -440,7 +476,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         llm: this.ctx.llm,
         provider: route.provider,
         warn: (message) => { this.warn(message) },
-        onText: (delta, done, usage) => { this.captureText(progress, delta, done, usage) },
+        onText: (delta, done, usage) => { this.captureText(agent.session, progress, delta, done, usage) },
       }),
     })
     return {
@@ -458,23 +494,38 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   }
 
   /**
-   * Record a settled bridge call. The attempt counter advances here and nowhere
-   * else, so a replayed log reconstructs it, and `appendMemory` writes the record
-   * the counter and usage belong to.
+   * Record a bridge call's streamed text and, on the terminal flush, its usage.
+   * The attempt counter advances when a call first streams text, so the live
+   * records and the tick record that settles the call report one attempt.
    */
   private captureText(
+    session: Session,
     progress: Runtime['progress'],
     delta: string,
     done: boolean,
     usage: TokenUsage | undefined,
   ): void {
-    progress.active ||= delta.length > 0
-    // A call that never streamed text formed no memory, and usage without text is
-    // not one either — leave the counter alone so the next tick writes no record.
-    // The terminal flush's own delta is always empty, so the verdict comes from
-    // the mid-call flushes this flag accumulated.
-    if (!done || !progress.active) return
-    progress.attempt++
+    if (!progress.active) {
+      // The terminal flush carries an empty delta, so a call that never streamed
+      // one formed no memory: it takes no attempt number and leaves no record.
+      if (delta.length === 0) return
+      progress.active = true
+      progress.attempt++
+    }
+    progress.buffer += delta
+    if (done || progress.buffer.length >= PROGRESS_FLUSH_CHARS) {
+      try {
+        session.append('autobio/memory-progress', {
+          attempt: progress.attempt,
+          delta: progress.buffer,
+          ...done ? { done: true } : {},
+        })
+      } catch {
+        // A session that closed mid-call costs this flush, not the call.
+      }
+      progress.buffer = ''
+    }
+    if (!done) return
     progress.active = false
     // `exactOptionalPropertyTypes`: absent and `undefined` are not the same
     // property, and a call that reported no usage must not leave the previous
@@ -554,11 +605,20 @@ function newestUsage(session: Session): { seq: number; usage: TokenUsage } | und
  * The attempt count the log already recorded, read once when a runtime opens. A
  * replayed session resumes the counter from the log rather than from zero, so a
  * tick that finishes no call has nothing new to report and writes nothing.
+ *
+ * Records that do not name a count are skipped rather than read as one, because
+ * a count that is not a number poisons the counter it seeds: `Math.max(0, NaN)`
+ * is `NaN`, which is what every later record would then report, and a session
+ * that opens on one is wedged for good. Sessions written before a record carried
+ * a count hold such events, so this reads the newest count instead of folding
+ * every event into a maximum.
  */
 function attemptFromLog(session: Session): number {
   let attempt = 0
   for (const event of session.events) {
-    if (event.type === 'autobio/memory') attempt = Math.max(attempt, event.data.attempt)
+    if (event.type !== 'autobio/memory') continue
+    const recorded = event.data.attempt as unknown
+    if (typeof recorded === 'number' && Number.isFinite(recorded)) attempt = Math.max(attempt, recorded)
   }
   return attempt
 }
@@ -583,6 +643,74 @@ function createMint(summary: SummaryEntry, range: { firstSeq: number; lastSeq: n
  */
 function internals(strategy: AutobiographicalStrategy): Internals {
   return strategy as unknown as Internals
+}
+
+/**
+ * Every value in a record the session log cannot store, as console lines: where
+ * each one sits, what it is, and the value itself. The record's own
+ * `JSON.stringify` renders `NaN` and `undefined` as `null`, so the report says
+ * what the value actually is rather than what that text would show.
+ *
+ * Exported for its own spec: the tick's record is built from values the library
+ * hands over, and a spec that has to make the log refuse one cannot reach the
+ * readings this function exists to produce.
+ *
+ * @param data - the record the log refused.
+ * @returns one line per offending field, or that the record itself is storable
+ *   and the refusal came from elsewhere.
+ */
+export function describeJsonFailures(data: unknown): string[] {
+  const found = unstorableFields(data, '')
+  if (found.length === 0) return ['none — every value in the record is storable JSON']
+  return found.map(({ path, value }) => `${path} is ${describeValue(value)}`)
+}
+
+/** Every field the lossless-JSON boundary refuses, reported by path. */
+function unstorableFields(value: unknown, path: string): { path: string; value: unknown }[] {
+  if (isJsonValue(value)) return []
+  // Only a record or a list has fields to walk into. An exotic object is refused
+  // for what it is, and what it holds is not the log's business.
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => unstorableFields(item, `${path}${index}.`))
+  }
+  if (value !== null && typeof value === 'object' && value.constructor.name === 'Object') {
+    return Object.entries(value).flatMap(([key, item]) => unstorableFields(item, `${path}${key}.`))
+  }
+  return [{ path: path === '' ? '<the record itself>' : path.replace(/\.$/, ''), value }]
+}
+
+/**
+ * A value as a console line can show it: what it is, and its own text where that
+ * text means something. A value that came out of an exotic object or a function
+ * is named by what it is, because its JSON text is `{}` or nothing at all.
+ *
+ * @param value - the value the log refused.
+ * @returns the value's type and text, truncated to a line's worth.
+ */
+function describeValue(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (typeof value === 'number' && !Number.isFinite(value)) return `a non-finite number (${String(value)})`
+  if (typeof value === 'function') return `a function (${value.name})`
+  // `JSON.stringify` passes straight through a string, so its own quotes say it
+  // is one; only the text has to be bounded.
+  if (typeof value === 'string') return value.length > 300 ? `${JSON.stringify(value.slice(0, 300))}…` : JSON.stringify(value)
+  if (typeof value === 'object') {
+    // The log refuses an exotic object for what it is, not for its text, and an
+    // object whose `toJSON` writes the text has no business in a durable field.
+    return value.constructor.name === 'Object'
+      ? `an object the log cannot store: ${bounded(JSON.stringify(value))}`
+      : `a ${value.constructor.name}`
+  }
+  /* v8 ignore next -- the boundary refuses null, booleans, numbers, strings,
+     arrays, plain objects, and exotic objects; the readings above are every value
+     it can name but the boundary's own reading of it. */
+  return 'a symbol the log cannot store'
+}
+
+/** A console line's worth of text, so one refused record cannot flood the log. */
+function bounded(text: string): string {
+  return text.length > 600 ? `${text.slice(0, 600)}…` : text
 }
 
 function describe(error: unknown): string {

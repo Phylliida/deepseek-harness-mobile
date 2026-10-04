@@ -74,10 +74,31 @@ describe('LogStore', () => {
     expect(() => { store.registerState(slots().counter) }).toThrow(/already exists/)
   })
 
+  it('reports a write\'s identity without serializing the entry, which nothing reads', () => {
+    const { store } = seeded(1)
+    const cyclic: Record<string, unknown> = { id: 'L1-0' }
+    cyclic['self'] = cyclic
+    // `JSON.stringify` refuses a cycle, so an append that lands proves the record
+    // carries the write's identity rather than a serialized copy of the entry.
+    const record = store.appendToStateJson(slots().summaries.id, cyclic)
+    expect(Object.hasOwn(record, 'payload')).toBe(false)
+    expect(record.sequence).toBe(store.currentSequence())
+    expect(record.recordType).toBe(`state:${slots().summaries.id}`)
+  })
+
   it('retunes a slot via updateStateStrategy, which is feature-detected', () => {
     const { store } = seeded(1)
     store.updateStateStrategy({ ...slots().summaries, strategy: 'append_log' })
     expect(store.listStates()).toContainEqual({ id: slots().summaries.id, strategy: 'append_log' })
+  })
+
+  it('flushes and closes without work, and reports a store that has no closed state', () => {
+    const { store } = seeded(1)
+    // Both are Chronicle's disk duties, which this store has none of; the library
+    // reaches them through `ContextManager.sync` and `ContextManager.close`.
+    expect(() => { store.sync() }).not.toThrow()
+    expect(() => { store.close() }).not.toThrow()
+    expect(store.isClosed()).toBe(false)
   })
 
   it('round-trips reads through JSON so a warm cache hashes like a cold one', () => {
@@ -87,14 +108,6 @@ describe('LogStore', () => {
     const read = (store.getStateJson(MESSAGES_STATE) as Array<{ extra: unknown }>)[0]?.extra
     expect(read).toEqual(written)
     expect(Object.getPrototypeOf(read)).toBe(Object.prototype)
-  })
-
-  it('assigns the identity its append-log writers cite back', () => {
-    const { store } = seeded(1)
-    const record = store.appendToStateJson(slots().summaries.id, { content: 'x' })
-    const stored = JSON.parse(String(record.payload)) as { storeId: string; storeSequence: number }
-    expect(stored.storeId).toBe(record.id)
-    expect(stored.storeSequence).toBe(record.sequence)
   })
 
   it('leaves a payload\'s own identity alone, because a recollection is named by it', () => {
@@ -112,6 +125,27 @@ describe('LogStore', () => {
     store.editStateItem(MESSAGES_STATE, 0, Buffer.from(JSON.stringify({ participant: 'system' })))
     expect(store.getStateJson(MESSAGES_STATE)).toBe(live)
     expect((live[0] as { participant: string }).participant).toBe('system')
+  })
+
+  it('refuses an edit outside the slot rather than writing a hole', () => {
+    const { store } = seeded(1)
+    const before = store.getStateJson(MESSAGES_STATE) as unknown[]
+    expect(() => store.editStateItem(MESSAGES_STATE, before.length, Buffer.from('{}'))).toThrow(/outside the slot/)
+    expect(() => store.editStateItem(MESSAGES_STATE, -1, Buffer.from('{}'))).toThrow(/outside the slot/)
+    // Neither refusal moved the slot: a sparse assignment would have grown it.
+    expect(store.getStateJson(MESSAGES_STATE)).toEqual(before)
+  })
+
+  it('moves a slot first written as a scalar onto the storage its registration names', () => {
+    const store = new LogStore()
+    const ids = slots()
+    // `setStateJson` stores a snapshot for an id it has never seen, and the id is
+    // then registered as an append log. Reads have to follow the appends, or every
+    // read answers from the scalar the slot was never given.
+    store.setStateJson(ids.counter.id, 3)
+    store.registerState({ id: ids.counter.id, strategy: 'append_log' })
+    store.appendToStateJson(ids.counter.id, { note: 'first' })
+    expect(store.getStateJson(ids.counter.id)).toEqual([expect.objectContaining({ note: 'first' })])
   })
 
   it('refuses to redact the messages slot, whose ids are surface positions', () => {
@@ -227,6 +261,34 @@ describe('ContextManager over a seeded LogStore', () => {
     expect(second.getStateJson(MESSAGES_STATE)).toEqual(first.getStateJson(MESSAGES_STATE))
     expect(second.getStateJson(slots().counter.id)).toEqual(first.getStateJson(slots().counter.id))
   })
+
+  it('syncs, stays open and reports not-closed through the manager', async () => {
+    const { store } = seeded(2)
+    const manager = await ContextManager.open({ store: store as never, strategy: strategy() })
+
+    // Three calls the library makes on the store it was handed: a flush, a close
+    // it owns only for a store it opened itself, and a closed check.
+    expect(() => { manager.sync() }).not.toThrow()
+    expect(() => { manager.close() }).not.toThrow()
+    expect(manager.isClosed()).toBe(false)
+  })
+
+  it('reports the index queries it does not have as unsupported, not as a missing method', async () => {
+    // The proxied store the engine hands the library, not the raw class: absence is
+    // a property of the boundary, and the raw class answers absent either way.
+    const store = createStore()
+    seedFromLog(store, transcript(2))
+    const manager = await ContextManager.open({ store: store as never, strategy: strategy() })
+    const probes = store as unknown as Record<string, unknown>
+
+    // The library `typeof`-probes both and answers for itself when they are
+    // absent. A thrower here makes the store look capable, and the failure the
+    // library's own capability check reports becomes this store's drift alarm.
+    expect(typeof probes['queryStateIndexRange']).not.toBe('function')
+    expect(typeof probes['queryStateIndexEq']).not.toBe('function')
+    expect(() => manager.queryMessagesByTime({ fromMs: 0, toMs: Date.now() }))
+      .toThrow(/Chronicle history index unsupported/)
+  })
 })
 
 describe('the guard on unmodelled store methods', () => {
@@ -243,6 +305,16 @@ describe('the guard on unmodelled store methods', () => {
     // `MessageStore` probes this with `typeof` and skips registration when it is
     // missing; a thrower here would fail every open on a real session.
     expect(typeof store['registerStateFieldIndex']).not.toBe('function')
+  })
+
+  it('awaits and stringifies without the drift alarm, because neither is a store capability', async () => {
+    const store = createStore()
+
+    // Both are JavaScript's own probes, not the library's. A `then` here rejects
+    // every `await store`; a `toJSON` throws out of any diagnostic that
+    // stringifies the store it was handed.
+    expect(await (store as unknown as PromiseLike<unknown>)).toBe(store)
+    expect(() => JSON.stringify(store)).not.toThrow()
   })
 
   it('leaves the modelled surface alone', () => {

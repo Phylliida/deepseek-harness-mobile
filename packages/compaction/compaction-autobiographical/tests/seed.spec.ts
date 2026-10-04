@@ -7,15 +7,15 @@
  * survives the process that produced it going away.
  */
 
-import type { SummaryEntry } from '@animalabs/context-manager'
+import type { MessageId, SummaryEntry } from '@animalabs/context-manager'
+import { AutobiographicalStrategy, ContextManager } from '@animalabs/context-manager'
 import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
-import { appendSurfaceNode, readMemoryLog, seedFromLog } from '../src/seed.ts'
-import { LogStore, MESSAGES_STATE, slots } from '../src/store.ts'
+import { appendSurfaceNode, readMemoryLog, resolveRange, seedFromLog } from '../src/seed.ts'
+import { createStore, LogStore, MESSAGES_STATE, slots } from '../src/store.ts'
 import type { AutobiographicalMemoryEventData, AutobiographicalMemoryMint } from '../src/types.ts'
-
 
 /** A fresh session with one exchange appended, and the seqs it landed on. */
 function session(id: string): { session: Session; ask: number; answer: number } {
@@ -61,6 +61,15 @@ function tick(overrides: {
       created: 1_700_000_000_000,
       ...overrides.range === undefined ? {} : { sourceRange: overrides.range },
     },
+  }
+}
+
+/** A recollection carrying the fields a range read touches. */
+function summary(id: string, level: number, overrides: Partial<SummaryEntry> = {}): SummaryEntry {
+  return {
+    id, level, content: `content of ${id}`, tokens: 12, created: 1_700_000_000_000,
+    sourceLevel: 0, sourceIds: [], sourceRange: { first: id, last: id },
+    ...overrides,
   }
 }
 
@@ -427,20 +436,237 @@ describe('seedFromLog', () => {
     // One past the highest index, so a resumed run cannot re-issue an id.
     expect(store.getStateJson(slots().counter.id)).toBe(5)
   })
+
+  it('stores the library\'s block vocabulary, not the harness\'s', () => {
+    const store = new LogStore()
+    const live = Session.create(SessionId('seed-vocabulary'))
+    live.append('turn/start', { turn: 0 })
+    live.append('assistant/message', {
+      turn: 0,
+      step: 0,
+      message: createAssistantMessage({
+        content: [
+          { type: 'reasoning', text: 'weighing the read' },
+          { type: 'tool-call', id: CallId('call-1'), name: 'read', arguments: '{"path":"a.ts"}' },
+        ],
+        source: { provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' })
+    live.append('tool/result', {
+      turn: 0,
+      step: 0,
+      message: createToolResultMessage({
+        callId: CallId('call-1'),
+        content: [{ type: 'text', text: 'the file' }],
+        isError: false,
+      }),
+    }, { surfaceOp: 'append' })
+
+    seedFromLog(store, live)
+
+    const messages = store.getStateJson(MESSAGES_STATE) as Array<{ content: unknown[] }>
+    // The library reads its own names only: under the harness's, these blocks
+    // price at zero tokens, match no tool pair and carry no tool a chunk can see.
+    expect(messages[0]?.content).toEqual([
+      { type: 'thinking', thinking: 'weighing the read' },
+      { type: 'tool_use', id: 'call-1', name: 'read', input: { path: 'a.ts' } },
+    ])
+    expect(messages[1]?.content).toEqual([
+      { type: 'tool_result', toolUseId: 'call-1', content: [{ type: 'text', text: 'the file' }], isError: false },
+    ])
+  })
+
+  it('stores arguments that are not a JSON object as an empty input', () => {
+    const store = new LogStore()
+    const live = Session.create(SessionId('seed-arguments'))
+    live.append('turn/start', { turn: 0 })
+    // A call the model truncated: the list is a JSON value but not an object, and
+    // the text is not JSON at all. Neither is tool input, so neither is stored.
+    const calls = [
+      { id: 'list', arguments: '[1,2]' },
+      { id: 'garbage', arguments: 'not json' },
+    ]
+    for (const call of calls) {
+      live.append('assistant/message', {
+        turn: 0,
+        step: 0,
+        message: createAssistantMessage({
+          content: [{ type: 'tool-call', id: CallId(call.id), name: 'read', arguments: call.arguments }],
+          source: { provider: 'test', model: 'test-model' },
+        }),
+      }, { surfaceOp: 'append' })
+    }
+
+    seedFromLog(store, live)
+
+    const messages = store.getStateJson(MESSAGES_STATE) as Array<{ content: Array<{ input: unknown }> }>
+    expect(messages.map(message => message.content[0]?.input)).toEqual([{}, {}])
+  })
+
+  it('replaces a block the store cannot represent with a placeholder', () => {
+    const store = new LogStore()
+    const live = Session.create(SessionId('seed-attachment'))
+    live.append('turn/start', { turn: 0 })
+    live.append('user/message', createUserMessage({
+      content: [
+        // The harness carries a durable reference here, never the bytes: what a
+        // recollection can preserve is the fact of the attachment.
+        {
+          type: 'image',
+          attachment: { attachmentId: 'sha256:x', mediaType: 'image/png', bytes: 3, width: 1, height: 1 },
+        } as unknown as ContentBlock,
+      ],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+
+    seedFromLog(store, live)
+
+    const messages = store.getStateJson(MESSAGES_STATE) as Array<{ content: unknown[] }>
+    expect(messages[0]?.content).toEqual([{ type: 'text', text: '[image omitted from memory mirror]' }])
+  })
+
+  it('stores a row the slot can hold, not the frozen content the session wrote', () => {
+    const store = new LogStore()
+    const { session: live, ask } = session('seed-json')
+    seedFromLog(store, live)
+
+    const [row] = store.getStateJson(MESSAGES_STATE) as Array<Record<string, unknown>>
+    const [block] = row?.content as unknown[]
+    // The session freezes what it publishes, and the library edits the messages it
+    // materializes from this slot, so the row is a fresh JSON-shaped copy. The
+    // clock is the event's own, in the milliseconds `MessageStore` also writes.
+    expect(row?.['timestamp']).toBe((live.events.find(candidate => candidate.seq === ask) as { time: number }).time)
+    expect(Object.isFrozen(block)).toBe(false)
+    expect(Object.getPrototypeOf(block)).toBe(Object.prototype)
+    expect(JSON.parse(JSON.stringify(row))).toEqual(row)
+    const event = live.events.find(candidate => candidate.seq === ask)
+    expect(event?.type === 'user/message' && Object.isFrozen(event.data.content[0])).toBe(true)
+  })
+
+  it('skips an appended message with no blocks, as the live path does', () => {
+    const store = new LogStore()
+    const live = Session.create(SessionId('seed-empty-content'))
+    live.append('turn/start', { turn: 0 })
+    const ask = live.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'ask' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    // An event that derives a message carrying no blocks: a row for it would stand
+    // for nothing the memory system can price, chunk or remember.
+    live.append('user/message', createUserMessage({
+      content: [] as ContentBlock[],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const answer = live.append('assistant/message', {
+      turn: 0,
+      step: 0,
+      message: createAssistantMessage({
+        content: [{ type: 'text', text: 'answer' }],
+        source: { provider: 'test', model: 'test-model' },
+      }),
+    }, { surfaceOp: 'append' }).seq
+
+    const { seqOf } = seedFromLog(store, live)
+
+    // The two events that carry blocks keep the ids they would have had, so a
+    // second open numbers the same rows and a minted range still resolves.
+    expect([...seqOf.entries()]).toEqual([
+      ['record-000000000000', ask],
+      ['record-000000000001', answer],
+    ])
+    const again = new LogStore()
+    seedFromLog(again, live)
+    expect(again.getStateJson(MESSAGES_STATE)).toEqual(store.getStateJson(MESSAGES_STATE))
+  })
+})
+
+describe('resolveRange', () => {
+  it('resolves a recollection whose sources are other recollections, not messages', () => {
+    const store = new LogStore()
+    const { session: live, ask } = session('resolve-nested')
+    const { seqOf } = seedFromLog(store, live)
+    const first = [...seqOf.keys()][0] as string
+
+    // The library's own `sourceIds` are message ids at level 1 and *summary ids*
+    // above it (`strategy.d.ts:1176`). A recollection built on another
+    // recollection therefore names nothing `seqOf` holds, and reading only that
+    // map reports no range — which is what left level-3 recollections unable to
+    // stand over the ground the picker had resolved to them.
+    const child = summary('L1-0', 1, { sourceIds: [first], sourceRange: { first, last: first } })
+    const parent = summary('L2-0', 2, {
+      sourceLevel: 1,
+      sourceIds: [child.id],
+      sourceRange: { first: child.id, last: child.id },
+    })
+    store.appendToStateJson(slots().summaries.id, child)
+    store.appendToStateJson(slots().summaries.id, parent)
+
+    const rows = seededSummaries(store)
+    expect(seqOf.get(first)).toBe(ask)
+    expect(resolveRange(seqOf, child, rows)).toEqual({ firstSeq: ask, lastSeq: ask })
+    // The same recollection read twice resolves once out of the memo rather than
+    // walking its chain again.
+    expect(resolveRange(seqOf, parent, rows)).toEqual({ firstSeq: ask, lastSeq: ask })
+    expect(resolveRange(seqOf, parent, rows)).toEqual({ firstSeq: ask, lastSeq: ask })
+    // Without the rows there is no chain to walk, so the refusal still stands —
+    // the caller that holds only the message map gets no invented range.
+    expect(resolveRange(seqOf, parent)).toBeUndefined()
+  })
+
+  it('walks a chain of recollections to the ground a level-3 stands over', () => {
+    const store = new LogStore()
+    const { session: live, ask, answer } = session('resolve-chain')
+    const { seqOf } = seedFromLog(store, live)
+    const first = [...seqOf.keys()][0] as string
+    const second = [...seqOf.keys()][1] as string
+
+    // The shape the library writes for a pyramid: level 1 names messages, and
+    // every level above names the recollections beneath it. An L3 therefore
+    // reaches the ground only by walking two hops, and a reader that stops at the
+    // message map returns nothing for it — which is how a level-3 recollection
+    // came to stand over no ground at all while the picker kept resolving messages
+    // to it, failing every pass with "no level-3 recollection stands for log seq".
+    const child = summary('L1-0', 1, { sourceIds: [first, second], sourceRange: { first, last: second } })
+    const middle = summary('L2-0', 2, {
+      sourceLevel: 1,
+      sourceIds: [child.id],
+      sourceRange: { first: child.id, last: child.id },
+    })
+    const top = summary('L3-0', 3, {
+      sourceLevel: 2,
+      sourceIds: [middle.id],
+      sourceRange: { first: middle.id, last: middle.id },
+    })
+    const self = summary('L2-1', 2, { sourceLevel: 1, sourceIds: ['L2-1'] })
+    for (const row of [child, middle, top, self]) store.appendToStateJson(slots().summaries.id, row)
+    const rows = seededSummaries(store)
+
+    expect(resolveRange(seqOf, top, rows)).toEqual({ firstSeq: ask, lastSeq: answer })
+    // A recollection naming itself has no ground under it, and the walk says so
+    // rather than following its own citation forever.
+    expect(resolveRange(seqOf, self, rows)).toBeUndefined()
+    expect(answer).toBeGreaterThan(ask)
+  })
 })
 
 describe('appendSurfaceNode', () => {
-  it('mirrors a live append with the store\'s own id, so live and replay agree', () => {
-    const store = new LogStore()
-    const live = Session.create(SessionId('append-live'))
-    const ids = slots()
-    store.registerState(ids.messages)
+  /** An open manager over an empty store, which is where a live append lands. */
+  async function open(id: string): Promise<{ store: LogStore; live: Session; manager: ContextManager }> {
+    const store = createStore()
+    store.registerState(slots().messages)
+    const live = Session.create(SessionId(id))
+    const manager = await ContextManager.open({ store: store as never, strategy: new AutobiographicalStrategy({}) })
+    return { store, live, manager }
+  }
+
+  it('mirrors a live append the manager can read back, with the store\'s own id', async () => {
+    const { store, live, manager } = await open('append-live')
     const ask = live.append('user/message', createUserMessage({
       content: [{ type: 'text', text: 'ask' }],
       source: { kind: 'user' },
     }), { surfaceOp: 'append' })
 
-    const id = appendSurfaceNode(store, live, ask)
+    const id = appendSurfaceNode(manager, live, ask)
 
     expect(id).toBeDefined()
     const messages = store.getStateJson(MESSAGES_STATE) as Record<string, unknown>[]
@@ -448,14 +674,17 @@ describe('appendSurfaceNode', () => {
     expect(messages[0]?.id).toBe(id)
     expect(messages[0]?.participant).toBe('user')
     expect(messages[0]?.metadata).toEqual({ dshSeq: ask.seq })
-    expect(messages[0]?.timestamp).toEqual(new Date(ask.time))
+    // Milliseconds, the form `MessageStore` writes and the library's time filters
+    // compare against. A live row takes the library's own clock, because
+    // `addMessage` stamps it; a replayed row takes the event's.
+    expect(typeof messages[0]?.timestamp).toBe('number')
+    // Through `addMessage`, so the index the library resolves ids by saw the
+    // write: a row appended straight to the slot leaves this read null.
+    expect(manager.getMessage(id as MessageId)).toEqual(expect.objectContaining({ participant: 'user' }))
   })
 
-  it('contributes no node for a step that carries no message', () => {
-    const store = new LogStore()
-    const live = Session.create(SessionId('append-usage-only'))
-    const ids = slots()
-    store.registerState(ids.messages)
+  it('contributes no node for a step that carries no message', async () => {
+    const { store, live, manager } = await open('append-usage-only')
     // A max-tokens step exists to bill usage and carries no content; it must
     // not occupy a surface position.
     const step = live.append('assistant/message', {
@@ -468,7 +697,22 @@ describe('appendSurfaceNode', () => {
       usage: { inputTokens: 10, outputTokens: 1 },
     }, { surfaceOp: 'append' })
 
-    expect(appendSurfaceNode(store, live, step)).toBeUndefined()
+    expect(appendSurfaceNode(manager, live, step)).toBeUndefined()
+    expect(store.getStateJson(MESSAGES_STATE)).toEqual([])
+  })
+
+  it('contributes no node for an appended message that carries no block', async () => {
+    const { store, live, manager } = await open('append-empty-content')
+    // A user message with no blocks derives a message whose content is empty, and
+    // a row for it stands for nothing the memory system can price or remember.
+    // The seed path skips the same event, so a replay numbers the rows from the
+    // events that carry blocks.
+    const empty = live.append('user/message', createUserMessage({
+      content: [] as ContentBlock[],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+
+    expect(appendSurfaceNode(manager, live, empty)).toBeUndefined()
     expect(store.getStateJson(MESSAGES_STATE)).toEqual([])
   })
 })

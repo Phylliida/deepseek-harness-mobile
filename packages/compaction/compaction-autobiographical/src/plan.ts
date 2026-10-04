@@ -25,7 +25,7 @@ import { MESSAGES_STATE } from './store.ts'
 import type { LogStore } from './store.ts'
 import type { RecollectionRange } from './types.ts'
 import { estimateTokens } from './types.ts'
-import { resolveRange, surfaceGround } from './seed.ts'
+import { recollectionRows, resolveRange, surfaceGround } from './seed.ts'
 
 /** One planned fold: shadow `startSeq..endSeq` with a single recollection node. */
 export interface FoldOp {
@@ -151,7 +151,7 @@ export function foldBlocks(summary: SummaryEntry): ContentBlock[] {
  *   when a surface node names a seq the log does not hold.
  */
 export function planFolds(store: LogStore, session: Session, inputs: PlanInputs): FoldOp[] {
-  const ranges = standing(inputs)
+  const ranges = standing(inputs, recollectionRows(store))
   // A resolution lands on the *messages* a recollection covered, so two adjacent
   // recollections at the same level resolve the same way and a run of equal
   // levels spans ground no single recollection owns. Partition by recollection
@@ -222,8 +222,8 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
  * absorbed more ground is the wider of the two. Computed once per pass, because
  * every mirrored message asks the same table for the entry standing over it.
  */
-function standing(inputs: PlanInputs): Map<number, { summary: SummaryEntry; first: number; last: number }[]> {
-  const byLevel = new Map<number, { summary: SummaryEntry; first: number; last: number }[]>()
+function standing(inputs: PlanInputs, rows: readonly SummaryEntry[]): Map<number, Standing[]> {
+  const byLevel = new Map<number, Standing[]>()
   for (const summary of inputs.summaries) {
     // The picker leaves the newest recollection standing for a covered run
     // unresolved, so the entry of the level the run needs has no resolution. A
@@ -235,7 +235,7 @@ function standing(inputs: PlanInputs): Map<number, { summary: SummaryEntry; firs
     if (summary.parentId !== undefined || summary.mergedInto !== undefined) continue
     /* oxlint-enable typescript/no-deprecated */
     const seeded = inputs.seeded.get(summary.id)?.covered
-    const resolved = resolveRange(inputs.seqOf, summary)
+    const resolved = resolveRange(inputs.seqOf, summary, rows)
     const first = Math.min(seeded?.firstSeq ?? Infinity, resolved?.firstSeq ?? Infinity)
     const last = Math.max(seeded?.lastSeq ?? -Infinity, resolved?.lastSeq ?? -Infinity)
     if (first > last) continue
@@ -246,12 +246,15 @@ function standing(inputs: PlanInputs): Map<number, { summary: SummaryEntry; firs
   return byLevel
 }
 
+/** One recollection, with the log span it stands over. */
+interface Standing {
+  readonly summary: SummaryEntry
+  readonly first: number
+  readonly last: number
+}
+
 /** The recollection at `level` standing for one log seq, or a throw. */
-function standingFor(
-  byLevel: Map<number, { summary: SummaryEntry; first: number; last: number }[]>,
-  level: number,
-  seq: number,
-): SummaryEntry {
+function standingFor(byLevel: Map<number, Standing[]>, level: number, seq: number): SummaryEntry {
   // The newest standing entry wins, because a recollection that absorbed ground
   // is minted after the ones it absorbed.
   const summary = byLevel.get(level)?.filter(entry => entry.first <= seq && entry.last >= seq).at(-1)?.summary

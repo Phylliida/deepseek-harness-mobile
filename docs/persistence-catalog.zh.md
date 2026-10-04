@@ -248,7 +248,18 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 'autobio/memory': AutobiographicalMemoryEventData
 ```
 
-来源：[`packages/compaction/compaction-autobiographical/src/types.ts:99`](../packages/compaction/compaction-autobiographical/src/types.ts)
+来源：[`packages/compaction/compaction-autobiographical/src/types.ts:120`](../packages/compaction/compaction-autobiographical/src/types.ts)
+
+<a id="autobiomemory-progress--log-only"></a>
+
+#### `autobio/memory-progress` — log-only
+
+```ts persistence-catalog
+/** Live memory-formation text as pre-rewrite builds logged it; read for compatibility, never written. */
+'autobio/memory-progress': AutobiographicalMemoryProgressEventData
+```
+
+来源：[`packages/compaction/compaction-autobiographical/src/types.ts:122`](../packages/compaction/compaction-autobiographical/src/types.ts)
 
 ### `command/*`
 

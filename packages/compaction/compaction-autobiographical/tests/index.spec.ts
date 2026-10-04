@@ -13,11 +13,13 @@
 import { ContextManager, OverBudgetError } from '@animalabs/context-manager'
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { AutobiographicalCompactionEngine } from '../src/index.ts'
+import AutobiographicalCompactionEngine from '../src/index.ts'
+import { describeJsonFailures } from '../src/index.ts'
 import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
-import { build, contextOf } from './harness.ts'
+import { build, contextOf, summarizer } from './harness.ts'
 
 /** Let the fire-and-forget tick chain finish. It is never awaited by a pass. */
 async function settled(): Promise<void> {
@@ -269,6 +271,61 @@ describe('tool definitions', () => {
 })
 
 describe('memory formation behind the pass', () => {
+  it('reports what a refused record holds, including the values JSON would hide', () => {
+    // The readings the log's own refusal cannot show: `JSON.stringify` renders an
+    // absent value and a non-finite number as `null`, and an exotic object as an
+    // empty one, so the report names each by what it actually is and where it sits.
+    expect(describeJsonFailures({
+      attempt: 3,
+      usage: { inputTokens: 1, cacheReadTokens: undefined },
+      memory: { id: 'L1-4', tokens: Number.NaN, created: new Date(0), sourceRange: { firstSeq: 1, lastSeq: 2 } },
+    })).toEqual([
+      'usage.cacheReadTokens is undefined',
+      'memory.tokens is a non-finite number (NaN)',
+      'memory.created is a Date',
+    ])
+  })
+
+  it('reports a record whose values are all storable as such', () => {
+    expect(describeJsonFailures({ attempt: 3, statistics: { l1: 0, l2: 1 }, text: 'x'.repeat(301) }))
+      .toEqual(['none — every value in the record is storable JSON'])
+  })
+
+  it('reports a value by kind where its own text would say nothing', () => {
+    // A function is refused for what it is: its own text is not the value's text.
+    // An exotic object is refused by its constructor, because the log finds no
+    // fields in it to walk into.
+    expect(describeJsonFailures({ usage: { run: function named() { return 1 } } }))
+      .toEqual(['usage.run is a function (named)'])
+    expect(describeJsonFailures({ usage: (name: string) => name })).toEqual(['usage is a function (usage)'])
+    expect(describeJsonFailures({ usage: new Map([['a', 1]]) })).toEqual(['usage is a Map'])
+  })
+
+  it('reports a bare value the log refuses rather than one of a record\'s fields', () => {
+    expect(describeJsonFailures(Number.NaN)).toEqual(['<the record itself> is a non-finite number (NaN)'])
+  })
+
+  it('reports a field by its path through a list as well as a record', () => {
+    expect(describeJsonFailures({ memory: { sourceIds: ['a', undefined] } }))
+      .toEqual(['memory.sourceIds.1 is undefined'])
+  })
+
+  it('binds the text it reports to a line rather than dumping a recollection', () => {
+    // A recollection's own content is the one value here that runs long, so the
+    // two cuts — the string's, and the record's — are what keeps the line readable.
+    expect(describeJsonFailures({ memory: { content: 'y'.repeat(400) } }))
+      .toEqual(['none — every value in the record is storable JSON'])
+    expect(describeJsonFailures({ memory: { content: 'y'.repeat(400), tokens: Number.POSITIVE_INFINITY } }))
+      .toEqual(['memory.tokens is a non-finite number (Infinity)'])
+    expect(describeJsonFailures({ memory: { tokens: 'z'.repeat(400) } }))
+      .toEqual(['none — every value in the record is storable JSON'])
+  })
+
+  it('reports the text of a plain object the log cannot store', () => {
+    expect(describeJsonFailures({ memory: { sourceRange: { firstSeq: 1, lastSeq: 2, at: undefined } } }))
+      .toEqual(['memory.sourceRange.at is undefined'])
+  })
+
   it('warns and still records when the tick fails', async () => {
     const calls: GenerateOptions[] = []
     const { engine, agent, session } = build(30, 'index-tick-failed', {}, undefined, {
@@ -326,6 +383,61 @@ describe('memory formation behind the pass', () => {
     expect(events(session, 'autobio/memory').at(-1)).not.toHaveProperty('data.memory')
   })
 
+  it('resumes the counter from the newest record that names one', async () => {
+    const session = Session.create(SessionId('index-bad-attempt'))
+    session.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 100_000 })
+    // Records written before they carried a count, as the sessions on disk hold:
+    // the field is absent rather than `undefined`, because the log's own boundary
+    // refuses a value JSON cannot carry. Reading one as a count is what wedged a
+    // live session: `Math.max(0, undefined)` is `NaN`, so the counter opened at
+    // `NaN` and the record naming it could not cross that same boundary — the
+    // session then failed to start at all.
+    const stats = { chunksTotal: 0, chunksCompressed: 0, compressionCount: 0, l1: 0, l2: 0, l3: 0, pendingMerges: 0 }
+    session.append('autobio/memory', { ...stats } as never)
+    session.append('autobio/memory', { ...stats } as never)
+    session.append('autobio/memory', { ...stats, attempt: 4 })
+    const ctx = new Context()
+    ctx.provide('llm', summarizer([]) as never)
+    const engine = new AutobiographicalCompactionEngine(ctx, {
+      operatingWindowTokens: 700,
+      reserveTokens: 128,
+      auto: false,
+      strategy: { recentWindowTokens: 0 },
+    })
+    const agent = {
+      session,
+      options: { provider: 'test', model: 'test-model' },
+      runMaintenance: <T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> => task(new AbortController().signal),
+    } as ManualCompactAgentContext
+
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+
+    // The count the log can resume from, rather than one no record ever named.
+    expect(runtime!.recorded).toBe(4)
+    expect(runtime!.progress.attempt).toBe(4)
+  })
+
+  it('refuses to record a call whose counter is not a number', async () => {
+    const { engine, agent, session } = build(30, 'index-nan-attempt')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    const written = events(session, 'autobio/memory').length
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    runtime!.progress.attempt = Number.NaN
+    const settle = (engine as unknown as {
+      appendMemory(r: unknown, s: unknown): void
+    }).appendMemory.bind(engine)
+    settle(runtime, session)
+
+    // A count the log cannot store is refused here rather than written, because the
+    // record that carries it is the one a reopen seeds the counter from: storing it
+    // would leave a session that opens on a counter it cannot be resumed from.
+    expect(events(session, 'autobio/memory')).toHaveLength(written)
+    expect(warn.mock.calls.flat().join('\n')).toContain('the counter is not a number')
+  })
+
   it('refuses to write down a recollection whose ground is not in the store', async () => {
     const { engine, agent, session } = build(30, 'index-ungrounded')
     await engine.compactNow(agent, new AbortController().signal)
@@ -350,6 +462,142 @@ describe('memory formation behind the pass', () => {
     const records = events(session, 'autobio/memory') as { data: { memory?: { id: string } } }[]
     expect(records.some(({ data }) => data.memory?.id === 'L1-9')).toBe(false)
     expect(records.length).toBeGreaterThan(0)
+  })
+
+  it('reports the value the log refuses instead of writing a record without it', async () => {
+    const { engine, agent, session } = build(30, 'index-unstorable')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    const written = events(session, 'autobio/memory').length
+    // A recollection whose token count is not a number the log can store. The
+    // mint reaches `append` through the tick chain, which nothing awaits: a throw
+    // there is rejected work behind a turn, and the process dies with it.
+    runtime?.strategy.summaries.push({
+      id: 'L1-8',
+      level: 1,
+      content: 'a memory priced at no number at all',
+      tokens: Number.NaN,
+      created: 0,
+      sourceIds: ['ground-1'],
+    })
+    runtime!.seqOf.set('ground-1', 1)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const settle = (engine as unknown as {
+      appendMemory(r: unknown, s: unknown): void
+    }).appendMemory.bind(engine)
+
+    settle(runtime, session)
+
+    // The console carries what the log could not take and where it sat in the
+    // record — `JSON.stringify` would have rendered that `NaN` as `null` — and
+    // the log is left without a record rather than with a wrong one.
+    const lines = warn.mock.calls.map(([line]) => String(line))
+    expect(lines.some(line => line.includes('memory.tokens') && line.includes('NaN'))).toBe(true)
+    expect(events(session, 'autobio/memory')).toHaveLength(written)
+
+    // The counter moved with the attempt, so the next pass has nothing to add:
+    // a record that keeps being refused must not append a warning per pass.
+    warn.mockClear()
+    settle(runtime, session)
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('names the nested path of a value the log refuses', async () => {
+    const { engine, agent, session } = build(30, 'index-unstorable-nested')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    const written = events(session, 'autobio/memory').length
+    // Every field of the recollection is storable; the span it stands over is
+    // not, and the record has to say so by the path to it.
+    runtime?.strategy.summaries.push({
+      id: 'L1-7',
+      level: 1,
+      content: 'a memory standing over a span with no bound',
+      tokens: 12,
+      created: 0,
+      sourceIds: ['ground-1'],
+    })
+    runtime!.seqOf.set('ground-1', Number.POSITIVE_INFINITY)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const settle = (engine as unknown as {
+      appendMemory(r: unknown, s: unknown): void
+    }).appendMemory.bind(engine)
+
+    settle(runtime, session)
+
+    const lines = warn.mock.calls.map(([line]) => String(line))
+    expect(lines.some(line => line.includes('memory.sourceRange.firstSeq') && line.includes('Infinity'))).toBe(true)
+    expect(events(session, 'autobio/memory')).toHaveLength(written)
+  })
+
+  it('says so when the record itself is storable and the refusal came from elsewhere', async () => {
+    const { engine, agent, session } = build(30, 'index-refused-elsewhere')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    runtime!.progress.attempt += 1
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(session, 'append').mockImplementation(() => {
+      throw new Error('the log closed mid-write')
+    })
+    const settle = (engine as unknown as {
+      appendMemory(r: unknown, s: unknown): void
+    }).appendMemory.bind(engine)
+
+    settle(runtime, session)
+
+    // Every value in the record is one the log stores, so the report says that
+    // rather than naming an offender that does not exist — a refusal with no
+    // offending value is a different bug, and the report must not blur the two.
+    const lines = warn.mock.calls.map(([line]) => String(line))
+    expect(lines.some(line => line.includes('the log closed mid-write'))).toBe(true)
+    expect(lines.some(line => line.includes('every value in the record is storable JSON'))).toBe(true)
+    expect(lines.some(line => line.includes('data: {"chunksTotal"'))).toBe(true)
+  })
+
+  /** A summarizer that streams `text` in two deltas and then stops. */
+  const streaming = (text: string) => ({
+    async *stream(): AsyncIterable<StreamChunk> {
+      if (text !== '') {
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: text.slice(0, 800) }
+        yield { type: 'text-delta', index: 0, text: text.slice(800) }
+      }
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    },
+  })
+
+  /** The live records of the first bridge call, as the chat row reads them. */
+  function progressOf(session: Session, attempt: number): [number, boolean | undefined][] {
+    return (events(session, 'autobio/memory-progress') as {
+      data: { attempt: number; delta: string; done?: boolean }
+    }[])
+      .filter(event => event.data.attempt === attempt)
+      .map(event => [event.data.delta.length, event.data.done])
+  }
+
+  it('flushes what a recollection streams mid-call and closes it on the terminal flush', async () => {
+    const { engine, agent, session } = build(30, 'index-progress', {}, undefined, streaming('x'.repeat(1_200)))
+    await engine.compactNow(agent, new AbortController().signal)
+    for (let i = 0; i < 50 && progressOf(session, 1).length < 2; i += 1) await settled()
+
+    // One record per buffered flush rather than one per streamed chunk: the first
+    // carries the text the row streams, the second closes the call with nothing
+    // left to carry. Both report the attempt the settling tick record will too.
+    expect(progressOf(session, 1)).toEqual([[1_200, undefined], [0, true]])
+    // The tick record that settles the call reports the same attempt, which is
+    // what lets one chat row hold both.
+    expect((events(session, 'autobio/memory') as { data: { attempt: number } }[])[0]?.data.attempt).toBe(1)
+  })
+
+  it('writes no live record for a call that streamed no text', async () => {
+    const { engine, agent, session } = build(30, 'index-progress-empty', {}, undefined, streaming(''))
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+
+    // Nothing streamed, so the call formed no memory: it takes no attempt number
+    // and leaves no record for a chat row to claim.
+    expect(events(session, 'autobio/memory-progress')).toHaveLength(0)
+    expect(events(session, 'autobio/memory')).toHaveLength(0)
   })
 })
 

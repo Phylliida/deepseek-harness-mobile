@@ -13,6 +13,9 @@
  *    recollection cannot be derived (minting calls a model), so the event
  *    payload *is* the archive: content, level, and the seq range it covered.
  *
+ * Both passes store the library's block vocabulary rather than the harness's,
+ * because the library reads its own names only — see {@link toMembraneBlock}.
+ *
  * The chunks slot stays empty on purpose. `AutobiographicalStrategy` synthesizes
  * chunk records from L1 `sourceIds` whenever it finds L1s and no chunks
  * (`migrateChunkRecords`), then `rebuildChunks` spreads them over the live
@@ -22,7 +25,9 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical/seed
  */
 
-import type { SummaryEntry } from '@animalabs/context-manager'
+import type { ContextManager, MessageId, SummaryEntry } from '@animalabs/context-manager'
+import type { ContentBlock as MembraneBlock } from '@animalabs/membrane'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import { foldIdOf } from './plan.ts'
@@ -77,7 +82,9 @@ export function seedFromLog(store: LogStore, session: Session): {
     const message = session.deriveEventMessage(event)
     // A usage-only assistant step carries no message and so contributes no node.
     if (!message) continue
-    const id = writeMessage(store, event, message, 'id', 'sequence')
+    const content = mirrorContent(message)
+    if (content === undefined) continue
+    const id = writeMessage(store, event, message.role, content)
     seqOf.set(id, event.seq)
     idAtSeq.set(event.seq, id)
   }
@@ -156,55 +163,139 @@ export function seedFromLog(store: LogStore, session: Session): {
 }
 
 /**
- * A recollection minted after seeding records message ids, not log seqs, so its
- * range is resolved through the messages it names.
+ * The recollection rows seeding wrote, which a range read walks a chain of
+ * higher recollections through.
  *
- * A source id the replay never stored — ground a later fold removed — contributes
- * no seq rather than failing the read.
- *
- * @param seqOf - the log seq behind each store message id, as
- * {@link seedFromLog} returns it.
- * @param summary - the recollection whose `sourceIds` name the messages it covers.
- * @returns the first and last log seq its sources span, or undefined when none of
- * them is in the map. The undefined case is a refusal rather than an empty span:
- * `Math.min()` over no arguments is `Infinity`, so a caller that read the bounds
- * anyway would record a range no seq can fall inside.
+ * @param store - the seeded store holding the summaries slot.
+ * @returns the rows, or none when the engine is reading a store it did not seed.
  */
-export function resolveRange(seqOf: ReadonlyMap<string, number>, summary: SummaryEntry): { firstSeq: number; lastSeq: number } | undefined {
-  const known = summary.sourceIds.flatMap(id => seqOf.get(id)).filter(seq => seq !== undefined)
-  if (known.length === 0) return undefined
-  return { firstSeq: Math.min(...known), lastSeq: Math.max(...known) }
+export function recollectionRows(store: LogStore): readonly SummaryEntry[] {
+  // The slot holds an array once `seedFromLog` registers it, which is the only
+  // way this store is opened, so there is no absent case to answer for here.
+  return store.getStateJson(slots().summaries.id) as readonly SummaryEntry[]
 }
 
 /**
- * Append a surface node's derived message during a live session, returning the
- * store's id for it, or undefined when the event contributes no message.
+ * A recollection minted after seeding records store ids rather than log seqs, so
+ * its range is resolved through what its sources name.
  *
- * Both paths write through the store directly rather than through
- * `ContextManager.addMessage`, for two reasons. Only the store's own id
- * injection reproduces the ids a replay produces, and `seqOf` is keyed on them.
- * And `addMessage` shards a message over twice `targetChunkTokens`, a decision
- * replay cannot reconstruct from the log — so live and replayed would cut a
- * large body into different records. The engine has no stake in which
- * granularity wins (`rebuildChunks` never splits a message, so the whole body
- * lands in one chunk either way), only in the two agreeing.
+ * A level-1 recollection names the messages it distilled, and those are in
+ * `seqOf`; a higher one names the recollections beneath it — `sourceIds` is
+ * "message IDs for L1, summary IDs for L_{k>1}" — which `seqOf` does not hold and
+ * never will, since a recollection is a pyramid entry rather than a mirrored
+ * message. So a chain is walked through the seeded summaries, and a recollection
+ * spans the union of what its own sources resolve to.
+ *
+ * A source that resolves to nothing contributes no seq rather than failing the
+ * read: that is ground a later fold removed, or a citation the log does not
+ * account for.
+ *
+ * @param seqOf - the log seq behind each store message id, as
+ * {@link seedFromLog} returns it.
+ * @param summary - the recollection whose sources the range is read from.
+ * @param summaries - the recollection rows seeding wrote, which a chain of higher
+ * recollections is walked through. Absent when the caller holds only the message
+ * map, in which case a recollection naming recollections resolves to nothing.
+ * @returns the first and last log seq its sources span, or undefined when none of
+ * them resolves. The undefined case is a refusal rather than an empty span:
+ * `Math.min()` over no arguments is `Infinity`, so a caller that read the bounds
+ * anyway would record a range no seq can fall inside.
+ */
+export function resolveRange(
+  seqOf: ReadonlyMap<string, number>,
+  summary: SummaryEntry,
+  summaries?: readonly SummaryEntry[],
+): { firstSeq: number; lastSeq: number } | undefined {
+  return new Ranges(seqOf, summaries).of(summary)
+}
+
+/** A recollection's covered span, in log-seq terms. */
+type ResolvedRange = { firstSeq: number; lastSeq: number }
+
+/**
+ * Resolves recollections to the log span they cover by walking the chain above
+ * each one. A recollection spans the union of what its own sources resolve to.
+ */
+class Ranges {
+  private readonly byId: ReadonlyMap<string, SummaryEntry>
+
+  constructor(
+    private readonly seqOf: ReadonlyMap<string, number>,
+    summaries: readonly SummaryEntry[] | undefined,
+  ) {
+    this.byId = new Map((summaries ?? []).map(entry => [entry.id, entry]))
+  }
+
+  /**
+   * The span a recollection covers.
+   * @param summary - the recollection to resolve.
+   * @returns its span, or undefined when nothing beneath it resolves to a seq.
+   */
+  of(summary: SummaryEntry): ResolvedRange | undefined {
+    return this.over(summary, new Set())
+  }
+
+  /**
+   * The span one recollection covers, without revisiting its own chain.
+   * @param summary - the recollection to resolve.
+   * @param open - ids on the current walk, so a citation that loops back stops.
+   * @returns its span, or undefined when nothing beneath it resolves to a seq.
+   */
+  private over(summary: SummaryEntry, open: ReadonlySet<string>): ResolvedRange | undefined {
+    if (open.has(summary.id)) return undefined
+    const below = new Set(open).add(summary.id)
+    const seqs: number[] = []
+    for (const id of summary.sourceIds) {
+      const seq = this.seqOf.get(id)
+      if (seq !== undefined) {
+        seqs.push(seq)
+        continue
+      }
+      const source = this.byId.get(id)
+      if (source === undefined) continue
+      const range = this.over(source, below)
+      if (range !== undefined) seqs.push(range.firstSeq, range.lastSeq)
+    }
+    if (seqs.length === 0) return undefined
+    return { firstSeq: Math.min(...seqs), lastSeq: Math.max(...seqs) }
+  }
+}
+
+/**
+ * Mirror one surface node the log gained, returning the store's id for it, or
+ * undefined when the event contributes no message.
+ *
+ * The write goes through `ContextManager.addMessage` rather than straight to
+ * the store, so the library's own bookkeeping sees the message: `addMessage`
+ * bumps the write version `MessageStore` revalidates its id index against, and
+ * fires `onNewMessage`, which rebuilds the strategy's chunks. A row written
+ * straight to the slot leaves `manager.getMessage` blind to it and the strategy
+ * chunking ground it never learned about. `autoTickOnNewMessage` stays off, so
+ * that hook compresses nothing.
+ *
+ * The stored row is the one the seed path writes: the store assigns the
+ * identity a replay would assign, and the log seq rides the metadata as
+ * `dshSeq`, which is how a fold finds the event behind a message.
  *
  * Only append events reach this: a replacement is never mirrored, because the
  * planner finds the ground a fold node stands for already covered and asks for no
  * fold there.
  *
- * @param store - the open store whose messages slot the node is appended to.
+ * @param manager - the open manager whose store the node is appended to.
  * @param session - the session the event came from, read for the derived message.
  * @param event - the appended surface event to mirror.
  * @returns the store's own message id for the node, or undefined when the event
- * contributes no message — a usage-only assistant step is a real and expected
- * case, not a failure.
+ * contributes nothing to mirror — a usage-only assistant step carries no message,
+ * and a message carrying no blocks stands for no row. Both are real and expected
+ * cases, not failures.
  */
-export function appendSurfaceNode(store: LogStore, session: Session, event: SessionEvent): string | undefined {
+export function appendSurfaceNode(manager: ContextManager, session: Session, event: SessionEvent): MessageId | undefined {
   const message = session.deriveEventMessage(event)
   // A usage-only assistant step carries no message and so contributes no node.
   if (!message) return undefined
-  return writeMessage(store, event, message, 'id', 'sequence')
+  const content = mirrorContent(message)
+  if (content === undefined) return undefined
+  return manager.addMessage(message.role, content, { dshSeq: event.seq })
 }
 
 /**
@@ -212,27 +303,88 @@ export function appendSurfaceNode(store: LogStore, session: Session, event: Sess
  *
  * The harness message has no participant name of its own, and roles are what the
  * library's tool-message normalization reads, so the participant is the role
- * itself. `dshSeq` keeps the originating log seq on the row, which is how a
- * stored message is traced back to the event it came from.
+ * itself. The timestamp is the event's own clock in milliseconds, which is what
+ * the library's time filters compare against and what `MessageStore` writes for
+ * a live append.
  */
 function writeMessage(
   store: LogStore,
   event: SessionEvent,
-  message: { role: string; content: unknown },
-  idField: string,
-  sequenceField: string,
+  participant: string,
+  content: readonly MembraneBlock[],
 ): string {
   return store.appendToStateJsonWithIdentity(
     slots().messages.id,
     {
-      participant: message.role,
-      content: message.content,
+      participant,
+      content,
       metadata: { dshSeq: event.seq },
-      timestamp: new Date(event.time),
+      timestamp: event.time,
     },
-    idField,
-    sequenceField,
+    'id',
+    'sequence',
   ).id
+}
+
+/**
+ * The content one surface message contributes to the store, or undefined when it
+ * contributes nothing.
+ *
+ * A message with no blocks stands for nothing the memory system can price, chunk
+ * or remember: the library classifies such a row as empty content and requires no
+ * rendering for it, so the store keeps only rows that carry something. The seed
+ * and the live path both apply the rule, so a replay of the same log numbers the
+ * same rows.
+ *
+ * The row is built fresh rather than handed the session's own blocks: the session
+ * deep-freezes what it publishes, and the library treats the messages it
+ * materializes from this slot as mutable.
+ */
+function mirrorContent(message: { readonly content: readonly ContentBlock[] }): MembraneBlock[] | undefined {
+  return message.content.length === 0 ? undefined : message.content.map(toMembraneBlock)
+}
+
+/**
+ * The harness's block vocabulary in the library's.
+ *
+ * The two name the same blocks differently, and the library reads its own names
+ * only: under the harness's, a tool call prices at zero tokens, matches no
+ * tool-pair check, and leaves its chunk looking tool-free to the strategy's
+ * compression gate, so a tool transcript reaches memory formation as text with
+ * its tools missing.
+ *
+ * A block the harness carries a durable reference for rather than a payload —
+ * an image — becomes a placeholder: the store cannot represent the attachment,
+ * and the fact of it is what a recollection can preserve.
+ */
+function toMembraneBlock(block: ContentBlock): MembraneBlock {
+  switch (block.type) {
+    case 'text': return { type: 'text', text: block.text }
+    case 'reasoning': return { type: 'thinking', thinking: block.text }
+    case 'tool-call': return { type: 'tool_use', id: block.id, name: block.name, input: toolInput(block.arguments) }
+    case 'tool-result':
+      return {
+        type: 'tool_result',
+        toolUseId: block.toolCallId,
+        // A result's content nests blocks of its own, and the library prices
+        // and renders it by recursing into them.
+        content: block.content.map(toMembraneBlock),
+        ...block.isError === undefined ? {} : { isError: block.isError },
+      }
+    default: return { type: 'text', text: `[${block.type} omitted from memory mirror]` }
+  }
+}
+
+/** Tool arguments as the library stores them; input that is not a JSON object keeps an empty record. */
+function toolInput(arguments_: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(arguments_)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
 }
 
 /**
