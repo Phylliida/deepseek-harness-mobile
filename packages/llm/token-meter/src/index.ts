@@ -220,42 +220,52 @@ export class TokenMeter extends Service {
 
     if (event.type === 'assistant/message') {
       const stepStart = state.stepStart
-      if (stepStart === undefined
-        || stepStart.turn !== event.data.turn
-        || stepStart.step !== event.data.step) {
+      const anchored = stepStart !== undefined
+        && stepStart.turn === event.data.turn
+        && stepStart.step === event.data.step
+      // A compaction backend writes its replacement outside any step: the fold
+      // is planned at a turn boundary or on the maintenance thread, and its
+      // surface change is priced by the shadow-price event immediately before it
+      // (see `compaction/summary`), not by step anchoring. Such a message takes
+      // no anchor of its own — the newest anchor still belongs to the last real
+      // model call, whose usage stays reusable.
+      const replacement = event.data.message.source.compactionId !== undefined
+      if (!anchored && !replacement) {
         throw new Error(`token meter: assistant/message at seq ${event.seq} has no matching step/start event`)
       }
 
-      // assistant/message is surface-mandatory at every append/seed boundary.
-      // oxlint-disable-next-line typescript/no-non-null-assertion
-      const eventTokens = surface!.tokens
-      if (event.data.usage !== undefined && nextHeader !== undefined) {
-        const providerAssistantTokens = this._estimateProviderAssistant(
-          session,
-          event,
-          eventTokens,
-        )
-        const anchorSurfaceTokens = stepStart.surfaceTokens + providerAssistantTokens
-        const providerTokens = usageTokens(event.data.usage)
-        const estimatedAnchorTokens = estimateHeader(nextHeader) + anchorSurfaceTokens
-        nextAnchor = {
-          header: nextHeader,
-          surfaceTokens: anchorSurfaceTokens,
-          // Signed heuristic deltas remain conservative only from an anchor
-          // that is at least as large as the matching full heuristic price.
-          baseline: providerTokens >= estimatedAnchorTokens
-            ? { kind: 'usage', tokens: providerTokens, usage: event.data.usage }
-            : { kind: 'estimated', tokens: estimatedAnchorTokens },
-        }
-      } else {
-        const anchorSurfaceTokens = stepStart.surfaceTokens + eventTokens
-        nextAnchor = {
-          header: nextHeader,
-          surfaceTokens: anchorSurfaceTokens,
-          baseline: {
-            kind: 'estimated',
-            tokens: estimateHeader(nextHeader) + anchorSurfaceTokens,
-          },
+      if (anchored) {
+        // assistant/message is surface-mandatory at every append/seed boundary.
+        // oxlint-disable-next-line typescript/no-non-null-assertion
+        const eventTokens = surface!.tokens
+        if (event.data.usage !== undefined && nextHeader !== undefined) {
+          const providerAssistantTokens = this._estimateProviderAssistant(
+            session,
+            event,
+            eventTokens,
+          )
+          const anchorSurfaceTokens = stepStart.surfaceTokens + providerAssistantTokens
+          const providerTokens = usageTokens(event.data.usage)
+          const estimatedAnchorTokens = estimateHeader(nextHeader) + anchorSurfaceTokens
+          nextAnchor = {
+            header: nextHeader,
+            surfaceTokens: anchorSurfaceTokens,
+            // Signed heuristic deltas remain conservative only from an anchor
+            // that is at least as large as the matching full heuristic price.
+            baseline: providerTokens >= estimatedAnchorTokens
+              ? { kind: 'usage', tokens: providerTokens, usage: event.data.usage }
+              : { kind: 'estimated', tokens: estimatedAnchorTokens },
+          }
+        } else {
+          const anchorSurfaceTokens = stepStart.surfaceTokens + eventTokens
+          nextAnchor = {
+            header: nextHeader,
+            surfaceTokens: anchorSurfaceTokens,
+            baseline: {
+              kind: 'estimated',
+              tokens: estimateHeader(nextHeader) + anchorSurfaceTokens,
+            },
+          }
         }
       }
     }

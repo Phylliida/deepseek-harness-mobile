@@ -22,11 +22,18 @@ export interface BridgeOptions {
   readonly agentParticipant?: string
   readonly warn?: (message: string) => void
   /**
-   * Streamed text tap for the chat's live memory-formation rows. Fires per
-   * delta and once with `done: true` when the call ends however it ends, which
-   * is what bounds an attempt.
+   * Cancellation for the call about to start, read once per call. The calls run
+   * on the engine's own tick chain rather than inside the pass that scheduled
+   * them, so the signal is a live read instead of a value captured at
+   * construction.
    */
-  readonly onText?: (delta: string, done: boolean, usage?: TokenUsage) => void
+  readonly signal?: () => AbortSignal | undefined
+  /**
+   * Streamed text tap for the chat's live memory-formation rows. Fires per
+   * delta and once when the call ends however it ends — with the failure that
+   * ended it — which is what bounds an attempt.
+   */
+  readonly onText?: (delta: string, done: boolean, usage?: TokenUsage, failure?: string) => void
 }
 
 const DEFAULT_AGENT_PARTICIPANT = 'assistant'
@@ -110,8 +117,11 @@ function toHarnessMessage(message: RequestMessage, agentParticipant: string, voi
   if (message.participant === agentParticipant) {
     return [createAssistantMessage({ content: blocks, source: voice })]
   }
-  const named = message.participant === 'user'
+  const named = message.participant === 'user' || blocks.length === 0
     ? blocks
+    // A foreign message keeps its speaker on the block it opens with. Every block
+    // it holds may have mapped away — a message of redacted reasoning alone does —
+    // and then there is no opening block to name and nothing to say.
     : [withName(blocks[0] as ContentBlock, message.participant), ...blocks.slice(1)]
   // `createUserMessage` with the tool source would stamp a generic identity;
   // the library matches a result to its call through the block's own id.
@@ -154,6 +164,9 @@ export function createBridge(options: BridgeOptions): Membrane {
       const voice: Voice = { provider, model: request.config.model }
       const messages = request.messages.flatMap(message => toHarnessMessage(message, agentParticipant, voice))
       const assembler = new BlockAssembler()
+      // Read at the call, not at construction: a pass arms the cancellation when
+      // it kicks the tick, and the tick's calls start after that pass returned.
+      const signal = options.signal?.()
       // The library sizes its own request; a long-reasoning model still needs
       // room for thinking beside the recollection, so the configured cap is a
       // floor rather than a replacement — and a request that asks for no cap
@@ -161,6 +174,7 @@ export function createBridge(options: BridgeOptions): Membrane {
       const capped = request.config.maxTokens > 0
         ? Math.max(request.config.maxTokens, maxTokens ?? 0)
         : maxTokens
+      let failure: string | undefined
       try {
         for await (const chunk of llm.stream({
           provider,
@@ -173,6 +187,7 @@ export function createBridge(options: BridgeOptions): Membrane {
           ...request.tools === undefined ? {} : { tools: request.tools.map(toHarnessTool) },
           ...capped === undefined ? {} : { maxTokens: capped },
           ...request.config.temperature === undefined ? {} : { temperature: request.config.temperature },
+          ...signal === undefined ? {} : { signal },
           purpose: 'compaction',
         })) {
           if (chunk.type === 'text-delta') onText?.(chunk.text, false)
@@ -181,16 +196,20 @@ export function createBridge(options: BridgeOptions): Membrane {
       } catch (error: unknown) {
         // The library classifies a thrown call as abort without the text;
         // echo it so a quarantine is diagnosable from the console.
-        warn?.(`compression call threw: ${error instanceof Error ? error.message : String(error)}`)
+        failure = error instanceof Error ? error.message : String(error)
+        warn?.(`compression call threw: ${failure}`)
+        onText?.('', true, assembler.usage, failure)
         throw error
-      } finally {
-        onText?.('', true, assembler.usage)
       }
 
       const finish = assembler.finish
       if (finish.kind === 'error' || finish.kind === 'aborted') {
-        warn?.(`compression call ended ${finish.kind}: ${finish.failure.code} ${finish.failure.message}`)
+        failure = `${finish.failure.code} ${finish.failure.message}`
+        warn?.(`compression call ended ${finish.kind}: ${failure}`)
       }
+      // The terminal tap closes the attempt either way: a call that streamed no
+      // text and failed has no other record of having been made.
+      onText?.('', true, assembler.usage, failure)
       const content = toMembraneBlocks(assembler.blocks(), messages)
       const text = content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')
       return {

@@ -1,6 +1,7 @@
 /*
  * The memory-formation row, styled as the Think row is: one preview line that
- * follows the call while it streams, and the recollection disclosed on click.
+ * follows the call while it streams, and the recollection disclosed on click. A
+ * call that failed says so in that line.
  */
 
 .root {
@@ -69,6 +70,10 @@
 
 .summary[data-follow-end] {
   text-overflow: clip;
+}
+
+.summary[data-error] {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .body {

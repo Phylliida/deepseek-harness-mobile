@@ -14,13 +14,19 @@ type StrategyStats = ReturnType<AutobiographicalStrategy['getStats']>
 /** Knobs accepted by the plugin config; every field is optional. */
 export interface AutobiographicalCompactionConfig {
   /**
-   * Ceiling for the context the strategy keeps live, reached by folding aged
-   * history. Default 65_536: models degrade well before their advertised window,
-   * so the operating point stays there regardless of route. A configured value
-   * is the ceiling itself rather than a floor under the route's own window.
+   * The window the pass compiles against: the live context is held below
+   * `min(routed window, this) − reserveTokens`, reached by folding aged history.
+   * Default 65_536: models degrade well before their advertised window, so the
+   * operating point stays there regardless of route. A configured value is the
+   * ceiling itself rather than a floor under the route's own window.
    */
   operatingWindowTokens?: number
-  /** Tokens reserved for the model's response inside the compile budget; default 8192. */
+  /**
+   * Tokens kept out of the live context for the model's response; default 8192.
+   * The library subtracts them from the compile budget after the pass already
+   * has, so the live ceiling is the window less twice this value — headroom that
+   * also covers the system prompt and tool schemas the strategy never sees.
+   */
   reserveTokens?: number
   /** Register the step-boundary folding listener; default true. */
   auto?: boolean
@@ -105,14 +111,10 @@ export interface AutobiographicalMemoryEventData extends StrategyStats {
 }
 
 /**
- * Log-only record of one streamed-text flush from an in-flight
- * memory-formation call, as builds before the log-native rewrite wrote it.
- *
- * This build never appends one: a recollection reaches the transcript through
- * its fold node instead, and the call's usage rides the tick record. The type
- * stays in the vocabulary because the read path refuses a log holding a type
- * outside it, so dropping the declaration would make every session written
- * before the rewrite unopenable.
+ * Log-only record of one streamed-text flush from a memory-formation call: the
+ * prose the chat's memory row follows while the call runs, and the terminal flush
+ * that closes the attempt. The text is the call's own output and never becomes a
+ * surface node, so this is the only place the live form of it is written down.
  */
 export interface AutobiographicalMemoryProgressEventData {
   /** Bridge call number within the session runtime; groups one call's flushes. */
@@ -121,15 +123,19 @@ export interface AutobiographicalMemoryProgressEventData {
   delta: string
   /** Present on the call's terminal flush, success or failure. */
   done?: boolean
-  /** The call's provider-reported usage on the terminal flush. */
-  usage?: TokenUsage
+  /**
+   * Why the call failed, on the terminal flush of one that did. A call can fail
+   * before streaming any text, and this is what keeps such a request visible: the
+   * row it settles reports the failure instead of an empty recollection.
+   */
+  error?: string
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     /** Log-only record of one memory-formation tick that has news to report. */
     'autobio/memory': AutobiographicalMemoryEventData
-    /** Live memory-formation text as pre-rewrite builds logged it; read for compatibility, never written. */
+    /** Live memory-formation text, and the terminal flush that closes the attempt. */
     'autobio/memory-progress': AutobiographicalMemoryProgressEventData
   }
 }

@@ -99,8 +99,10 @@ export function assertFoldOpsApply(session: Session, ops: readonly FoldOp[]): vo
  *   planner.
  * @param turn - the turn the events belong to, or null outside a turn. The
  *   replacement message records 0 in that case, since it requires a number.
- * @param step - the step within the turn the replacement message is stamped
- *   with; it is not advanced, and must be the step the session already holds.
+ * @param step - the step the replacement message is stamped with: the step the
+ *   pass is preparing inside a turn, or 0 outside one. A fold lands before the
+ *   step it was planned for starts, so the step names where the recollection
+ *   belongs rather than a step the session already holds.
  * @param route - the route the runtime was opened with, supplying the provider
  *   and model recorded as the folds' provenance. The session's own
  *   `requestContext()` is the value intended here.
@@ -130,8 +132,8 @@ export function applyFolds(
  * @param op - the fold to land, already widened to pair-safe boundaries by the
  *   planner.
  * @param turn - the turn the events belong to, or null outside a turn.
- * @param step - the step within the turn the replacement message is stamped
- *   with; it is not advanced, and must be the step the session already holds.
+ * @param step - the step the replacement message is stamped with, as
+ *   {@link applyFolds} defines it.
  * @param route - the route the runtime was opened with, supplying the provider
  *   and model recorded as the fold's provenance.
  * @returns the landed fold: the compaction id, the start, summary and end seqs,

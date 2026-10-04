@@ -42,7 +42,11 @@ const t = makeTranslate(zh, commonZh)
  * The row view reads only its Node and the locale seat, so the direct-render
  * seat carries those two and no framework runtime.
  */
-function row(text: string, streaming: boolean): Parameters<typeof AutobioMemoryNodeView>[0] {
+function row(
+  text: string,
+  streaming: boolean,
+  error?: string,
+): Parameters<typeof AutobioMemoryNodeView>[0] {
   return {
     node: {
       key: 'autobio-attempt-1',
@@ -52,7 +56,13 @@ function row(text: string, streaming: boolean): Parameters<typeof AutobioMemoryN
       anchorSeq: 10,
       location: { kind: 'unresolved' },
       visibility: 'visible',
-      data: { kind: 'autobio-memory', seq: 10, text, streaming },
+      data: {
+        kind: 'autobio-memory',
+        seq: 10,
+        text,
+        streaming,
+        ...error === undefined ? {} : { error },
+      },
     },
     t,
   } as unknown as Parameters<typeof AutobioMemoryNodeView>[0]
@@ -103,6 +113,20 @@ describe('AutobioMemoryNodeView', () => {
 
     fireEvent.click(view.getByText('记忆形成'))
     expect(disclosure.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('shows a failed call that wrote nothing as the failure it ended with', () => {
+    const view = render(<AutobioMemoryNodeView {...row('', false, 'the provider hung up')} />)
+
+    // Constraint one: every model request shows up. A call that failed before
+    // writing a character has no recollection to preview, so the failure is the
+    // row's line and the row is not left standing as a settled empty one.
+    expect(view.getByText('the provider hung up')).toBeTruthy()
+    expect(view.getByText('失败')).toBeTruthy()
+    expect(view.container.querySelector('[data-state]')?.getAttribute('data-state')).toBe('error')
+    expect(view.getByText('记忆形成')).toBeTruthy()
+    // Nothing was written, so there is no body to disclose either.
+    expect(view.queryByRole('button')).toBeNull()
   })
 
   it('carries no preview line and nothing to disclose for a call that has written nothing yet', () => {

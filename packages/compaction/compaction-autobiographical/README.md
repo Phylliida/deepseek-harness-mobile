@@ -35,8 +35,8 @@ Every setting is optional. The three harness knobs are the whole integration sur
 
 | Key | Required | Meaning |
 |---|---|---|
-| `operatingWindowTokens` | no (default: the routed request's window, capped at 65536) | Ceiling for the live context the strategy keeps; also the lever for exercising folding against a small deliberate budget. Without it, and before the first routed request, a pass skips. The cap keeps the operating point near 64k — models degrade well before their advertised window — while a smaller routed window always wins. |
-| `reserveTokens` | no (default `8192`) | Tokens reserved for the model's response inside the compile budget. |
+| `operatingWindowTokens` | no (default: the routed request's window, capped at 65536) | The window the pass compiles against: the live context is held below `min(routed window, this) − reserveTokens`, reached by folding aged history. Also the lever for exercising folding against a small deliberate budget. Without it, and before the first routed request, a pass skips. The cap keeps the operating point near 64k — models degrade well before their advertised window — while a smaller routed window always wins. |
+| `reserveTokens` | no (default `8192`) | Tokens kept out of the live context for the model's response. The library subtracts them from the compile budget after the pass already has, so the live ceiling is the window less twice this value — headroom that also covers the system prompt and tool schemas the strategy never sees. |
 | `auto` | no (default `true`) | Register the step-boundary folding listener at load. Set `false` for manual-only folding. |
 | `strategy` | no (default `{}`) | `AutobiographicalOptions` passed through to the library: `recentWindowTokens`, `headWindowTokens`, `maxMessageTokens`, `targetChunkTokens`, `mergeThreshold`, `maxTokens`, `kvStableReachTokens`, `summaryTargetTokens`, … |
 
@@ -89,7 +89,7 @@ I recall that we had been tracing the compaction seam, and that I had just finis
 
 #### Token effect
 
-A fold replaces the shadowed span's measured tokens with the recollection's, and a later merge replaces several recollections with a coarser one, so the surface's cost per unit of history falls as the session ages without ever carrying a second copy. Folding runs before request derivation, so the very next request already carries it, and a span that cannot fit even at the coarsest resolution leaves the surface unchanged. `reserveTokens` stays outside the compile budget.
+A fold replaces the shadowed span's measured tokens with the recollection's, and a later merge replaces several recollections with a coarser one, so the surface's cost per unit of history falls as the session ages without ever carrying a second copy. Folding runs before request derivation, so the very next request already carries it, and a span that cannot fit even at the coarsest resolution leaves the surface unchanged. `reserveTokens` is kept out of the live context twice over: the pass subtracts it below the operating window and the library subtracts it again as the response allowance.
 
 #### KV Cache effect
 

@@ -788,13 +788,18 @@ describe('built-in conversation node Definitions', () => {
         memory: { id: 'L1-0', level: 1, content: 'I recall the exchange.', tokens: 6, created: 1 },
       }),
       at(20, 'autobio/memory-progress', { attempt: 2, delta: 'a second call' }),
+      // A call that failed before writing a character: the terminal flush is the
+      // row's whole record of it, and the failure is what it carries.
+      at(25, 'autobio/memory-progress', { attempt: 3, delta: '', done: true, error: 'the provider hung up' }),
       at(30, 'autobio/memory', { note: 'not a stats record' }),
       at(40, 'autobio/memory-progress', { attempt: 'one', delta: 'x' }),
     ])
     const rows = [...snapshot(value).nodes.values()].filter(candidate => candidate.kind === 'autobio-memory')
-    expect(rows).toHaveLength(2)
+    expect(rows).toHaveLength(3)
     expect(rows[0]?.data).toMatchObject({ text: 'I recall the exchange.', streaming: false })
     expect(rows[1]?.data).toMatchObject({ text: 'a second call', streaming: true })
+    expect(rows[1]?.data).not.toHaveProperty('error')
+    expect(rows[2]?.data).toMatchObject({ text: '', streaming: false, error: 'the provider hung up' })
     // Log-only records carry no turn of their own, so the row is seated by the
     // seq it lands on rather than by a coordinate its payload declares.
     expect(rows[0]?.location).toMatchObject({ kind: 'step', turn: { turn: 1 }, step: { step: 1 } })

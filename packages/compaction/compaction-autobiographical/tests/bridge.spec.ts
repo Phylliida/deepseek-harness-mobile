@@ -199,6 +199,25 @@ describe('createBridge', () => {
       expect(sent[0]?.content[0]).toMatchObject({ type: 'tool-result', toolCallId: 'call-3', isError: false })
     })
 
+    it('drops a third-party message whose blocks all map away', async () => {
+      const calls: GenerateOptions[] = []
+      await complete(
+        { llm: runtime(textChunks('ok'), calls) },
+        request({
+          messages: [
+            { participant: 'user', content: [{ type: 'text', text: 'mine' }] },
+            // Opaque by construction: `toHarness` drops it, and a message left
+            // with no blocks has no opening block to name its speaker on.
+            { participant: 'Reviewer', content: [{ type: 'redacted_thinking', data: 'opaque' }] },
+          ],
+        }),
+      )
+
+      const sent = calls[0]?.messages ?? []
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.content[0]).toMatchObject({ type: 'text', text: 'mine' })
+    })
+
     it('declares the agent\'s tools on the request', async () => {
       const calls: GenerateOptions[] = []
       await complete(
@@ -294,17 +313,38 @@ describe('createBridge', () => {
 
     it('warns when the call ends in failure', async () => {
       const warned: string[] = []
+      const tones: Array<[string, boolean, TokenUsage | undefined, string | undefined]> = []
       await complete(
         {
           llm: runtime([
             { type: 'finish', reason: { kind: 'error', failure: { code: 'rate_limit', message: 'slow down' } } },
           ]),
           warn: message => warned.push(message),
+          onText: (delta, done, usage, failure) => tones.push([delta, done, usage, failure]),
         },
         request(),
       )
 
       expect(warned).toEqual(['compression call ended error: rate_limit slow down'])
+      // The terminal tone carries the failure beside the empty delta: a call that
+      // wrote nothing before it failed is still a request, and this is all the
+      // chat has to show for it.
+      expect(tones).toEqual([['', true, undefined, 'rate_limit slow down']])
+    })
+
+    it('hands the stream the cancellation armed for the call', async () => {
+      const calls: GenerateOptions[] = []
+      const turn = new AbortController()
+      await complete({ llm: runtime(textChunks('ok'), calls), signal: () => turn.signal }, request())
+
+      expect(calls[0]?.signal).toBe(turn.signal)
+    })
+
+    it('leaves the signal off a call nothing armed one for', async () => {
+      const calls: GenerateOptions[] = []
+      await complete({ llm: runtime(textChunks('ok'), calls), signal: () => undefined }, request())
+
+      expect('signal' in (calls[0] as object)).toBe(false)
     })
 
     it('echoes a thrown call so the quarantine is diagnosable, and rethrows', async () => {

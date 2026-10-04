@@ -12,14 +12,14 @@
 
 import { ContextManager, OverBudgetError } from '@animalabs/context-manager'
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AutobiographicalCompactionEngine from '../src/index.ts'
-import { describeJsonFailures } from '../src/index.ts'
 import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
-import { build, contextOf, provideTokenMeter, summarizer } from './harness.ts'
+import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
+import { build, contextOf, provideTokenMeter, settle, summarizer } from './harness.ts'
 
 /** Let the fire-and-forget tick chain finish. It is never awaited by a pass. */
 async function settled(): Promise<void> {
@@ -28,7 +28,15 @@ async function settled(): Promise<void> {
 
 /** An open runtime: the strategy it holds and the manager a pass compiles through. */
 interface OpenRuntime {
-  strategy: { summaries: unknown[]; tick(): Promise<void>; store: { getStateJson(id: string): unknown[] } }
+  strategy: {
+    summaries: unknown[]
+    tick(): Promise<void>
+    store: { getStateJson(id: string): unknown[] }
+    /** The committed resolutions the planner reads a fold's ground from. */
+    resolutions: Map<string, number>
+    /** Message ids the picker leaves at the frontier they were resolved under. */
+    locked: Set<string>
+  }
   manager: { compile(budget: unknown): Promise<unknown> }
   /** Log seq behind each mirrored message id, as the runtime keeps it. */
   seqOf: Map<string, number>
@@ -156,26 +164,42 @@ describe('compiling against a refusal', () => {
     expect(events(session, 'compaction/start')).toEqual([])
   })
 
-  it('does not retry a refusal it can already afford', async () => {
-    const { engine, agent } = build(30, 'index-refuse-affordable')
+  it('retries at the floor a refusal reports, and warns in the refusal\'s own units', async () => {
+    const { engine, agent } = build(30, 'index-refuse-floor')
+    // A refusal reports its floor against the library's usable budget — the total
+    // less the response allowance — so a floor below the total is still a floor
+    // above the budget that refused, and the retry claims exactly that floor.
     const compile = vi.spyOn(ContextManager.prototype, 'compile')
-      .mockImplementation(async (_budget) => {
-        throw overBudget(_budget?.maxTokens ?? 0, 100)
+      .mockImplementationOnce(async (asked) => {
+        throw overBudget((asked?.maxTokens ?? 0) - 128, 100)
       })
+      .mockImplementationOnce(async (asked) => {
+        throw overBudget((asked?.maxTokens ?? 0) - 128, (asked?.maxTokens ?? 0) - 98)
+      })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
-    // 100 + 128 fits inside 572, so a retry would ask for less than the budget
-    // that already refused. Nothing is gained by trying again.
-    expect(compile).toHaveBeenCalledTimes(1)
+    expect(compile.mock.calls.at(1)?.[0]).toEqual({ maxTokens: 228, reserveForResponse: 128 })
+    // Both numbers in the warning are the refusal's own: `actual` is a
+    // usable-budget figure, so it is printed against the usable budget it was
+    // measured against rather than the total the pass asked for.
+    expect(warn.mock.calls.flat().join('\n')).toContain('folding is 130 tokens over budget 100')
   })
 
-  it('surfaces a compile failure that is not a refusal', async () => {
+  it('reports a compile failure that is not a refusal as an expected one', async () => {
     const { engine, agent } = build(30, 'index-compile-broke')
     vi.spyOn(ContextManager.prototype, 'compile').mockImplementation(async () => {
       throw new Error('the store went away')
     })
 
-    await expect(engine.compactNow(agent, new AbortController().signal)).rejects.toThrow('the store went away')
+    // `/compact` reports a classified failure to its caller and rethrows
+    // anything else as an unexpected one, so a store fault has to arrive
+    // classified rather than as a crash the command adapter cannot place.
+    const error = await engine.compactNow(agent, new AbortController().signal)
+      .then(() => { throw new Error('expected a rejection') }, (caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ManualCompactionError)
+    expect((error as ManualCompactionError).code).toBe('summary')
+    expect((error as ManualCompactionError).message).toContain('the store went away')
   })
 
   it('warns and folds again next step when the retry is still over budget', async () => {
@@ -184,7 +208,7 @@ describe('compiling against a refusal', () => {
     vi.spyOn(ContextManager.prototype, 'compile').mockImplementation(async (_budget) => {
       const budget = _budget ?? { maxTokens: 0, reserveForResponse: 0 }
       // Over budget yet again, but only just: the next pass will not be.
-      throw overBudget(budget.maxTokens, budget.maxTokens + 10)
+      throw overBudget(budget.maxTokens - 128, budget.maxTokens - 118)
     })
 
     expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
@@ -248,6 +272,36 @@ describe('tool definitions', () => {
     expect(set).not.toHaveBeenCalled()
   })
 
+  it('pushes a declaration set the strategy already holds once, and the system voice with it', async () => {
+    const { engine, agent, session } = build(30, 'index-declarations')
+    const declared = (system: string) => ({
+      config: { provider: 'test', model: 'test-model' },
+      system,
+      tools: [{ name: 'now', description: 'The time.', parameters: { type: 'object' } }],
+    })
+    session.append('request/header', { header: declared('you are the agent'), reason: 'initial' })
+    const set = vi.spyOn(ContextManager.prototype, 'setToolDefinitions')
+    const prompt = vi.spyOn(ContextManager.prototype, 'setSystemPrompt')
+
+    await engine.compactNow(agent, new AbortController().signal)
+    await engine.compactNow(agent, new AbortController().signal)
+
+    // A pass runs at every step boundary while the header only changes when the
+    // declarations do, so a pass that finds the same snapshot has nothing to push.
+    expect(set).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledWith('you are the agent')
+
+    // The memory-writing call is served the session's own system voice, so a
+    // change to it has to reach the strategy on the pass that sees it.
+    session.append('request/header', { header: declared('you are the agent, and terse'), reason: 'change' })
+    await engine.compactNow(agent, new AbortController().signal)
+
+    expect(set).toHaveBeenCalledTimes(2)
+    expect(prompt).toHaveBeenCalledTimes(2)
+    expect(prompt).toHaveBeenLastCalledWith('you are the agent, and terse')
+  })
+
   it('pushes tools a session declared after its runtime was already open', async () => {
     const { engine, agent, session } = build(4, 'index-tools-late')
     await engine.compactNow(agent, new AbortController().signal)
@@ -271,61 +325,6 @@ describe('tool definitions', () => {
 })
 
 describe('memory formation behind the pass', () => {
-  it('reports what a refused record holds, including the values JSON would hide', () => {
-    // The readings the log's own refusal cannot show: `JSON.stringify` renders an
-    // absent value and a non-finite number as `null`, and an exotic object as an
-    // empty one, so the report names each by what it actually is and where it sits.
-    expect(describeJsonFailures({
-      attempt: 3,
-      usage: { inputTokens: 1, cacheReadTokens: undefined },
-      memory: { id: 'L1-4', tokens: Number.NaN, created: new Date(0), sourceRange: { firstSeq: 1, lastSeq: 2 } },
-    })).toEqual([
-      'usage.cacheReadTokens is undefined',
-      'memory.tokens is a non-finite number (NaN)',
-      'memory.created is a Date',
-    ])
-  })
-
-  it('reports a record whose values are all storable as such', () => {
-    expect(describeJsonFailures({ attempt: 3, statistics: { l1: 0, l2: 1 }, text: 'x'.repeat(301) }))
-      .toEqual(['none — every value in the record is storable JSON'])
-  })
-
-  it('reports a value by kind where its own text would say nothing', () => {
-    // A function is refused for what it is: its own text is not the value's text.
-    // An exotic object is refused by its constructor, because the log finds no
-    // fields in it to walk into.
-    expect(describeJsonFailures({ usage: { run: function named() { return 1 } } }))
-      .toEqual(['usage.run is a function (named)'])
-    expect(describeJsonFailures({ usage: (name: string) => name })).toEqual(['usage is a function (usage)'])
-    expect(describeJsonFailures({ usage: new Map([['a', 1]]) })).toEqual(['usage is a Map'])
-  })
-
-  it('reports a bare value the log refuses rather than one of a record\'s fields', () => {
-    expect(describeJsonFailures(Number.NaN)).toEqual(['<the record itself> is a non-finite number (NaN)'])
-  })
-
-  it('reports a field by its path through a list as well as a record', () => {
-    expect(describeJsonFailures({ memory: { sourceIds: ['a', undefined] } }))
-      .toEqual(['memory.sourceIds.1 is undefined'])
-  })
-
-  it('binds the text it reports to a line rather than dumping a recollection', () => {
-    // A recollection's own content is the one value here that runs long, so the
-    // two cuts — the string's, and the record's — are what keeps the line readable.
-    expect(describeJsonFailures({ memory: { content: 'y'.repeat(400) } }))
-      .toEqual(['none — every value in the record is storable JSON'])
-    expect(describeJsonFailures({ memory: { content: 'y'.repeat(400), tokens: Number.POSITIVE_INFINITY } }))
-      .toEqual(['memory.tokens is a non-finite number (Infinity)'])
-    expect(describeJsonFailures({ memory: { tokens: 'z'.repeat(400) } }))
-      .toEqual(['none — every value in the record is storable JSON'])
-  })
-
-  it('reports the text of a plain object the log cannot store', () => {
-    expect(describeJsonFailures({ memory: { sourceRange: { firstSeq: 1, lastSeq: 2, at: undefined } } }))
-      .toEqual(['memory.sourceRange.at is undefined'])
-  })
-
   it('warns and still records when the tick fails', async () => {
     const calls: GenerateOptions[] = []
     const { engine, agent, session } = build(30, 'index-tick-failed', {}, undefined, {
@@ -465,7 +464,7 @@ describe('memory formation behind the pass', () => {
     expect(records.length).toBeGreaterThan(0)
   })
 
-  it('reports the value the log refuses instead of writing a record without it', async () => {
+  it('reports that a refused record holds a value the log cannot store', async () => {
     const { engine, agent, session } = build(30, 'index-unstorable')
     await engine.compactNow(agent, new AbortController().signal)
     const runtime = await runtimes(engine).get(session.id)
@@ -476,7 +475,7 @@ describe('memory formation behind the pass', () => {
     runtime?.strategy.summaries.push({
       id: 'L1-8',
       level: 1,
-      content: 'a memory priced at no number at all',
+      content: `a memory priced at no number at all ${'y'.repeat(1_000)}`,
       tokens: Number.NaN,
       created: 0,
       sourceIds: ['ground-1'],
@@ -489,46 +488,54 @@ describe('memory formation behind the pass', () => {
 
     settle(runtime, session)
 
-    // The console carries what the log could not take and where it sat in the
-    // record — `JSON.stringify` would have rendered that `NaN` as `null` — and
-    // the log is left without a record rather than with a wrong one.
+    // The console carries the log's own refusal, that the record held a value it
+    // could not store at all, and the text it made of the record. `JSON.stringify`
+    // rendered that `NaN` as `null`, and the log is left without a record rather
+    // than with a wrong one.
     const lines = warn.mock.calls.map(([line]) => String(line))
-    expect(lines.some(line => line.includes('memory.tokens') && line.includes('NaN'))).toBe(true)
+    expect(lines.some(line => line.includes('the memory record for attempt'))).toBe(true)
+    expect(lines.some(line => line.includes('holds a value the session log cannot store'))).toBe(true)
+    const data = lines.find(line => line.includes('data: {"chunksTotal"'))
+    // One line's worth of the record, so a long recollection cannot flood the log.
+    expect(data?.endsWith('…')).toBe(true)
+    expect(data?.length).toBeLessThan(700)
     expect(events(session, 'autobio/memory')).toHaveLength(written)
-
-    // The counter moved with the attempt, so the next pass has nothing to add:
-    // a record that keeps being refused must not append a warning per pass.
-    warn.mockClear()
-    settle(runtime, session)
-    expect(warn).not.toHaveBeenCalled()
   })
 
-  it('names the nested path of a value the log refuses', async () => {
-    const { engine, agent, session } = build(30, 'index-unstorable-nested')
+  it('announces a recollection only once its record is durable', async () => {
+    const { engine, agent, session } = build(30, 'index-refused-announcement')
     await engine.compactNow(agent, new AbortController().signal)
     const runtime = await runtimes(engine).get(session.id)
     const written = events(session, 'autobio/memory').length
-    // Every field of the recollection is storable; the span it stands over is
-    // not, and the record has to say so by the path to it.
     runtime?.strategy.summaries.push({
-      id: 'L1-7',
+      id: 'L1-6',
       level: 1,
-      content: 'a memory standing over a span with no bound',
+      content: 'a memory the log refused once',
       tokens: 12,
       created: 0,
       sourceIds: ['ground-1'],
     })
-    runtime!.seqOf.set('ground-1', Number.POSITIVE_INFINITY)
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    runtime!.seqOf.set('ground-1', 1)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     const settle = (engine as unknown as {
       appendMemory(r: unknown, s: unknown): void
     }).appendMemory.bind(engine)
 
+    // The write refuses, so the recollection is not in the log and the record
+    // naming it is not either.
+    const refuse = vi.spyOn(session, 'append').mockImplementation(() => {
+      throw new Error('the log closed mid-write')
+    })
+    settle(runtime, session)
+    expect(events(session, 'autobio/memory')).toHaveLength(written)
+
+    // A recollection marked announced by a refused record is never announced
+    // again, so the retry is the whole of what keeps it in the archive.
+    refuse.mockRestore()
     settle(runtime, session)
 
-    const lines = warn.mock.calls.map(([line]) => String(line))
-    expect(lines.some(line => line.includes('memory.sourceRange.firstSeq') && line.includes('Infinity'))).toBe(true)
-    expect(events(session, 'autobio/memory')).toHaveLength(written)
+    const records = events(session, 'autobio/memory') as { data: { memory?: { id: string } } }[]
+    expect(records.some(({ data }) => data.memory?.id === 'L1-6')).toBe(true)
   })
 
   it('says so when the record itself is storable and the refusal came from elsewhere', async () => {
@@ -546,12 +553,12 @@ describe('memory formation behind the pass', () => {
 
     settle(runtime, session)
 
-    // Every value in the record is one the log stores, so the report says that
-    // rather than naming an offender that does not exist — a refusal with no
-    // offending value is a different bug, and the report must not blur the two.
+    // Every value in the record is one the log stores, so the report names no
+    // offender — a refusal with no offending value is a different bug, and the
+    // report must not blur the two.
     const lines = warn.mock.calls.map(([line]) => String(line))
     expect(lines.some(line => line.includes('the log closed mid-write'))).toBe(true)
-    expect(lines.some(line => line.includes('every value in the record is storable JSON'))).toBe(true)
+    expect(lines.some(line => line.includes('holds a value the session log cannot store'))).toBe(false)
     expect(lines.some(line => line.includes('data: {"chunksTotal"'))).toBe(true)
   })
 
@@ -800,5 +807,303 @@ describe('disposal', () => {
     await settled()
 
     expect(runtimes(engine).size).toBe(0)
+  })
+})
+
+describe('the pass and the calls behind it', () => {
+  /** Every live memory-formation flush the log holds, as the chat row reads them. */
+  function progressRecords(session: Session): { attempt: number; delta: string; done?: boolean; error?: string }[] {
+    return (events(session, 'autobio/memory-progress') as { data: { attempt: number; delta: string; done?: boolean; error?: string } }[])
+      .map(event => event.data)
+  }
+
+  /** The bridge call the fake summarizer was handed, once one has been made. */
+  async function firstCall(calls: GenerateOptions[]): Promise<GenerateOptions> {
+    for (let i = 0; i < 50 && calls.length === 0; i += 1) await settled()
+    return calls[0] as GenerateOptions
+  }
+
+  it('passes on the automatic entry for a session that has logged no turn', async () => {
+    const session = Session.create(SessionId('index-no-turn'))
+    session.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 100_000 })
+    const { engine } = build(0, 'index-no-turn')
+
+    // Nothing in the log holds a turn open, so the entry has no owner to offer a
+    // bracket and leaves the surface alone rather than inventing one.
+    expect(await engine.compactIfNeeded(asAgent(session, {}), 'pressure', new AbortController().signal)).toBeNull()
+  })
+
+  it('reports an automatic fold failure as an expected failure', async () => {
+    const { engine, agent } = build(30, 'index-auto-broke')
+    vi.spyOn(ContextManager.prototype, 'compile').mockImplementation(async () => {
+      throw new Error('the store went away')
+    })
+
+    await expect(engine.compactIfNeeded(agent, 'pressure', new AbortController().signal))
+      .rejects.toBeInstanceOf(ManualCompactionError)
+  })
+
+  it('refuses a manual fold the agent will not claim', async () => {
+    const { engine, agent } = build(30, 'index-busy-agent')
+    const busy = {
+      ...agent,
+      // The loop refuses an idle claim while it has other work, which is a busy
+      // agent rather than a fold that failed.
+      runMaintenance: (): Promise<never> => { throw new Error('the agent already has active work') },
+    }
+
+    const error = await engine.compactNow(busy, new AbortController().signal)
+      .then(() => { throw new Error('expected a rejection') }, (caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(ManualCompactionError)
+    expect((error as ManualCompactionError).code).toBe('busy')
+    expect((error as ManualCompactionError).message).toContain('requires an idle agent')
+  })
+
+  it('keeps forming memory when the compile refuses', async () => {
+    // Compressing is what raises the floor the next compile finds, so a session
+    // riding its budget that skips its tick on a refusal never comes back under:
+    // the merges its recollections are waiting for never run.
+    const { engine, agent, session } = build(30, 'index-refuse-tick')
+    vi.spyOn(ContextManager.prototype, 'compile').mockImplementation(async (asked) => {
+      const budget = asked ?? { maxTokens: 0, reserveForResponse: 0 }
+      throw overBudget(budget.maxTokens - 128, budget.maxTokens - 100)
+    })
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    const runtime = await runtimes(engine).get(session.id)
+    const tick = vi.spyOn(runtime!.strategy, 'tick')
+
+    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    await settled()
+
+    expect(tick).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels the calls a pass kicked when the turn that kicked them ends', async () => {
+    const calls: GenerateOptions[] = []
+    const { engine, agent } = build(30, 'index-turn-abort', {}, undefined, summarizer(calls))
+    const turn = new AbortController()
+
+    await engine.compactNow(agent, turn.signal)
+    const call = await firstCall(calls)
+
+    // The call starts after the pass has returned, so the pass has to leave the
+    // cancellation where the bridge can read it: a turn that aborted mid-call
+    // cannot keep paying for the recollection it no longer wants.
+    expect(call.signal).toBeDefined()
+    expect(call.signal?.aborted).toBe(false)
+    turn.abort()
+    expect(call.signal?.aborted).toBe(true)
+  })
+
+  it('ends the calls its maintenance claim ends', async () => {
+    const calls: GenerateOptions[] = []
+    const { engine, agent } = build(30, 'index-claim-abort', {}, undefined, summarizer(calls))
+    const claim = new AbortController()
+    const manual = {
+      ...agent,
+      runMaintenance: <T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> => task(claim.signal),
+    }
+
+    await engine.compactNow(manual, new AbortController().signal)
+    const call = await firstCall(calls)
+
+    // The idle reservation is the other half of a manual pass: it ends when the
+    // agent stops being idle, and the work it claimed has to end with it.
+    expect(call.signal?.aborted).toBe(false)
+    claim.abort()
+    expect(call.signal?.aborted).toBe(true)
+  })
+
+  it('stamps a fold with the route its recollection voice was frozen with', async () => {
+    const { engine, agent, session } = build(30, 'index-provenance', { auto: false })
+    // The runtime is opened, and speaks, as the route it is handed; a request
+    // routed elsewhere afterwards does not restyle the recollections already
+    // being written in that voice.
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    session.append('request/context', { provider: 'other', model: 'other-model', contextWindow: 100_000 })
+
+    const { folds } = await settle(engine, agent)
+
+    expect(folds.length).toBeGreaterThan(0)
+    const summaries = events(session, 'compaction/summary') as { data: { provider: string; model: string } }[]
+    expect(summaries.every(({ data }) => data.provider === 'test' && data.model === 'test-model')).toBe(true)
+    const nodes = session.events.filter(event => event.type === 'assistant/message'
+      && event.data.message.source.compactionId !== undefined)
+    const node = nodes.at(-1)
+    expect(node?.type === 'assistant/message' ? node.data.message.source : undefined)
+      .toMatchObject({ provider: 'test', model: 'test-model' })
+  })
+
+  it('accounts every call a tick settled, not only its last', async () => {
+    const { engine, agent, session } = build(30, 'index-usage-per-call')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await runtimes(engine).get(session.id)
+    const capture = (engine as unknown as {
+      captureText(s: unknown, p: unknown, delta: string, done: boolean, usage: unknown, failure: string | undefined): void
+    }).captureText.bind(engine)
+    const settle = (engine as unknown as {
+      appendMemory(r: unknown, s: unknown): void
+    }).appendMemory.bind(engine)
+
+    // Two ticks, each settling several calls as the refusal ladder does: the
+    // record's usage is what the session's cost accounting folds in, so a tick
+    // that reported only the last call would under-bill the others. The first
+    // tick's calls report every optional field, the second's report none.
+    const all = { cacheReadTokens: 5, cacheWriteTokens: 2, reasoningTokens: 3, costUsd: 0.5 }
+    const ticks: ReadonlyArray<readonly [TokenUsage, TokenUsage]> = [
+      // Every optional field reported by both calls, by only one of them, and by
+      // neither: a field one call leaves out is summed from the other, and one
+      // neither reports stays absent rather than becoming a zero.
+      [
+        { inputTokens: 10, outputTokens: 1, ...all },
+        { inputTokens: 20, outputTokens: 2 },
+      ],
+      [
+        { inputTokens: 1, outputTokens: 1 },
+        { inputTokens: 2, outputTokens: 2, ...all },
+      ],
+      [
+        { inputTokens: 3, outputTokens: 3 },
+        { inputTokens: 4, outputTokens: 4 },
+      ],
+    ]
+
+    for (const [index, usages] of ticks.entries()) {
+      for (const usage of usages) {
+        capture(session, runtime!.progress, `memory ${index}`, false, undefined, undefined)
+        capture(session, runtime!.progress, '', true, usage, undefined)
+      }
+      // A call that reported no usage at all leaves the tick's total standing.
+      capture(session, runtime!.progress, 'a call the provider did not bill', false, undefined, undefined)
+      capture(session, runtime!.progress, '', true, undefined, undefined)
+      settle(runtime, session)
+    }
+
+    const records = events(session, 'autobio/memory') as { data: { usage?: TokenUsage } }[]
+    expect(records[0]?.data.usage).toEqual({ inputTokens: 30, outputTokens: 3, ...all })
+    expect(records[1]?.data.usage).toEqual({ inputTokens: 3, outputTokens: 3, ...all })
+    expect(records[2]?.data.usage).toEqual({ inputTokens: 7, outputTokens: 7 })
+    await settled()
+  })
+
+  it('records a call that failed before streaming any text', async () => {
+    const { engine, agent, session } = build(30, 'index-failed-call', {}, undefined, {
+      async *stream(): AsyncIterable<StreamChunk> {
+        throw new Error('the provider hung up')
+      },
+    })
+
+    await engine.compactNow(agent, new AbortController().signal)
+    for (let i = 0; i < 50 && progressRecords(session).length === 0; i += 1) await settled()
+
+    // Every request shows up in the chat, including one that failed before
+    // writing a character: its terminal flush carries the failure where a
+    // streamed call carries its text.
+    const failed = progressRecords(session).filter(record => record.error !== undefined)
+    expect(failed.length).toBeGreaterThan(0)
+    expect(failed[0]).toMatchObject({ delta: '', done: true, error: 'the provider hung up' })
+    expect(Object.keys(failed[0] as object).sort()).toEqual(['attempt', 'delta', 'done', 'error'])
+  })
+
+  it('writes one bracket per recollection a pass planned', async () => {
+    const { engine, agent, session } = build(30, 'index-multi-op')
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    const runtime = await runtimes(engine).get(session.id)
+    const stored = runtime!.strategy.store.getStateJson('messages') as { id: string }[]
+    // Two recollections standing over two disjoint runs of the surface, which is
+    // the state a compile reaches when several chunks are ready at once.
+    const runs = [stored.slice(0, 2), stored.slice(2, 4)]
+    for (const [index, run] of runs.entries()) {
+      const ids = run.map(message => message.id)
+      runtime!.strategy.summaries.push({
+        id: `L1-9${index}`,
+        level: 1,
+        content: `content of L1-9${index}`,
+        tokens: 5,
+        created: 0,
+        sourceLevel: 0,
+        sourceIds: ids,
+        sourceRange: { first: ids[0] as string, last: ids.at(-1) as string },
+      })
+      for (const message of run) runtime!.strategy.resolutions.set(message.id, 1)
+    }
+    const landed = (): string[] => (events(session, 'compaction/summary') as { data: { compactionId: string } }[])
+      .map(event => event.data.compactionId)
+    const before = landed()
+
+    const result = await engine.compactNow(agent, new AbortController().signal)
+
+    // Both recollections were committed by the one compile, so both brackets land
+    // in the one pass: a pass that folds only the first leaves the rest of the
+    // layout it just committed standing unfolded until the next step boundary.
+    expect(landed().slice(before.length)).toEqual(expect.arrayContaining(['autobio:L1-90', 'autobio:L1-91']))
+    expect(result).not.toBeNull()
+    await settled()
+  })
+
+  it('reports a planner divergence as a changed span rather than an unexpected error', async () => {
+    const { engine, agent, session } = build(30, 'index-divergence')
+    await engine.compactNow(agent, new AbortController().signal)
+    await settled()
+    const runtime = await runtimes(engine).get(session.id)
+    const stored = runtime!.strategy.store.getStateJson('messages') as { id: string }[]
+    // A pinned message keeps the frontier it was resolved under, so a pin can
+    // outlive the recollection behind it: the store then resolves ground no
+    // recollection stands over, which is the planner's own divergence. It has to
+    // reach `/compact` as a failed span rather than as an unexpected crash the
+    // command adapter rethrows.
+    runtime!.strategy.locked.add(stored.at(-1)!.id)
+    runtime!.strategy.resolutions.set(stored.at(-1)!.id, 7)
+
+    const error = await engine.compactNow(agent, new AbortController().signal)
+      .then(() => { throw new Error('expected a rejection') }, (caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(ManualCompactionError)
+    expect((error as ManualCompactionError).code).toBe('changed')
+    expect((error as ManualCompactionError).message).toContain('no level-7 recollection stands for log seq')
+  })
+
+  it('owns an automatic fold by the turn the log holds open', async () => {
+    const { engine, agent, session } = build(30, 'index-open-turn')
+    // The automatic entry has no step to be handed, so the turn it folds inside
+    // is the one the log holds open and nothing else.
+    session.append('turn/start', { turn: 30 })
+
+    const { folds } = await settle(engine, agent)
+
+    expect(folds.length).toBeGreaterThan(0)
+    const owners = (events(session, 'compaction/start') as { data: { turn: number | null } }[])
+      .map(event => event.data.turn)
+    expect(new Set(owners)).toEqual(new Set([30]))
+  })
+
+  /** Every bracket owner in the log, in the order the brackets landed. */
+  function owners(session: Session): (number | null)[] {
+    return (events(session, 'compaction/start') as { data: { turn: number | null } }[])
+      .map(event => event.data.turn)
+  }
+
+  it('owns an automatic fold by no turn at all when the log holds none open', async () => {
+    const { engine, agent, session } = build(30, 'index-auto-standalone')
+    // Every turn the fixture started has ended, so nothing holds a turn open and
+    // `null` is the standalone shape the invariant accepts. A bracket left holding
+    // the newest closed turn is one no turn boundary can ever close.
+    const { folds } = await settle(engine, agent)
+
+    expect(folds.length).toBeGreaterThan(0)
+    expect(owners(session)).toEqual(owners(session).map(() => null))
+  })
+
+  it('owns a manual fold by no turn at all when the log holds none open', async () => {
+    const { engine, agent, session } = build(30, 'index-manual-standalone')
+    // The idle agent `/compact` folds on, whose log holds no turn open either.
+    const { folds } = await settle(engine, agent, (_context, signal) => engine.compactNow(agent, signal))
+
+    expect(folds.length).toBeGreaterThan(0)
+    expect(owners(session)).toEqual(owners(session).map(() => null))
   })
 })

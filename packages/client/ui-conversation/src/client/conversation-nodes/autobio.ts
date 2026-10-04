@@ -17,6 +17,8 @@ export interface AutobioMemoryNode {
   readonly text: string
   /** Whether the call is still streaming; false once it settled. */
   readonly streaming: boolean
+  /** Why the call failed, when it did. A failed call may carry no text at all. */
+  readonly error?: string
 }
 
 /**
@@ -39,18 +41,31 @@ export const autobioMemoryDefinition: ConversationNodeDefinition<Record<string, 
     let seq = 0
     let text = ''
     let streaming = false
+    let error: string | undefined
     for (const match of context.matches) {
-      const data = match.event.data as { delta?: unknown; done?: unknown; memory?: { content?: unknown } }
+      const data = match.event.data as {
+        delta?: unknown
+        done?: unknown
+        error?: unknown
+        memory?: { content?: unknown }
+      }
       seq = match.event.seq
       if ((match.event.type as string) === 'autobio/memory-progress') {
         if (typeof data.delta === 'string') text += data.delta
         streaming = data.done !== true
+        // The terminal flush of a failed call is the row's whole account of it:
+        // the call can fail before it writes a character.
+        if (typeof data.error === 'string') error = data.error
       } else if (typeof data.memory?.content === 'string') {
         text = data.memory.content
         streaming = false
       }
     }
-    return chatNode(context, 'autobio-memory', seq, { kind: 'autobio-memory', seq, text, streaming })
+    const node = { kind: 'autobio-memory' as const, seq, text, streaming }
+    return chatNode(context, 'autobio-memory', seq, {
+      ...node,
+      ...error === undefined ? {} : { error },
+    })
   },
 }
 

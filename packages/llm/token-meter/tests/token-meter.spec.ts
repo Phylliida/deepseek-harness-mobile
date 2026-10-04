@@ -4,6 +4,7 @@ import { createUserMessage, CallId, createMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, Message, TokenUsage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { Session, SessionId, canonicalHeader } from '@deepseek-ai/dsh-session'
 import type { EpochHeader, SessionEvent } from '@deepseek-ai/dsh-session'
+import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import type { TokenMeasurement, TokenMeterConfig } from '@deepseek-ai/dsh-token-meter'
 
@@ -459,6 +460,62 @@ describe('malformed replay and listener lifecycle', () => {
       }),
     }, { surfaceOp: 'append', sourceEventSeqs: [] })
     expectRepeatedFailure(meter(), session, /no matching step\/start/)
+  })
+
+  it('accepts a compaction replacement written outside any step', () => {
+    // The autobiographical backend lands a fold at a turn boundary or on the
+    // maintenance thread, so its replacement names a step no step/start opened.
+    // The shadow price is the adjacency protocol's business, not step anchoring.
+    const session = Session.create(SessionId('fold-outside-step'))
+    // Two surface nodes to fold into one, so the replacement is a shrink.
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'an earlier ask the recollection stands over' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    appendSuccessfulCall(session, header('deepseek-v4-flash'), {
+      usage: { inputTokens: 500, outputTokens: 20 },
+      providerText: 'short',
+    })
+    const service = meter()
+    const before = service.measure(session)
+    const shadowed = [...session.surface.nodes]
+    const summary = [{ type: 'text' as const, text: 'recall' }]
+    session.append('compaction/summary', {
+      compactionId: CompactionId('autobio:L1-0'),
+      summary,
+      shadowedRange: { start: shadowed[0]!, end: shadowed.at(-1)! },
+      shadowedSeqs: shadowed,
+      shadowedTokenCount: before.surfaceTokens,
+      provider: 'mock',
+      model: 'deepseek-v4-flash',
+    })
+    session.append('assistant/message', {
+      turn: 1,
+      step: 1,
+      message: createMessage({
+        role: 'assistant',
+        content: summary,
+        source: {
+          kind: 'model',
+          provider: 'mock',
+          model: 'deepseek-v4-flash',
+          compactionId: CompactionId('autobio:L1-0'),
+        },
+      }),
+    }, {
+      surfaceOp: { op: 'replace', start: shadowed[0]!, end: shadowed.at(-1)! },
+      sourceEventSeqs: shadowed,
+    })
+
+    const after = service.measure(session)
+    // The fold's own node is the whole surface the replacement left behind, and
+    // the anchor still belongs to the last model call, so its provider usage is
+    // reused with the fold's shrink carried as a signed delta.
+    expect(after.nodes).toHaveLength(1)
+    expect(after.surfaceTokens).toBeLessThan(before.surfaceTokens)
+    expect(after.baseline).toMatchObject({ kind: 'usage', tokens: 520 })
+    expect(after.surfaceDeltaTokens).toBeLessThan(0)
+    expectSurfaceTotal(after)
   })
 
   it('clears completed step boundaries and rejects overlapping or late step events', () => {

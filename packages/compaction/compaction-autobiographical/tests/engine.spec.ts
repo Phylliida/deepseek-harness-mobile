@@ -102,6 +102,49 @@ describe('automatic folding at a step boundary', () => {
     expect(agent.session.events.some(event => event.type === 'compaction/end')).toBe(true)
   })
 
+  it('owns a fold by the turn and step the pass is preparing', async () => {
+    const { engine, agent, session } = build(30, 'engine-auto-owner', { auto: true })
+    const events = agentEvents(contextOf(engine), asAgent(session, agent.options))
+    // One pass opens the runtime and seeds its store; the recollection and the
+    // resolution below are what make the stepped pass below land a fold rather
+    // than plan one for the tick to mint first.
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = await (engine as unknown as {
+      runtimes: Map<string, Promise<{
+        strategy: { summaries: unknown[]; resolutions: Map<string, number> }
+        store: { getStateJson(id: string): { id: string }[] }
+      }>>
+    }).runtimes.get(session.id)
+    const stored = runtime!.store.getStateJson('messages').slice(0, 2)
+    const ids = stored.map(message => message.id)
+    runtime!.strategy.summaries.push({
+      id: 'L1-70',
+      level: 1,
+      content: 'content of L1-70',
+      tokens: 5,
+      created: 0,
+      sourceLevel: 0,
+      sourceIds: ids,
+      sourceRange: { first: ids[0] as string, last: ids.at(-1) as string },
+    })
+    for (const id of ids) runtime!.strategy.resolutions.set(id, 1)
+
+    await events.waterfall(
+      'agent/pre-step',
+      { messages: [], turn: 30, step: 7, signal: SIGNAL },
+      async () => ({ kind: 'enter' as const, messages: [] }),
+    )
+
+    // A fold lands before the step it was planned for starts, so its owner comes
+    // from the payload: the log holds no open turn to name, and a bracket left
+    // holding the newest closed turn is one no turn boundary can close.
+    const start = session.events.filter(event => event.type === 'compaction/start').at(-1)
+    expect(start?.data).toMatchObject({ turn: 30 })
+    const node = session.events.filter(event => event.type === 'assistant/message'
+      && event.data.message.source.compactionId !== undefined).at(-1)
+    expect(node?.data).toMatchObject({ turn: 30, step: 7 })
+  })
+
   it('keeps the turn standing when folding fails', async () => {
     const { engine } = build(30, 'engine-auto-throws', { auto: true })
     const warned = vi.spyOn(console, 'warn').mockImplementation(() => {})

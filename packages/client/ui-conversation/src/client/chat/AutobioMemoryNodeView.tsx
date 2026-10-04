@@ -26,7 +26,8 @@ function latestLine(text: string): string {
 
 /**
  * Render one memory-formation call as a preview row with its recollection disclosed.
- * @param props.node - the row's streamed or settled recollection text.
+ * @param props.node - the row's streamed or settled recollection text, and why the
+ *   call failed when it did.
  * @param props.t - conversation locale seat for the row title and running status.
  * @returns the memory-formation disclosure.
  */
@@ -35,8 +36,12 @@ export const AutobioMemoryNodeView = function AutobioMemoryNodeView({
 }: ChatNodeViewProps<'autobio-memory'>) {
   const [expanded, setExpanded] = useState(false)
   const summaryRef = useRef<HTMLSpanElement>(null)
-  const { text, streaming } = node.data
+  const { text, streaming, error } = node.data
+  const failed = error !== undefined
   const summary = streaming ? latestLine(text) : firstLine(text)
+  // A call that failed before writing anything has no line of its own, so the
+  // failure is what the row says rather than an empty preview.
+  const preview = summary === '' && failed ? error : summary
   const scheduleSummaryScroll = useThrottledVisualUpdate(() => {
     const element = summaryRef.current
     if (element === null) return
@@ -47,8 +52,9 @@ export const AutobioMemoryNodeView = function AutobioMemoryNodeView({
   }, [streaming, scheduleSummaryScroll, summary])
 
   return (
-    <div className={css.root} data-state={streaming ? 'running' : 'ok'}>
+    <div className={css.root} data-state={streaming ? 'running' : failed ? 'error' : 'ok'}>
       {streaming && <span className={a11yCss.visuallyHidden}>{t('row.running')}</span>}
+      {failed && <span className={a11yCss.visuallyHidden}>{t('row.failed')}</span>}
       <DisclosureRow
         rowClassName={css.row}
         leadingClassName={css.leading}
@@ -60,10 +66,15 @@ export const AutobioMemoryNodeView = function AutobioMemoryNodeView({
         expandable={text !== ''}
         expandOnRowClick
         onToggle={() => { setExpanded(value => !value) }}
-        collapsedContent={summary === '' ? undefined : (
+        collapsedContent={preview === '' ? undefined : (
           <>
             <span className={css.separator} aria-hidden />
-            <span ref={summaryRef} className={css.summary} data-follow-end={streaming || undefined}>{summary}</span>
+            <span
+              ref={summaryRef}
+              className={css.summary}
+              data-follow-end={streaming || undefined}
+              data-error={failed || undefined}
+            >{preview}</span>
           </>
         )}
       >

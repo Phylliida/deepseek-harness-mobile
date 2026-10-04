@@ -268,6 +268,15 @@ Files: `src/index.ts`, `src/apply.ts`, `src/bridge.ts`, `src/config.ts`,
   protocol, not by step anchoring. Do not fake a synthetic step (distorts
   usage accounting) and do not stamp a real turn/step (only possible inside a
   step, which the design left on purpose).
+  **Discovered while fixing E15 (ran):** the same log shape trips the *session*
+  invariant, not only the meter. With `dsh-invariants` and
+  `packages/core/session/src/invariant.ts` mounted, a fold node outside an open
+  step is refused at append time — `invariant violated by
+  "@deepseek-ai/dsh-session": assistant/message names turn 1/step 1 but open is
+  turn 1/step null` — so a deployment that mounts the invariants service needs
+  the same compaction-replacement exemption there. Left unfixed in Part 4:
+  E15's spec is the meter, and the live session that reported E15 mounts no
+  invariants companion.
 - **E2 [medium]** No abort plumbing anywhere: the bridge stream never sets
   `GenerateOptions.signal`, `foldPass` takes no signal, `compactNow` ignores
   the maintenance signal — in-flight compression keeps streaming and paying
@@ -346,13 +355,27 @@ Files: `src/index.ts`, `src/apply.ts`, `src/bridge.ts`, `src/config.ts`,
    Either make the configured window the true ceiling or keep the conservative
    double-subtract and fix the docs. Failure direction of the status quo is a
    slightly early fold, not an overflow.
+   **Decided in Part 4: keep the double subtraction, fix the docs.** The second
+   subtraction is the headroom the harness's own request envelope — system
+   prompt, tool schemas — needs, which the strategy never sees; making the
+   window the true ceiling would let the next request exceed the routed window.
+   The budget comment, the `types.ts` config JSDoc, and both READMEs now state
+   the arithmetic.
 2. **Zero-block events (Part 1, S10)** — skip or store; either way id
    determinism must hold and the rule needs a test.
 3. **`describeJsonFailures` (Part 4, E11)** — cut to pre-check + warn
    (recommended) or harden the walker.
+   **Decided in Part 4: cut it.** The refusal reports the log's own error, an
+   `isJsonValue` verdict on the record, and its bounded JSON text; the
+   per-field walk, its throw paths, and its export are gone.
 4. **Tick on refused compile (Part 4, E12)** — kick anyway (recommended).
+   **Decided in Part 4: kick anyway**, still after the compile attempt.
 5. **Failed-call row shape (Part 4, G1)** — terminal progress record with an
    error marker, vs a new field; keep the event vocabulary minimal.
+   **Decided in Part 4: the existing `autobio/memory-progress` event gains an
+   optional `error`, written on the terminal flush of a call that failed.** The
+   row's node data carries it and `AutobioMemoryNodeView` renders the failed
+   state; the event's dead `usage?` field is dropped (G3).
 
 ## Do not "fix" (checked and sound)
 

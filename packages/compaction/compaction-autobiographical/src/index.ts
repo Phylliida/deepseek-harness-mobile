@@ -25,17 +25,17 @@ import type {
   ManualCompactAgentContext,
 } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
-import type { TokenUsage } from '@deepseek-ai/dsh-llm'
+import type { TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { RequestContext, Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 // Type-only: resolves the token meter's Context declaration, which the planner's
 // node price comes from.
 import type {} from '@deepseek-ai/dsh-token-meter'
-import { applyFold } from './apply.ts'
+import { applyFolds } from './apply.ts'
 import { createBridge } from './bridge.ts'
 import { resolveConfig } from './config.ts'
-import { planFolds, priceSurfaceNode } from './plan.ts'
+import { DivergenceError, planFolds, priceSurfaceNode } from './plan.ts'
 import { appendSurfaceNode, recollectionRows, resolveRange, seedFromLog } from './seed.ts'
 import { createStore } from './store.ts'
 import type { LogStore } from './store.ts'
@@ -56,11 +56,33 @@ export const inject = ['llm', 'tokenMeter']
 /** Streamed characters buffered before one live record is appended: a record per chunk would put a token-size row in the durable log. */
 const PROGRESS_FLUSH_CHARS = 1000
 
+/**
+ * Where one folding pass runs, and what may cancel it.
+ *
+ * The bracket a fold lands in needs an owner the compaction invariant accepts:
+ * the open turn with the step this pass is preparing, or `null` between turns,
+ * which is the standalone shape a manual pass writes.
+ */
+interface Pass {
+  /** Turn the fold's bracket belongs to, or `null` outside a turn. */
+  readonly turn: number | null
+  /** Step within that turn the replacement message is stamped with. */
+  readonly step: number
+  /** Cancellation for the calls this pass kicks. */
+  readonly signal?: AbortSignal
+}
+
 /** The live context-manager stack for one session. */
 interface Runtime {
   manager: ContextManager
   store: LogStore
   strategy: AutobiographicalStrategy
+  /**
+   * The route the runtime was opened with. A recollection's voice is frozen at
+   * open, so the same value stamps the fold node's provenance rather than the
+   * route the landing pass happens to read.
+   */
+  route: RequestContext
   /**
    * Log seq coverage per recollection the log has announced. Presence is also
    * the record that it was announced: the coverage is written at the same moment
@@ -75,12 +97,22 @@ interface Runtime {
    */
   walked: number
   /**
-   * The attempt counter this runtime has reached, this call's usage, the text it
-   * has streamed since the last live record, and whether the call streamed any
-   * text — the terminal flush carries an empty delta, so only the mid-call
-   * flushes prove a call produced something.
+   * The attempt counter this runtime has reached, the usage every call since the
+   * last record reported, the text the current call has streamed since the last
+   * live record, and whether it streamed any text — the terminal flush carries an
+   * empty delta, so only the mid-call flushes prove a call produced something.
    */
-  progress: { attempt: number; active: boolean; buffer: string; usage?: TokenUsage }
+  progress: { attempt: number; active: boolean; buffer: string; usage: TokenUsage | undefined }
+  /**
+   * Cancellation the memory-formation calls of the newest kicked tick run under.
+   * The bridge reads it when a call starts: the tick runs after the pass that
+   * kicked it has returned, so the signal has to outlive that pass.
+   */
+  cancellation: { signal: AbortSignal | undefined }
+  /** The tool declaration set the strategy was last handed, by identity. */
+  declaredTools: readonly ToolSchema[] | undefined
+  /** The system prompt the strategy was last handed. */
+  declaredSystem: string | undefined
   /**
    * The attempt count the newest record in the log reports. Replay seeds it from
    * the log and every write moves it forward, so a tick that finishes no call
@@ -115,15 +147,25 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    */
   static readonly Config = Schema.object({
     /**
-     * Ceiling for the live context the strategy keeps, reached by folding aged
+     * The window the compile budget is measured against, reached by folding aged
      * history. Default 65_536.
+     *
+     * The budget is `min(routed window, this) − reserveTokens`, and the library
+     * subtracts `reserveTokens` again as the response allowance, so the live
+     * context is held below this less twice the reserve: the second subtraction
+     * is the headroom the harness's own request envelope — system prompt, tool
+     * schemas — needs, which the strategy never sees. The double subtraction
+     * fails by folding early, never by overflowing.
      */
-    operatingWindowTokens: Schema.number(),
+    operatingWindowTokens: Schema.number().step(1).min(1),
     /**
-     * Tokens reserved for the model's response inside the compile budget, and
-     * the breathing room kept below the operating window. Default 8192.
+     * Tokens kept out of the live context for the response. Default 8192.
+     *
+     * It is subtracted twice: once as breathing room below the operating window
+     * and again by the library, which reserves it for the model's response
+     * inside its own budget arithmetic.
      */
-    reserveTokens: Schema.number().default(8192),
+    reserveTokens: Schema.number().step(1).min(0).default(8192),
     /** Register the step-boundary folding listener. Default true. */
     auto: Schema.boolean().default(true),
     /**
@@ -151,9 +193,9 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // the console and never stops the turn: the strategy replans from the log on
     // every compile, so the next step boundary is a complete retry.
     if (this.config.auto) {
-      ctx.on('agent/pre-step', async ({ agent }, next) => {
+      ctx.on('agent/pre-step', async ({ agent, turn, step, signal }, next) => {
         try {
-          await this.foldPass(agent)
+          await this.foldPass(agent, { turn, step, signal })
         } catch (error: unknown) {
           this.warn(`folding failed: ${describe(error)}; continuing the turn`)
         }
@@ -173,17 +215,45 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   override async compactIfNeeded(
     agent: CompactionAgentContext,
     _trigger: CompactionTrigger,
-    _signal: AbortSignal,
+    signal: AbortSignal,
   ): Promise<CompactionResult | null> {
-    return this.foldPass(agent)
+    try {
+      // No step is proposed on this entry, so the bracket is owned by whatever
+      // turn the log holds open — the shape the invariant accepts — and carries
+      // no step of its own.
+      return await this.foldPass(agent, { turn: openTurn(agent.session), step: 0, signal })
+    } catch (error: unknown) {
+      throw manualFailure(error)
+    }
   }
 
-  override compactNow(
+  override async compactNow(
     agent: ManualCompactAgentContext,
-    _signal: AbortSignal,
+    signal: AbortSignal,
     _sourceCommandId?: CommandId,
   ): Promise<CompactionResult | null> {
-    return agent.runMaintenance(() => this.foldPass(agent))
+    let claimed: Promise<CompactionResult | null>
+    try {
+      // The idle reservation is what keeps a manual pass from racing a turn, and
+      // a claim the agent refuses is the busy case rather than a fold failure.
+      claimed = agent.runMaintenance(maintenance => this.foldPass(agent, {
+        // A manual pass runs on an idle agent, so its bracket is standalone and
+        // the invariant refuses a numbered owner beside it.
+        turn: null,
+        step: 0,
+        // The maintenance claim ends with the idle reservation and this signal
+        // with the request, so a cancellation either way has to reach the calls
+        // the pass kicks.
+        signal: AbortSignal.any([maintenance, signal]),
+      }))
+    } catch (error: unknown) {
+      throw new ManualCompactionError('busy', 'manual compaction requires an idle agent', { cause: error })
+    }
+    try {
+      return await claimed
+    } catch (error: unknown) {
+      throw manualFailure(error)
+    }
   }
 
   /**
@@ -212,7 +282,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * `compile` reads the store, and folding already happened in the form of
    * recollections the last ticks minted.
    */
-  private async foldPass(agent: CompactionAgentContext): Promise<CompactionResult | null> {
+  private async foldPass(agent: CompactionAgentContext, pass: Pass): Promise<CompactionResult | null> {
     // All three refusals are the session's to fix, not the pass's to fail: a
     // session that has not routed has no route, one whose route advertises no
     // window has no window, and one whose window is no larger than the reserve has
@@ -228,22 +298,23 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     this.syncToolDefinitions(runtime, session)
     this.feedCalibration(runtime, session)
 
-    if (!await compileFolds(runtime, budget, this.config.reserveTokens, (message) => { this.warn(message) })) return null
+    const reached = await compileFolds(runtime, budget, this.config.reserveTokens, (message) => { this.warn(message) })
 
-    // After the compile, never before: the strategy cuts its compression queue
-    // inside `select`, so a tick ahead of the first compile of a session finds
-    // an empty queue and forms nothing. This is the one ordering the library
+    // After the compile attempt, never before: the strategy cuts its compression
+    // queue inside `select`, so a tick ahead of the first compile of a session
+    // finds an empty queue and forms nothing. This is the one ordering the library
     // imposes on the pass, and it is why a tick is kicked per pass rather than
-    // once at open.
-    this.kickTick(runtime, session)
+    // once at open. A refusal is not an exception to it: compressing is what
+    // raises the floor the next compile finds, so a session over budget has to
+    // keep forming memory or it stays over budget for good.
+    this.kickTick(runtime, session, pass.signal)
+    if (!reached) return null
 
-    const turn = currentTurn(session)
     const { resolutions, summaries } = internals(runtime.strategy)
-    // One op per pass until the multi-op loop lands: planning and applying are
-    // correct for several — the spans come out disjoint and `applyFolds` lands
-    // each in its own bracket — but taking one keeps a pass's cost and its
-    // bracket count predictable while that loop is still being built.
-    const [op] = planFolds(runtime.store, session, {
+    // Every op the picker committed lands in this pass, one bracket each: the
+    // compaction protocol allows exactly one summary per bracket, so a pass that
+    // folds several regions writes several transactions.
+    const ops = planFolds(runtime.store, session, {
       resolutions,
       summaries,
       seeded: runtime.known,
@@ -252,31 +323,50 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // delta it is delta-accounted against is measured with one estimator.
       price: priceSurfaceNode,
     })
-    if (op === undefined) return null
+    if (ops.length === 0) return null
     this.ctx.logger.info(
-      `autobiographical compaction: folded ${op.shadowedSeqs.length} node(s) into ${op.summaryId}`,
+      `autobiographical compaction: folded ${ops.reduce((total, op) => total + op.shadowedSeqs.length, 0)} node(s) `
+      + `into ${ops.length} recollection(s)`,
     )
-    return applyFold(session, op, turn, 0, routed)
+    // The seam reports one result per pass, so it takes the recollection that
+    // landed last; the log carries a bracket for every op either way.
+    return applyFolds(session, ops, pass.turn, pass.step, runtime.route).at(-1) as CompactionResult
   }
 
   /**
-   * Push the session's assembled tool schemas into the strategy. It defers
+   * Push the session's assembled tool schemas and system prompt into the
+   * strategy, each on the pass that first sees it. The strategy defers
    * compressing any chunk holding tool blocks until definitions arrive — a
    * tools-less replay of a tool transcript trips provider refusal classifiers —
-   * so a session that never pushed them would never fold at all.
+   * so a session that never pushed them would never fold at all, and the
+   * memory-writing call is served the session's system voice only if the prompt
+   * is pushed too.
    */
   private syncToolDefinitions(runtime: Runtime, session: Session): void {
-    const tools = session.requestHeader()?.tools
-    if (tools === undefined) return
-    // Both sides are JSON-Schema shaped and the library reads `inputSchema` as an
-    // open record, so the schema passes through with the object type forced: the
-    // `type` is written last because the harness requires it to be `'object'` and
-    // a tool declaring otherwise must not win.
-    runtime.manager.setToolDefinitions(tools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: { ...tool.parameters, type: 'object' as const },
-    })))
+    // The header fold is one object per header the log holds, so identity is the
+    // change check: a pass that finds the same object has nothing to push.
+    const header = session.requestHeader()
+    const tools = header?.tools
+    if (tools !== undefined && tools !== runtime.declaredTools) {
+      runtime.declaredTools = tools
+      // Both sides are JSON-Schema shaped and the library reads `inputSchema` as an
+      // open record, so the schema passes through with the object type forced: the
+      // `type` is written last because the harness requires it to be `'object'` and
+      // a tool declaring otherwise must not win.
+      runtime.manager.setToolDefinitions(tools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: { ...tool.parameters, type: 'object' as const },
+      })))
+    }
+    // A declaration set the session drops is not retracted: the library's own
+    // setter ignores an empty list, so a session that declares no tools leaves
+    // the strategy holding the last set it saw.
+    const system = header?.system
+    if (system !== undefined && system !== runtime.declaredSystem) {
+      runtime.declaredSystem = system
+      runtime.manager.setSystemPrompt(system)
+    }
   }
 
   /**
@@ -303,7 +393,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * a slow compression call delays the next tick rather than overlapping it, and
    * nothing here is ever awaited by a turn.
    */
-  private kickTick(runtime: Runtime, session: Session): void {
+  private kickTick(runtime: Runtime, session: Session, signal?: AbortSignal): void {
+    // The calls this tick makes read the cancellation when they start, which is
+    // what carries a turn abort or a cancelled `/compact` into a stream that is
+    // already paying for itself.
+    runtime.cancellation.signal = signal
     // The record is written on both paths, and before the failure is reported.
     // That order is the point: the attempt counter advances inside the compression
     // call, so a tick that failed *after* that advance holds a count the log can
@@ -336,15 +430,15 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * it anyway would append an identical record on every pass forever.
    *
    * The record carries values this engine does not construct — the strategy's
-   * counters, the recollection the library minted, the call's reported usage — and
+   * counters, the recollection the library minted, the calls' reported usage — and
    * the log accepts lossless JSON only. A record that cannot cross that boundary
-   * is reported in full and not written, counters included: it is a bug in what
-   * feeds the record, and the console line is the whole evidence for it. Guessing
-   * at the value would hide the bug and write a record the reader can no longer
-   * trust.
+   * is reported and not written, counters included: it is a bug in what feeds the
+   * record, and the console line is the whole evidence for it. Guessing at the
+   * value would hide the bug and write a record the reader can no longer trust.
    */
   private appendMemory(runtime: Runtime, session: Session): void {
-    const mint = this.newestMint(runtime)
+    const found = this.newestMint(runtime)
+    const mint = found?.mint
     if (mint === undefined && runtime.progress.attempt <= runtime.recorded) return
     const { progress } = runtime
     const usage = progress.usage
@@ -357,7 +451,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       this.warn(`refusing to record a call settled at attempt ${String(attempt)}; the counter is not a number`)
       return
     }
-    delete progress.usage
+    progress.usage = undefined
     const data = {
       ...runtime.strategy.getStats(),
       attempt,
@@ -368,17 +462,20 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       session.append('autobio/memory', data)
     } catch (error: unknown) {
       // The record is the archive's only account of this tick, so a refusal is
-      // reported whole — what was being written, and which value in it the log
-      // could not store. Dropping one field or writing a coerced one would leave
-      // a record that reads as complete and is not.
+      // reported whole — what was being written, and whether the log could store
+      // any of it at all. `isJsonValue` is the same boundary the log applies, so
+      // the report cannot throw on the value it is judging.
       this.warn(`the memory record for attempt ${attempt} was refused: ${describe(error)}`)
-      for (const line of describeJsonFailures(data)) this.warn(`  unsupported value: ${line}`)
+      if (!isJsonValue(data)) this.warn('  the record holds a value the session log cannot store')
       this.warn(`  data: ${bounded(JSON.stringify(data))}`)
       return
     }
-    // Only a record the log holds is a count a reopen can read back, so the field
-    // moves after the write rather than before it.
+    // Both markers move only once the record is durable: the count is what a
+    // reopen resumes from, and the coverage is the recollection's only account of
+    // the span it stands for. A recollection marked announced by a refused record
+    // is never announced again, which loses it from the archive for good.
     runtime.recorded = attempt
+    if (found !== undefined) runtime.known.set(found.mint.id, found.range)
   }
 
   /**
@@ -388,7 +485,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * rebuilt from the replayed surface, but nothing else remembers which events
    * it was distilled from.
    */
-  private newestMint(runtime: Runtime): AutobiographicalMemoryMint | undefined {
+  private newestMint(runtime: Runtime): { mint: AutobiographicalMemoryMint; range: RecollectionRange } | undefined {
     for (const summary of internals(runtime.strategy).summaries) {
       if (runtime.known.has(summary.id)) continue
       const range = resolveRange(runtime.seqOf, summary, recollectionRows(runtime.store))
@@ -397,8 +494,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // own source validation on the next open, so it is left for a later pass
       // rather than written down ungrounded.
       if (range === undefined) continue
-      runtime.known.set(summary.id, { covered: range, cited: range })
-      return createMint(summary, range)
+      return { mint: createMint(summary, range), range: { covered: range, cited: range } }
     }
     return undefined
   }
@@ -420,9 +516,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 
   /**
    * The compile budget, or nothing when the session has not routed a model yet.
-   * The reserve is both the breathing room below the operating window and the
-   * response allowance; prompt overhead is not subtracted here because the
-   * estimator's calibration multiplier already accounts for it.
+   * The reserve is the breathing room below the operating window, and the library
+   * subtracts it again inside its own arithmetic as the response allowance, so the
+   * live context it holds is the smaller of the route's window and the configured
+   * one, less twice the reserve. Prompt overhead is not subtracted here beyond
+   * that because the estimator's calibration multiplier already accounts for it.
    */
   private computeBudget(window: number): TokenBudget | undefined {
     const maxTokens = Math.min(window, this.config.operatingWindowTokens) - this.config.reserveTokens
@@ -468,7 +566,8 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       carrierPolicy: 'live-strip',
     })
     const recorded = attemptFromLog(agent.session)
-    const progress: Runtime['progress'] = { attempt: recorded, active: false, buffer: '' }
+    const progress: Runtime['progress'] = { attempt: recorded, active: false, buffer: '', usage: undefined }
+    const cancellation: Runtime['cancellation'] = { signal: undefined }
     // No estimator is handed over: the manager's own default is density-aware
     // and its calibration reports against the wire, so a fixed-density one here
     // would only overwrite the first of those.
@@ -486,17 +585,26 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         llm: this.ctx.llm,
         provider: route.provider,
         warn: (message) => { this.warn(message) },
-        onText: (delta, done, usage) => { this.captureText(agent.session, progress, delta, done, usage) },
+        // Read per call rather than captured: the tick that makes the call runs
+        // after the pass that kicked it has returned.
+        signal: () => cancellation.signal,
+        onText: (delta, done, usage, failure) => {
+          this.captureText(agent.session, progress, delta, done, usage, failure)
+        },
       }),
     })
     return {
       manager,
       strategy: manager.getStrategy() as AutobiographicalStrategy,
       store,
+      route,
       seqOf: seed.seqOf,
       walked: agent.session.events.length - 1,
       known: seed.known,
       progress,
+      cancellation,
+      declaredTools: undefined,
+      declaredSystem: undefined,
       recorded,
       calibrated: 0,
       tickChain: Promise.resolve(),
@@ -504,9 +612,10 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   }
 
   /**
-   * Record a bridge call's streamed text and, on the terminal flush, its usage.
-   * The attempt counter advances when a call first streams text, so the live
-   * records and the tick record that settles the call report one attempt.
+   * Record a bridge call's streamed text and, on the terminal flush, its usage
+   * and the failure it ended with. The attempt counter advances when a call first
+   * shows up — with text, or with a failure on the terminal flush — so a live
+   * record and the tick record that settles the call report one attempt.
    */
   private captureText(
     session: Session,
@@ -514,11 +623,13 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     delta: string,
     done: boolean,
     usage: TokenUsage | undefined,
+    failure: string | undefined,
   ): void {
     if (!progress.active) {
-      // The terminal flush carries an empty delta, so a call that never streamed
-      // one formed no memory: it takes no attempt number and leaves no record.
-      if (delta.length === 0) return
+      // A call that streamed nothing and failed still happened, and constraint
+      // one is that every request shows up: it takes an attempt number so its row
+      // exists, with nothing in it but the failure.
+      if (delta.length === 0 && failure === undefined) return
       progress.active = true
       progress.attempt++
     }
@@ -529,6 +640,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
           attempt: progress.attempt,
           delta: progress.buffer,
           ...done ? { done: true } : {},
+          ...failure === undefined ? {} : { error: failure },
         })
       } catch {
         // A session that closed mid-call costs this flush, not the call.
@@ -537,11 +649,10 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     }
     if (!done) return
     progress.active = false
-    // `exactOptionalPropertyTypes`: absent and `undefined` are not the same
-    // property, and a call that reported no usage must not leave the previous
-    // call's in place for `appendMemory` to bill twice.
-    delete progress.usage
-    if (usage !== undefined) progress.usage = usage
+    // A tick may settle more than one call — the library's refusal ladder streams
+    // its way through several — so every call's usage adds up here rather than the
+    // last one standing for the tick.
+    progress.usage = addUsage(progress.usage, usage)
   }
 
   /** Diagnostics go to the console as well: headless surfaces drop logger output. */
@@ -554,8 +665,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 
 /**
  * Compile against the budget, reporting whether the layout reached it. A
- * refusal measured from the route's advertised window is retried once at the
- * size the strategy could actually reach.
+ * refusal is retried once at the size the strategy could actually reach.
  */
 async function compileFolds(
   runtime: Runtime,
@@ -568,10 +678,10 @@ async function compileFolds(
     return true
   } catch (error: unknown) {
     if (!(error instanceof OverBudgetError)) throw error
-    // Worth one retry only when the size the strategy could actually reach
-    // exceeds the budget being claimed.
+    // The size the strategy could actually reach, converted back into a total
+    // budget: `actual` is measured against the usable budget the library derived,
+    // which is the total less the response allowance.
     const affordable = error.actual + reserveTokens
-    if (affordable <= budget.maxTokens) return over(error, budget.maxTokens, warn)
     try {
       await runtime.manager.compile({ maxTokens: affordable, reserveForResponse: reserveTokens })
       return true
@@ -581,24 +691,67 @@ async function compileFolds(
          call already refused: a retry at that size cannot refuse for size. Anything else
          it throws belongs to the caller. */
       if (!(retry instanceof OverBudgetError)) throw retry
-      return over(retry, retry.budget, warn)
+      return over(retry, warn)
     }
   }
 }
 
-/** The picker wants more folds than one pass commits; the excess is the queue. */
-function over(error: OverBudgetError, budget: number, warn: (message: string) => void): false {
-  warn(`folding is ${error.actual} tokens over budget ${budget}; folding again next step`)
+/**
+ * Report a refusal the retry could not fit and give up on the pass's folds: the
+ * next step compiles again. The refusal's `actual` and `budget` are both measured
+ * on the library's usable budget, so the two are comparable and neither is the
+ * total the pass asked for.
+ */
+function over(error: OverBudgetError, warn: (message: string) => void): false {
+  warn(`folding is ${error.actual} tokens over budget ${error.budget}; folding again next step`)
   return false
 }
 
-/** The session's latest started turn, for fold-node attribution outside a live step. */
-function currentTurn(session: Session): number | null {
-  for (let index = session.events.length - 1; index >= 0; index--) {
-    const event = session.events[index]
-    if (event?.type === 'turn/start') return event.data.turn
+/**
+ * The session's open turn, or `null` between turns. A turn the log has closed is
+ * closed for good: the compaction invariant refuses a bracket owned by it, and
+ * one written under it outlives the turn it claims.
+ */
+function openTurn(session: Session): number | null {
+  const boundary = session.events
+    .findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
+  return boundary?.type === 'turn/start' ? boundary.data.turn : null
+}
+
+/**
+ * One call's reported usage added to the total this tick has settled so far, or
+ * the call's own usage when it is the first. Fields only the provider reports on
+ * some calls stay absent until one reports them, so a tick whose calls reported
+ * none keeps the totals shape the usage projection reads.
+ */
+function addUsage(total: TokenUsage | undefined, next: TokenUsage | undefined): TokenUsage | undefined {
+  if (next === undefined) return total
+  if (total === undefined) return next
+  const added = total.cacheReadTokens !== undefined || next.cacheReadTokens !== undefined
+  const written = total.cacheWriteTokens !== undefined || next.cacheWriteTokens !== undefined
+  const thought = total.reasoningTokens !== undefined || next.reasoningTokens !== undefined
+  const billed = total.costUsd !== undefined || next.costUsd !== undefined
+  return {
+    inputTokens: total.inputTokens + next.inputTokens,
+    outputTokens: total.outputTokens + next.outputTokens,
+    ...added ? { cacheReadTokens: (total.cacheReadTokens ?? 0) + (next.cacheReadTokens ?? 0) } : {},
+    ...written ? { cacheWriteTokens: (total.cacheWriteTokens ?? 0) + (next.cacheWriteTokens ?? 0) } : {},
+    ...thought ? { reasoningTokens: (total.reasoningTokens ?? 0) + (next.reasoningTokens ?? 0) } : {},
+    ...billed ? { costUsd: (total.costUsd ?? 0) + (next.costUsd ?? 0) } : {},
   }
-  return null
+}
+
+/**
+ * A thrown fold pass as the seam's own failure class. `/compact` reports an
+ * expected failure to its caller and rethrows anything else as an unexpected
+ * one, so a planning or compile failure has to arrive classified: a divergence
+ * is the surface having moved under the plan, and everything else is the pass
+ * failing to produce a fold.
+ */
+function manualFailure(error: unknown): ManualCompactionError {
+  return error instanceof DivergenceError
+    ? new ManualCompactionError('changed', describe(error), { cause: error })
+    : new ManualCompactionError('summary', describe(error), { cause: error })
 }
 
 /** The newest assistant step that reported usage, and the seq it reported at. */
@@ -653,69 +806,6 @@ function createMint(summary: SummaryEntry, range: { firstSeq: number; lastSeq: n
  */
 function internals(strategy: AutobiographicalStrategy): Internals {
   return strategy as unknown as Internals
-}
-
-/**
- * Every value in a record the session log cannot store, as console lines: where
- * each one sits, what it is, and the value itself. The record's own
- * `JSON.stringify` renders `NaN` and `undefined` as `null`, so the report says
- * what the value actually is rather than what that text would show.
- *
- * Exported for its own spec: the tick's record is built from values the library
- * hands over, and a spec that has to make the log refuse one cannot reach the
- * readings this function exists to produce.
- *
- * @param data - the record the log refused.
- * @returns one line per offending field, or that the record itself is storable
- *   and the refusal came from elsewhere.
- */
-export function describeJsonFailures(data: unknown): string[] {
-  const found = unstorableFields(data, '')
-  if (found.length === 0) return ['none — every value in the record is storable JSON']
-  return found.map(({ path, value }) => `${path} is ${describeValue(value)}`)
-}
-
-/** Every field the lossless-JSON boundary refuses, reported by path. */
-function unstorableFields(value: unknown, path: string): { path: string; value: unknown }[] {
-  if (isJsonValue(value)) return []
-  // Only a record or a list has fields to walk into. An exotic object is refused
-  // for what it is, and what it holds is not the log's business.
-  if (Array.isArray(value)) {
-    return value.flatMap((item, index) => unstorableFields(item, `${path}${index}.`))
-  }
-  if (value !== null && typeof value === 'object' && value.constructor.name === 'Object') {
-    return Object.entries(value).flatMap(([key, item]) => unstorableFields(item, `${path}${key}.`))
-  }
-  return [{ path: path === '' ? '<the record itself>' : path.replace(/\.$/, ''), value }]
-}
-
-/**
- * A value as a console line can show it: what it is, and its own text where that
- * text means something. A value that came out of an exotic object or a function
- * is named by what it is, because its JSON text is `{}` or nothing at all.
- *
- * @param value - the value the log refused.
- * @returns the value's type and text, truncated to a line's worth.
- */
-function describeValue(value: unknown): string {
-  if (value === undefined) return 'undefined'
-  if (value === null) return 'null'
-  if (typeof value === 'number' && !Number.isFinite(value)) return `a non-finite number (${String(value)})`
-  if (typeof value === 'function') return `a function (${value.name})`
-  // `JSON.stringify` passes straight through a string, so its own quotes say it
-  // is one; only the text has to be bounded.
-  if (typeof value === 'string') return value.length > 300 ? `${JSON.stringify(value.slice(0, 300))}…` : JSON.stringify(value)
-  if (typeof value === 'object') {
-    // The log refuses an exotic object for what it is, not for its text, and an
-    // object whose `toJSON` writes the text has no business in a durable field.
-    return value.constructor.name === 'Object'
-      ? `an object the log cannot store: ${bounded(JSON.stringify(value))}`
-      : `a ${value.constructor.name}`
-  }
-  /* v8 ignore next -- the boundary refuses null, booleans, numbers, strings,
-     arrays, plain objects, and exotic objects; the readings above are every value
-     it can name but the boundary's own reading of it. */
-  return 'a symbol the log cannot store'
 }
 
 /** A console line's worth of text, so one refused record cannot flood the log. */
