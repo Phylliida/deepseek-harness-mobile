@@ -11,8 +11,23 @@ import type { CompactionAgentContext, CompactionResult, ManualCompactAgentContex
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import AutobiographicalCompactionEngine from '../src/index.ts'
 import type { AutobiographicalCompactionConfig } from '../src/types.ts'
+
+/**
+ * Provide the token meter the engine prices a fold's shadowed nodes with on a
+ * context that is about to gain an engine.
+ *
+ * Registered on the fixture's context — which is where the engine reads it — and
+ * constructed on a context of its own, because a `TokenMeter` is a cordis service
+ * and registering one is not what a fixture about folding is proving.
+ *
+ * @param ctx - the context the engine is constructed with.
+ */
+export function provideTokenMeter(ctx: Context): void {
+  ctx.provide('tokenMeter', new TokenMeter(new Context()) as never)
+}
 
 /** Answers every compression call with one recollection-shaped block. */
 export function summarizer(calls: GenerateOptions[]): { stream: (options: GenerateOptions) => AsyncIterable<StreamChunk> } {
@@ -86,9 +101,33 @@ export function build(
   ctx: Context
 } {
   const session = transcript(id, turns, contextWindow)
+  const { engine, calls, agent, ctx } = reopen(session, overrides, into, llm)
+  return { engine, calls, session, agent, ctx }
+}
+
+/**
+ * A fresh engine over a session that already exists: the second process of a
+ * reopen, which shares nothing with the first but the log. The recording
+ * summarizer is the assertion — a reopen that has to ask the model for anything
+ * shows up in `calls`.
+ */
+export function reopen(
+  session: Session,
+  overrides: AutobiographicalCompactionConfig = {},
+  into?: Context,
+  llm?: { stream: (options: GenerateOptions) => AsyncIterable<StreamChunk> },
+): {
+  engine: AutobiographicalCompactionEngine
+  calls: GenerateOptions[]
+  agent: ManualCompactAgentContext
+  ctx: Context
+} {
   const calls: GenerateOptions[] = []
   const ctx = into ?? new Context()
   ctx.provide('llm', (llm ?? summarizer(calls)) as never)
+  // The engine prices a fold's shadowed nodes with this meter, so a fixture
+  // without one could not plan a fold at all.
+  provideTokenMeter(ctx)
   const engine = new AutobiographicalCompactionEngine(ctx, {
     operatingWindowTokens: 700,
     reserveTokens: 128,
@@ -106,7 +145,7 @@ export function build(
     // driving the manual entry point stands in for it.
     runMaintenance: <T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> => task(new AbortController().signal),
   }
-  return { engine, calls, session, agent, ctx }
+  return { engine, calls, agent, ctx }
 }
 
 /**

@@ -20,7 +20,7 @@ import { seedFromLog } from '../src/seed.ts'
 import { createStore, slots } from '../src/store.ts'
 import type { LogStore } from '../src/store.ts'
 import type { AutobiographicalMemoryEventData } from '../src/types.ts'
-import { build } from './harness.ts'
+import { build, reopen } from './harness.ts'
 
 /** One recollection the fixture landed, with the ground it covers and its node. */
 interface Landed {
@@ -232,20 +232,45 @@ describe('a pyramid replayed from the log', () => {
   it('reopens a session the engine settled without calling the model again', async () => {
     // The pyramid a first process leaves behind, formed by the engine itself: every
     // event in the log is the real write path rather than a fixture's reading of it.
-    const first = build(4, 'reopen-cost', {
-      strategy: { recentWindowTokens: 0, targetChunkTokens: 150, minChunkCharsForLLM: 0 },
+    // mergeThreshold 2 makes the run consolidate as it goes, so the log it
+    // leaves is the realistic shape: a three-level pyramid with every level
+    // landed, not a frontier of exactly one merge's worth of recollections
+    // (which the reload gate does not re-queue, stamped or not, and so proves
+    // nothing with). The window is wide because a pass whose compile refuses
+    // kicks no tick, and memory formation — the merges this run lives on — is
+    // tick work.
+    const first = build(8, 'reopen-cost', {
+      operatingWindowTokens: 900,
+      strategy: { recentWindowTokens: 0, targetChunkTokens: 150, minChunkCharsForLLM: 0, mergeThreshold: 2 },
     })
-    for (let pass = 0; pass < 8; pass++) {
+    // Driven here rather than through `settle` because a merge tick is two model
+    // calls behind the mint that queued it: the log is settled when a pass and
+    // its trailing wait leave it untouched, with a wait long enough for the
+    // chain to land.
+    let previous = -1
+    for (let pass = 0; pass < 8 && first.session.events.length !== previous; pass++) {
+      previous = first.session.events.length
       await first.engine.compactIfNeeded(first.agent, 'pressure', new AbortController().signal)
-      await new Promise(resolve => setTimeout(resolve, 20))
+      await new Promise(resolve => setTimeout(resolve, 50))
     }
-    expect(first.session.events.filter(event => event.type === 'autobio/memory').length).toBeGreaterThan(0)
+    const mints = first.session.events.filter(event => event.type === 'autobio/memory')
+    expect(mints.length).toBeGreaterThan(0)
+    // Without a merged level in the log the reopen proves nothing: an L1-only
+    // pyramid has nothing to re-merge whether or not the links were rebuilt.
+    expect(mints.some(event => event.data.memory?.level === 3)).toBe(true)
 
     // A second process over the same log, with a summarizer that records what it is
     // asked for. Replay reads the surface and the pyramid; neither is a model call.
-    const second = build(0, 'reopen-cost-second', { strategy: { recentWindowTokens: 0 } })
-    seedFromLog(createStore(), first.session)
+    // The strategy options are the run's own: a merge threshold the reopen does not
+    // inherit would leave the re-merge this test counts gated behind a longer queue.
+    const second = reopen(first.session, {
+      operatingWindowTokens: 900,
+      strategy: { recentWindowTokens: 0, targetChunkTokens: 150, minChunkCharsForLLM: 0, mergeThreshold: 2 },
+    })
     await second.engine.compactIfNeeded(second.agent, 'pressure', new AbortController().signal)
+    // The tick that would re-merge runs after the pass returns; give it its turn
+    // before counting calls.
+    await new Promise(resolve => setTimeout(resolve, 50))
 
     expect(second.calls).toEqual([])
   })
