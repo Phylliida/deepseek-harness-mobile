@@ -19,7 +19,7 @@ import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
-import { SubagentError } from '@deepseek-ai/dsh-subagent'
+import { SubagentError, subagentModelOverrideFor } from '@deepseek-ai/dsh-subagent'
 import type { SubagentListEntry as CatalogSubagentListEntry, SubagentModelOverride } from '@deepseek-ai/dsh-subagent'
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
@@ -1117,7 +1117,6 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
   type WebModelSelectionRef = ModelSelectionRef & { current: ModelSelection }
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
-  const subagentSelections = new WeakMap<Agent, SubagentModelOverride>()
   /**
    * Serializes `agentPreset.select` per session. Two concurrent selects both
    * pass the blank check, and the second `unmountPresetFor` then finds nothing
@@ -1192,23 +1191,16 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   /**
-   * Install or return the session-local subagent route override that
-   * `resolveChildRoute` reads when this agent delegates without an explicit
-   * route. Process-local like the in-process tier of the main selection:
-   * the child a delegation starts records the resolved route in its own
-   * descriptor, so the model-visible fact is reconstructable from the
-   * child's log. A host harness without per-agent fibers already serves a
-   * holder from its shared scope; that holder is reused rather than
-   * re-provided.
+   * Return the session-local subagent route override that `resolveChildRoute`
+   * reads when this agent delegates without an explicit route. Process-local
+   * like the in-process tier of the main selection: the child a delegation
+   * starts records the resolved route in its own descriptor, so the
+   * model-visible fact is reconstructable from the child's log. The holder
+   * lives in the seam's Agent-keyed registry — a cordis service registration
+   * would land on the root store and serve every agent.
    */
   function subagentSelectionFor(agent: Agent): SubagentModelOverride {
-    const installed = subagentSelections.get(agent)
-    if (installed !== undefined) return installed
-    const visible = agent.ctx.get('subagentModel')
-    const override: SubagentModelOverride = visible ?? { current: undefined }
-    if (visible === undefined) agent.ctx.provide('subagentModel', override)
-    subagentSelections.set(agent, override)
-    return override
+    return subagentModelOverrideFor(agent)
   }
 
   /**

@@ -54,7 +54,7 @@ subagent seam 允许一个 agent（智能体）通过具名提供方把工作委
 
 该 seam 拥有 Service Provider 和 Consumer 共享的深度词汇：`AgentOptions.subagentDepth` 声明、`assertSubagentMaxDepth` 和 `delegationDepthOf(agent)`。持久化的 `SessionHeader.delegationDepth` 具有权威性且单调：运行时选项可以增大委派深度，但绝不能将其降到这个下界以下，因此恢复后的子 agent 不会被重新计为顶层。
 
-子 agent 的 provider／model 路由通过 `resolveChildRoute(parent, requested)` 按字段解析：首先是委派请求中的显式覆盖，其次是父会话安装的 `ctx.subagentModel` 默认值（由 Host 入口在 Agent 作用域上提供的 `SubagentModelOverride` holder，例如 Web 网关的会话级子代理模型 seat——这是可选的 `ctx.get` 读取，因此没有该入口的部署保持父级继承），最后是父级自身的路由。`resolveChildAgentOptions` 由该路由加上父级的 `maxTokens` 构建子 agent 的 `AgentOptions`，而可持续（continuable）启动的描述符会记录同一份已解析路由。
+子 agent 的 provider／model 路由通过 `resolveChildRoute(parent, requested)` 按字段解析：首先是委派请求中的显式覆盖，其次是发起方 agent 的子代理覆盖——即 `subagentModelOverrideFor(agent)` 交给 Host 入口（如 Web 网关的会话级子代理模型 seat）的 `SubagentModelOverride` holder；注册表按 Agent 键控，因为 cordis 服务注册会落在根存储上、对所有 agent 生效——最后是父级自身的路由。`resolveChildAgentOptions` 由该路由加上父级的 `maxTokens` 构建子 agent 的 `AgentOptions`，而可持续（continuable）启动的描述符会记录同一份已解析路由。
 
 `inheritsParentContext` 只用于描述，不能强制执行。它仅说明子 agent 是否能看到父级已完成的对话历史（`fork` 可以；`spawn` 和各进程外一次性提供方不可以），不表示是否继承工具、服务或权限。
 

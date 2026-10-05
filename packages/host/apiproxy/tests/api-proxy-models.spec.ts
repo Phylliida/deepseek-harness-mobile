@@ -21,8 +21,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
-// Type-only: pulls the `ctx.subagentModel` Context merge the delegation seam declares.
-import type {} from '@deepseek-ai/dsh-subagent'
+import { subagentModelOverrideFor } from '@deepseek-ai/dsh-subagent'
 import { createApiProxy } from '../src/api-proxy.ts'
 
 let nextRpc = 1
@@ -387,8 +386,8 @@ describe('Web session model selection', () => {
       sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
     })))
     expect(selected.selected).toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
-    // The delegation seam reads the very holder this RPC installs.
-    expect(agent.ctx.get('subagentModel')?.current)
+    // The delegation seam reads the very holder this RPC mutates.
+    expect(subagentModelOverrideFor(agent).current)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
     expect(expectValue(await api.sessions.models(request({ sessionId }))).subagent)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
@@ -405,13 +404,32 @@ describe('Web session model selection', () => {
       },
     })
     // A refused route never reaches the delegation seam.
-    expect(agent.ctx.get('subagentModel')?.current)
+    expect(subagentModelOverrideFor(agent).current)
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
 
     const cleared = expectValue(await api.sessions.selectSubagentModel(request({ sessionId })))
     expect(cleared.selected).toBeNull()
-    expect(agent.ctx.get('subagentModel')?.current).toBeUndefined()
+    expect(subagentModelOverrideFor(agent).current).toBeUndefined()
     expect(expectValue(await api.sessions.models(request({ sessionId }))).subagent).toBeNull()
+    await ctx.fiber.dispose()
+  })
+
+  it('keeps one session\'s subagent route invisible to another session', async () => {
+    const { ctx, sessionId: firstId } = await harness()
+    // A second session and agent on the same registry: a shared holder would leak.
+    const second = ctx.sessions.create()
+    const secondAgent = {
+      id: second.id, session: second, status: 'running', ctx,
+      inbox: { nextTurn: [], nextStep: [] },
+    } as unknown as Agent
+    ctx.agents.register(secondAgent)
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+
+    expect(expectValue(await api.sessions.selectSubagentModel(request({
+      sessionId: firstId, provider: 'deepseek-official', model: 'deepseek-reasoner',
+    }))).selected).toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    expect(expectValue(await api.sessions.models(request({ sessionId: second.id }))).subagent)
+      .toBeNull()
     await ctx.fiber.dispose()
   })
 

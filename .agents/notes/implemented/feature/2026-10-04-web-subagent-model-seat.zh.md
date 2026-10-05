@@ -12,7 +12,7 @@ Status: implemented
 
 Web Host 在会话选择旁保存一项会话级子代理路由覆盖。`session.models` 以 `subagent` 字段（`ModelSelection` 或 null）报告它，`session.selectSubagentModel` 负责设置或清除：provider 与 model 必须同时提供，并经由 `resolveCallConfig` 校验；两者都缺席则清除覆盖。与会话选择的进程内层级一样，该覆盖仅保存在当前进程中；图像准入检查不适用，因为子代理会启动自己的会话。
 
-该覆盖通过 Agent 作用域上的 holder 传递到委派路径。Host 为每个 Web Agent 以 `ctx.subagentModel` 提供可变的 `SubagentModelOverride`，`@deepseek-ai/dsh-subagent` 的 `resolveChildRoute` 以机会主义方式读取它，按字段介于显式的单次请求覆盖与父级自身路由之间。没有该入口的部署保持父级继承行为。可持续（continuable）启动的描述符记录同一份已解析路由，因此子代理实际采用的路由始终可以从其子会话日志重建。该覆盖不携带推理强度，因为 `AgentOptions` 没有相应字段。
+该覆盖通过按 agent 分配的 holder 传递到委派路径。Host 修改 `subagentModelOverrideFor(agent)` 从 `@deepseek-ai/dsh-subagent` 的 Agent 键控注册表返回的 `SubagentModelOverride`，`resolveChildRoute` 按字段在显式的单次请求覆盖与父级自身路由之间读取它。注册表按 Agent 键控，因为 cordis 服务注册会落在根存储上、对所有 agent 生效。没有该入口的部署保持父级继承行为。可持续（continuable）启动的描述符记录同一份已解析路由，因此子代理实际采用的路由始终可以从其子会话日志重建。该覆盖不携带推理强度，因为 `AgentOptions` 没有相应字段。
 
 在浏览器中，composer seat（`conversation.input.model`）在会话模型触发器左侧渲染一个子代理模型触发器，两者共用同一个会话级 `ModelDirectory`。其单层菜单提供一行"跟随会话模型"——默认值，选中即清除覆盖——以及共享的按提供方分组目录，并通过目录的 `selectSubagent` 动词提交。可被寻址的子代理会话不暴露该 seat 与动词，理由与会话选择条目相同。
 

@@ -1,22 +1,22 @@
 /**
  * Child route tiers (`resolveChildRoute`): an explicit per-request override,
- * else the session's installed `ctx.subagentModel` default, else the parent's
- * own route — and `resolveChildAgentOptions` carrying maxTokens and depth
- * independently of that tiering.
+ * else the delegating agent's subagent override (`subagentModelOverrideFor`),
+ * else the parent's own route — and `resolveChildAgentOptions` carrying
+ * maxTokens and depth independently of that tiering.
  */
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import {
-  resolveChildAgentOptions, resolveChildRoute, type SubagentModelOverride,
+  resolveChildAgentOptions, resolveChildRoute, subagentModelOverrideFor, type SubagentModelOverride,
 } from '../src/child-agent.ts'
 
-/** Minimal parent: AgentOptions plus a root scope holding the optional override. */
+/** Minimal parent: AgentOptions plus its override holder, when the case installs one. */
 function parentOf(options: AgentOptions, override?: SubagentModelOverride): Agent {
-  const ctx = new Context()
-  if (override !== undefined) ctx.provide('subagentModel', override)
-  return { options, ctx } as unknown as Agent
+  const parent = { options, ctx: new Context() } as unknown as Agent
+  if (override !== undefined) subagentModelOverrideFor(parent).current = override.current
+  return parent
 }
 
 describe('resolveChildRoute()', () => {
@@ -37,6 +37,18 @@ describe('resolveChildRoute()', () => {
     )
     expect(resolveChildRoute(parent, undefined))
       .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+  })
+
+  it('keeps one agent\'s override invisible to another agent', () => {
+    const first = parentOf(
+      { provider: 'deepseek-official', model: 'deepseek-chat' },
+      { current: { provider: 'other', model: 'other-model' } },
+    )
+    const second = parentOf({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    expect(resolveChildRoute(second, undefined))
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-chat' })
+    expect(resolveChildRoute(first, undefined))
+      .toEqual({ provider: 'other', model: 'other-model' })
   })
 
   it('falls back to the parent route when the installed default is cleared', () => {

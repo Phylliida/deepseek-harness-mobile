@@ -108,6 +108,7 @@ export {
   resolveChildAgentOptions,
   resolveChildDepth,
   resolveChildRoute,
+  subagentModelOverrideFor,
   SubagentDepthError,
 } from './child-agent.ts'
 export type { ChildComposition, DelegatedPolicyOverrides, SubagentModelOverride } from './child-agent.ts'

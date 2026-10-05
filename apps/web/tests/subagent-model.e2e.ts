@@ -1,7 +1,7 @@
 // Web e2e scenario: the composer's subagent-model seat sets and clears the
 // session's delegation route. The gesture rides `session.selectSubagentModel`,
 // and the gateway's `session.models` reports the override the delegation seam
-// (`ctx.subagentModel`) will hand to children that name no explicit route.
+// (`subagentModelOverrideFor`) will hand to children that name no explicit route.
 // Zero model calls: the switch is llm-domain traffic only, so there is no
 // fixture and a stray stream would fail loud because the adapter registry is empty.
 import type { Browser, Page } from 'playwright'
@@ -87,13 +87,16 @@ describe('web e2e: the composer subagent-model seat', () => {
     await trigger.waitFor({ timeout: 15_000 })
     await trigger.click()
     // The inherit row is the checked default.
-    await expect(page.getByRole('menuitemradio', { name: /跟随会话模型/ }))
-      .toHaveAttribute('aria-checked', 'true')
+    expect(await page.getByRole('menuitemradio', { name: /跟随会话模型/ }).getAttribute('aria-checked'))
+      .toBe('true')
     await page.getByRole('menuitemradio', { name: 'Acme Large' }).click()
 
     await expect.poll(() => subagentOf(sessionId), { timeout: 10_000 })
       .toEqual({ provider: 'acme-gateway', model: 'acme-large' })
-    await expect(page.getByRole('button', { name: '选择子代理模型，当前 Acme Large' })).toBeVisible()
+    await expect.poll(
+      async () => page.getByRole('button', { name: '选择子代理模型，当前 Acme Large' }).isVisible(),
+      { timeout: 10_000 },
+    ).toBe(true)
 
     // The inherit row clears the override; the session selection is untouched.
     await trigger.click()

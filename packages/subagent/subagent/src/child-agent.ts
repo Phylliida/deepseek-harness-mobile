@@ -27,23 +27,35 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { delegationDepthOf } from './depth.ts'
 
-declare module '@deepseek-ai/cordis' {
-  interface Context {
-    /**
-     * Per-session default model route for delegated children. A host entry
-     * point (the Web gateway's per-session subagent model seat) provides the
-     * holder on the Agent's scope; delegation reads it opportunistically (the
-     * documented `ctx.get` pattern), never as a hard dep, so a deployment
-     * without an entry point keeps parent inheritance.
-     */
-    subagentModel: SubagentModelOverride
-  }
-}
-
-/** Mutable per-session subagent route a host entry point installs on an Agent scope. */
+/** Mutable per-agent subagent route a host entry point installs for one session's delegations. */
 export interface SubagentModelOverride {
   /** Provider/model children inherit instead of the parent's route; undefined restores parent inheritance. */
   current: { provider: string; model: string } | undefined
+}
+
+/**
+ * Per-agent override holders. A cordis `provide` cannot carry this value:
+ * service registration lands on the root store, so one agent's holder would
+ * serve every agent. Keyed by Agent identity instead, so an entry dies with
+ * its agent.
+ */
+const subagentModelOverrides = new WeakMap<Agent, SubagentModelOverride>()
+
+/**
+ * Install or return the per-agent subagent route override that a host entry
+ * point (the Web gateway's per-session subagent model seat) mutates and
+ * delegation reads. Lazily created, so a deployment without an entry point
+ * keeps parent inheritance.
+ * @param agent - the delegating agent the override belongs to.
+ * @returns the agent's mutable override holder.
+ */
+export function subagentModelOverrideFor(agent: Agent): SubagentModelOverride {
+  let holder = subagentModelOverrides.get(agent)
+  if (holder === undefined) {
+    holder = { current: undefined }
+    subagentModelOverrides.set(agent, holder)
+  }
+  return holder
 }
 
 /** Thrown when starting a child would exceed the requested depth cap. */
@@ -77,8 +89,8 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 
 /**
  * Resolve the child's provider/model route, tiered per field: an explicit
- * per-request override, else the session's installed subagent default
- * (`ctx.subagentModel`), else the parent's own route.
+ * per-request override, else the delegating agent's subagent override
+ * ({@link subagentModelOverrideFor}), else the parent's own route.
  * @param parent - the delegating parent whose route is the last tier.
  * @param requested - per-child overrides, if any.
  * @returns the resolved pair; either field is absent when no tier supplies it.
@@ -87,7 +99,7 @@ export function resolveChildRoute(
   parent: Agent,
   requested: AgentOptions | undefined,
 ): { provider?: string; model?: string } {
-  const sessionDefault = parent.ctx.get('subagentModel')?.current
+  const sessionDefault = subagentModelOverrideFor(parent).current
   const provider = requested?.provider ?? sessionDefault?.provider ?? parent.options.provider
   const model = requested?.model ?? sessionDefault?.model ?? parent.options.model
   return {
