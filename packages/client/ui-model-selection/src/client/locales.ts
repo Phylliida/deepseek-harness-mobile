@@ -27,6 +27,12 @@ export const zh = {
   'empty.models': '没有可用的模型。',
   'blocked.composer': '当前模型不可用，请先选择模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'subagent.trigger.label': '子代理',
+  'subagent.trigger.selectAria': '选择子代理模型',
+  'subagent.trigger.aria': '选择子代理模型，当前 {model}',
+  'subagent.menu.aria': '子代理模型',
+  'subagent.inherit': '跟随会话模型',
+  'subagent.inherit.description': '委派的子代理使用会话当前模型',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -51,4 +57,10 @@ export const en = {
   'empty.models': 'No models available.',
   'blocked.composer': 'This model is unavailable — select one to continue',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'subagent.trigger.label': 'Subagents',
+  'subagent.trigger.selectAria': 'Select subagent model',
+  'subagent.trigger.aria': 'Select subagent model, current {model}',
+  'subagent.menu.aria': 'Subagent model',
+  'subagent.inherit': 'Inherit session model',
+  'subagent.inherit.description': 'Delegated subagents use the session’s current model',
 } satisfies Record<ModelKey, string>

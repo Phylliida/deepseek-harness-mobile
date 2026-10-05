@@ -16,6 +16,12 @@ export interface ModelDirectoryState {
   /** Model selection the host reports for the next assembled step; null before the first load. */
   current: ModelSelection | null
   /**
+   * Model route the host reports for this session's delegated subagent
+   * children: a selection, null when they inherit the session's own
+   * selection, undefined before the first load.
+   */
+  subagentCurrent: ModelSelection | null | undefined
+  /**
    * Whether an adapter serves the current selection's provider, as the host reports
    * it — null before the first load, which is NOT the same as blocked. Read
    * this rather than "current matches no group": catalog membership is
@@ -37,7 +43,7 @@ export interface ModelDirectoryState {
 export class ModelDirectory {
   /** The shared snapshot both entries render from (uSES-safe store). */
   readonly store: SnapshotStore<ModelDirectoryState> = createSnapshotStore<ModelDirectoryState>({
-    current: null, routable: null, groups: [], failures: [], status: 'idle', error: null,
+    current: null, subagentCurrent: undefined, routable: null, groups: [], failures: [], status: 'idle', error: null,
   })
 
   /** Latest operation wins; an older response never overwrites a newer one. */
@@ -50,7 +56,7 @@ export class ModelDirectory {
    * @param available - whether this session may use Agent-bound model RPCs.
    */
   constructor(
-    private readonly sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel'>,
+    private readonly sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel' | 'selectSubagentModel'>,
     private readonly sessionId: SessionId,
     private readonly available: () => boolean,
   ) {}
@@ -73,9 +79,10 @@ export class ModelDirectory {
       this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
       throw new Error(`session.models failed: ${result.error.code}: ${result.error.message}`)
     }
-    const { current, routable, groups, failures } = result.value
+    const { current, subagent, routable, groups, failures } = result.value
     this.store.update((s) => {
       s.current = current
+      s.subagentCurrent = subagent
       s.routable = routable
       s.groups = groups
       s.failures = failures
@@ -122,6 +129,35 @@ export class ModelDirectory {
   }
 
   /**
+   * Set or clear the session's subagent model route (null restores parent
+   * inheritance). Success updates the shared subagent selection; failure
+   * surfaces on the store and throws so the entry's own retry surface engages.
+   * @param selection - the provider/model pair children start on, or null to inherit.
+   */
+  async selectSubagent(selection: ModelSelection | null): Promise<void> {
+    this.assertAvailable()
+    const generation = ++this.generation
+    this.store.update((s) => { s.status = 'selecting'; s.error = null })
+    const { result } = await this.sessions.selectSubagentModel({
+      sessionId: this.sessionId,
+      ...selection === null ? {} : { provider: selection.provider, model: selection.model },
+    })
+    if (this.disposed || generation !== this.generation) {
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+      return
+    }
+    if (!result.ok) {
+      this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
+      throw new Error(`session.selectSubagentModel failed: ${result.error.code}: ${result.error.message}`)
+    }
+    this.store.update((s) => {
+      s.subagentCurrent = result.value.selected
+      s.status = 'ready'
+      s.error = null
+    })
+  }
+
+  /**
    * Drop the previous Host generation's projection and repull it. Clearing
    * first prevents an unconsumed process-local selection from being displayed
    * while the restarted Host has restored the last logged model selection.
@@ -131,6 +167,7 @@ export class ModelDirectory {
     ++this.generation
     this.store.update((s) => {
       s.current = null
+      s.subagentCurrent = undefined
       s.routable = null
       s.groups = []
       s.failures = []

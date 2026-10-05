@@ -22,4 +22,10 @@ export interface ModelSelectInjected {
    * @returns whether the host accepted the selection.
    */
   select: (selection: ModelSelection) => Promise<boolean>
+  /**
+   * Set or clear the session's subagent model route.
+   * @param selection - the provider/model pair children start on, or null to inherit the session model.
+   * @returns whether the host accepted the selection.
+   */
+  selectSubagent: (selection: ModelSelection | null) => Promise<boolean>
 }

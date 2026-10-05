@@ -63,6 +63,7 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
             ok: true,
             value: {
               current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+              subagent: null,
               routable: true,
               groups: [],
               failures: [],
@@ -89,6 +90,19 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       },
       async rename(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { title: request.payload.title, seq: 0 } } }
+      },
+      async selectSubagentModel(request) {
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: {
+              selected: request.payload.provider === undefined || request.payload.model === undefined
+                ? null
+                : { provider: request.payload.provider, model: request.payload.model },
+            },
+          },
+        }
       },
       async fork(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { sessionId: 's-fork' as never } } }

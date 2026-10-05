@@ -153,6 +153,12 @@ export interface SessionModels {
   /** Model selection for the session's next assembled step. */
   current: ModelSelection
   /**
+   * Model route this session's delegated subagent children start on, or null
+   * when they inherit the session's own selection. Process-local per session,
+   * like the in-process tier of `current`.
+   */
+  subagent: ModelSelection | null
+  /**
    * Whether an adapter currently serves `current.provider`, and therefore
    * whether this session can start a turn at all. Deliberately NOT derivable
    * from `groups`: catalog membership is advisory, so a route serving a model
@@ -300,6 +306,20 @@ export interface SessionsApi {
     reasoningEffort?: string
   }>):
   Promise<RpcResponse<{ selected: ModelSelection }>>
+
+  /**
+   * Sets or clears the model route this session's delegated subagent children
+   * start on when the delegation request names no route itself. Provider and
+   * model arrive together (catalog membership stays advisory); both absent
+   * clears the override, restoring parent inheritance. Session-backed
+   * subagents reject with `agent-busy`.
+   */
+  selectSubagentModel(request: RpcRequest<{
+    sessionId: SessionId
+    provider?: string
+    model?: string
+  }>):
+  Promise<RpcResponse<{ selected: ModelSelection | null }>>
 
   /**
    * Renames a session: appends a `session/title` event with the `user`

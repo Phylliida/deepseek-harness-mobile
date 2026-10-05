@@ -54,6 +54,8 @@ The Service Definition owns the versioned `subagent/descriptor` session event vo
 
 The seam owns the depth vocabulary shared by Service Providers and Consumers: the `AgentOptions.subagentDepth` declaration, `assertSubagentMaxDepth`, and `delegationDepthOf(agent)`. The persisted `SessionHeader.delegationDepth` is authoritative and monotone — runtime options may deepen the count but never lower it, so a resumed child cannot be re-counted as top-level.
 
+A child's provider/model route resolves per field through `resolveChildRoute(parent, requested)`: the delegation request's explicit override, else the parent session's installed `ctx.subagentModel` default (the `SubagentModelOverride` holder a host entry point provides on the Agent's scope, such as the Web gateway's per-session subagent model seat — an optional `ctx.get` read, so a deployment without it keeps parent inheritance), else the parent's own route. `resolveChildAgentOptions` builds the child's `AgentOptions` from that route plus the parent's `maxTokens`, and a continuable start's descriptor records the same resolved route.
+
 `inheritsParentContext` is descriptive rather than enforceable. It says only whether the child sees completed parent conversation history (`fork` does; `spawn` and the out-of-process one-shot providers do not), not whether it inherits tools, services, or authority.
 
 ## Delegated policy

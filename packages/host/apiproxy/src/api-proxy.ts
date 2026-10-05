@@ -20,7 +20,7 @@ import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, 
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { SessionQueryError, type SessionSearchCursor } from '@deepseek-ai/dsh-session-query'
 import { SubagentError } from '@deepseek-ai/dsh-subagent'
-import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai/dsh-subagent'
+import type { SubagentListEntry as CatalogSubagentListEntry, SubagentModelOverride } from '@deepseek-ai/dsh-subagent'
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
@@ -1117,6 +1117,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
   type WebModelSelectionRef = ModelSelectionRef & { current: ModelSelection }
   const selections = new WeakMap<Agent, WebModelSelectionRef>()
+  const subagentSelections = new WeakMap<Agent, SubagentModelOverride>()
   /**
    * Serializes `agentPreset.select` per session. Two concurrent selects both
    * pass the blank check, and the second `unmountPresetFor` then finds nothing
@@ -1187,6 +1188,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     const agent = agentCtx.agent
     if (agent === undefined) throw new Error('api-proxy: agent setup has no scoped agent')
     selectionFor(agent)
+    subagentSelectionFor(agent)
+  }
+
+  /**
+   * Install or return the session-local subagent route override that
+   * `resolveChildRoute` reads when this agent delegates without an explicit
+   * route. Process-local like the in-process tier of the main selection:
+   * the child a delegation starts records the resolved route in its own
+   * descriptor, so the model-visible fact is reconstructable from the
+   * child's log. A host harness without per-agent fibers already serves a
+   * holder from its shared scope; that holder is reused rather than
+   * re-provided.
+   */
+  function subagentSelectionFor(agent: Agent): SubagentModelOverride {
+    const installed = subagentSelections.get(agent)
+    if (installed !== undefined) return installed
+    const visible = agent.ctx.get('subagentModel')
+    const override: SubagentModelOverride = visible ?? { current: undefined }
+    if (visible === undefined) agent.ctx.provide('subagentModel', override)
+    subagentSelections.set(agent, override)
+    return override
   }
 
   /**
@@ -2281,9 +2303,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const found = await agentFor(sessionId)
         if ('error' in found) return err(request, found.error)
         const current = selectionFor(found.agent).current
+        const subagent = subagentSelectionFor(found.agent).current ?? null
         const { groups, failures } = await buildModelCatalog(ctx)
         const routable = routeServed(current.provider)
-        return ok(request, { current: { ...current }, routable, groups, failures })
+        return ok(request, { current: { ...current }, subagent, routable, groups, failures })
       },
 
       async selectModel(request) {
@@ -2335,6 +2358,29 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             })
           }
         })
+      },
+
+      async selectSubagentModel(request) {
+        const { sessionId, provider, model } = request.payload
+        const found = await agentFor(sessionId)
+        if ('error' in found) return err(request, found.error)
+        const override = subagentSelectionFor(found.agent)
+        // The wire schema pairs provider/model; either-absent is the clear.
+        if (provider === undefined || model === undefined) {
+          override.current = undefined
+          return ok(request, { selected: null })
+        }
+        try {
+          const resolved = await ctx.llm.resolveCallConfig({ provider, model })
+          override.current = { provider: resolved.provider, model: resolved.model }
+          return ok(request, { selected: { provider: resolved.provider, model: resolved.model } })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'model-unavailable',
+            message: error instanceof Error ? error.message : String(error),
+            details: { provider, model },
+          })
+        }
       },
 
       async rename(request) {

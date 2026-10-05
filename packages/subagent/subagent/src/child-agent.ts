@@ -27,6 +27,25 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import { delegationDepthOf } from './depth.ts'
 
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    /**
+     * Per-session default model route for delegated children. A host entry
+     * point (the Web gateway's per-session subagent model seat) provides the
+     * holder on the Agent's scope; delegation reads it opportunistically (the
+     * documented `ctx.get` pattern), never as a hard dep, so a deployment
+     * without an entry point keeps parent inheritance.
+     */
+    subagentModel: SubagentModelOverride
+  }
+}
+
+/** Mutable per-session subagent route a host entry point installs on an Agent scope. */
+export interface SubagentModelOverride {
+  /** Provider/model children inherit instead of the parent's route; undefined restores parent inheritance. */
+  current: { provider: string; model: string } | undefined
+}
+
 /** Thrown when starting a child would exceed the requested depth cap. */
 export class SubagentDepthError extends Error {
   constructor(public readonly attemptedDepth: number, public readonly maxDepth: number) {
@@ -57,9 +76,30 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 }
 
 /**
- * Resolve the child's `AgentOptions`: the parent's provider/model/maxTokens
- * route unless the request overrides it, stamped with the child's own
- * delegation depth.
+ * Resolve the child's provider/model route, tiered per field: an explicit
+ * per-request override, else the session's installed subagent default
+ * (`ctx.subagentModel`), else the parent's own route.
+ * @param parent - the delegating parent whose route is the last tier.
+ * @param requested - per-child overrides, if any.
+ * @returns the resolved pair; either field is absent when no tier supplies it.
+ */
+export function resolveChildRoute(
+  parent: Agent,
+  requested: AgentOptions | undefined,
+): { provider?: string; model?: string } {
+  const sessionDefault = parent.ctx.get('subagentModel')?.current
+  const provider = requested?.provider ?? sessionDefault?.provider ?? parent.options.provider
+  const model = requested?.model ?? sessionDefault?.model ?? parent.options.model
+  return {
+    ...provider !== undefined ? { provider } : {},
+    ...model !== undefined ? { model } : {},
+  }
+}
+
+/**
+ * Resolve the child's `AgentOptions`: the route {@link resolveChildRoute}
+ * tiers and the parent's maxTokens unless the request overrides them, stamped
+ * with the child's own delegation depth.
  * @param parent - the delegating parent whose route the child inherits.
  * @param requested - per-child overrides, if any.
  * @param childDepth - the resolved delegation depth to stamp.
@@ -70,12 +110,9 @@ export function resolveChildAgentOptions(
   requested: AgentOptions | undefined,
   childDepth: number,
 ): AgentOptions {
-  const parentProvider = parent.options.provider
-  const parentModel = parent.options.model
   const parentMaxTokens = parent.options.maxTokens
   return {
-    ...parentProvider !== undefined ? { provider: parentProvider } : {},
-    ...parentModel !== undefined ? { model: parentModel } : {},
+    ...resolveChildRoute(parent, requested),
     ...parentMaxTokens !== undefined ? { maxTokens: parentMaxTokens } : {},
     ...requested,
     subagentDepth: childDepth,

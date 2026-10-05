@@ -6,6 +6,7 @@ import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ComponentProps } from 'react'
 import type { ModelDirectoryState } from '../src/client/directory.ts'
 import { ModelSelect } from '../src/client/ModelSelect.tsx'
+import { SubagentModelSelect } from '../src/client/SubagentModelSelect.tsx'
 import { zh } from '../src/client/locales.ts'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 
@@ -32,6 +33,7 @@ const reasoning = {
 function state(overrides: Partial<ModelDirectoryState> = {}): ModelDirectoryState {
   return {
     current: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    subagentCurrent: null,
     routable: true,
     groups: [{
       id: 'deepseek-official',
@@ -180,5 +182,87 @@ describe('ModelSelect reasoning effort', () => {
 
     expect(screen.queryByRole('button')).toBeNull()
     expect(load).not.toHaveBeenCalled()
+  })
+})
+
+describe('SubagentModelSelect', () => {
+  it('shows the inherit default and submits a subagent route through selectSubagent', async () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state())
+    const selectSubagent = vi.fn(async (selection: ModelSelection | null) => {
+      directory.set(state({ subagentCurrent: selection }))
+      return true
+    })
+    render(<SubagentModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      selectSubagent={selectSubagent}
+      t={t}
+    />)
+
+    const trigger = screen.getByRole('button', { name: '选择子代理模型，当前 跟随会话模型' })
+    fireEvent.click(trigger)
+    // The inherit row is the checked default; catalog models follow.
+    const options = screen.getAllByRole('menuitemradio')
+    expect(options.map(item => item.textContent))
+      .toEqual(['跟随会话模型委派的子代理使用会话当前模型', 'DeepSeek-V4-Flash'])
+    expect(options[0]?.getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'DeepSeek-V4-Flash' }))
+    await waitFor(() => {
+      expect(selectSubagent).toHaveBeenCalledWith({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+      expect(trigger.getAttribute('aria-label')).toBe('选择子代理模型，当前 DeepSeek-V4-Flash')
+    })
+  })
+
+  it('clears an override through the inherit row', async () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({
+      subagentCurrent: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    }))
+    const selectSubagent = vi.fn(async (selection: ModelSelection | null) => {
+      directory.set(state({ subagentCurrent: selection }))
+      return true
+    })
+    render(<SubagentModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      selectSubagent={selectSubagent}
+      t={t}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: '选择子代理模型，当前 DeepSeek-V4-Flash' }))
+    fireEvent.click(screen.getByRole('menuitemradio', { name: /跟随会话模型/ }))
+    await waitFor(() => {
+      expect(selectSubagent).toHaveBeenCalledWith(null)
+    })
+  })
+
+  it('names the override by its catalog id when the model is unadvertised, and renders nothing when unavailable', () => {
+    const directory = createSnapshotStore<ModelDirectoryState>(state({
+      subagentCurrent: { provider: 'deepseek-official', model: 'removed-model' },
+    }))
+    const { unmount } = render(<SubagentModelSelect
+      locked={false}
+      available
+      directory={directory}
+      load={vi.fn()}
+      selectSubagent={vi.fn().mockResolvedValue(true)}
+      t={t}
+    />)
+    expect(screen.getByRole('button', { name: '选择子代理模型，当前 removed-model' })).toBeTruthy()
+    unmount()
+
+    render(<SubagentModelSelect
+      locked={false}
+      available={false}
+      directory={createSnapshotStore(state())}
+      load={vi.fn()}
+      selectSubagent={vi.fn().mockResolvedValue(false)}
+      t={t}
+    />)
+    expect(screen.queryByRole('button')).toBeNull()
   })
 })

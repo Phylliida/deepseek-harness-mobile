@@ -107,9 +107,10 @@ export {
   childSessionMeta,
   resolveChildAgentOptions,
   resolveChildDepth,
+  resolveChildRoute,
   SubagentDepthError,
 } from './child-agent.ts'
-export type { ChildComposition, DelegatedPolicyOverrides } from './child-agent.ts'
+export type { ChildComposition, DelegatedPolicyOverrides, SubagentModelOverride } from './child-agent.ts'
 export type {
   ContinuableStart,
   ContinuableStartSpec,

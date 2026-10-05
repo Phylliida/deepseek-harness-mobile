@@ -23,7 +23,25 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelSelectInjected } from './slots.ts'
+import { SubagentModelSelect } from './SubagentModelSelect.tsx'
 import css from './ModelSelect.module.css'
+
+/**
+ * The composer seat's occupant: the subagent-model trigger sits left of the
+ * session model seat, both over the same injected directory face.
+ * @param props - owner share + injected face + the standard locale seat.
+ * @returns the subagent and session model triggers.
+ */
+export function ModelSeats(
+  props: ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
+) {
+  return (
+    <>
+      <SubagentModelSelect {...props} />
+      <ModelSelect {...props} />
+    </>
+  )
+}
 
 /** Which pane the dropdown shows: the two-row root or one drilled-in list. */
 type Pane = 'root' | 'model' | 'effort'
@@ -44,7 +62,8 @@ interface EffortChoice {
  */
 export function ModelSelect(
   { locked, available, directory, load, select, t }:
-  ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
+  Pick<ModelSelectInjected, 'available' | 'directory' | 'load' | 'select'>
+  & { locked: boolean } & PropsLocale<'model'>,
 ) {
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),

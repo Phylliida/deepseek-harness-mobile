@@ -21,6 +21,8 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
+// Type-only: pulls the `ctx.subagentModel` Context merge the delegation seam declares.
+import type {} from '@deepseek-ai/dsh-subagent'
 import { createApiProxy } from '../src/api-proxy.ts'
 
 let nextRpc = 1
@@ -372,6 +374,44 @@ describe('Web session model selection', () => {
     })
     expect(expectValue(await api.sessions.models(request({ sessionId }))).current)
       .toEqual({ provider: 'deepseek-official', model: 'private-preview', reasoningEffort: 'max' })
+    await ctx.fiber.dispose()
+  })
+
+  it('sets, reports, and clears the session subagent route, and rejects an unserved provider', async () => {
+    const { ctx, agent, sessionId } = await harness()
+    const api = createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat' }), cwd: '/tmp' })
+
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).subagent).toBeNull()
+
+    const selected = expectValue(await api.sessions.selectSubagentModel(request({
+      sessionId, provider: 'deepseek-official', model: 'deepseek-reasoner',
+    })))
+    expect(selected.selected).toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    // The delegation seam reads the very holder this RPC installs.
+    expect(agent.ctx.get('subagentModel')?.current)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).subagent)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+
+    const rejected = await api.sessions.selectSubagentModel(request({
+      sessionId, provider: 'missing', model: 'model',
+    }))
+    expect(rejected.result).toEqual({
+      ok: false,
+      error: {
+        code: 'model-unavailable',
+        message: 'no adapter registered for provider "missing"',
+        details: { provider: 'missing', model: 'model' },
+      },
+    })
+    // A refused route never reaches the delegation seam.
+    expect(agent.ctx.get('subagentModel')?.current)
+      .toEqual({ provider: 'deepseek-official', model: 'deepseek-reasoner' })
+
+    const cleared = expectValue(await api.sessions.selectSubagentModel(request({ sessionId })))
+    expect(cleared.selected).toBeNull()
+    expect(agent.ctx.get('subagentModel')?.current).toBeUndefined()
+    expect(expectValue(await api.sessions.models(request({ sessionId }))).subagent).toBeNull()
     await ctx.fiber.dispose()
   })
 

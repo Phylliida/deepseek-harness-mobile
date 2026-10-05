@@ -11,7 +11,8 @@ import {
   sessionIdSchema, sessionListRequestSchema, sessionListValueSchema, sessionModelsRequestSchema,
   sessionModelsValueSchema, sessionPromptRequestSchema, sessionPromptValueSchema,
   sessionSearchRequestSchema, sessionSearchValueSchema, sessionSelectModelRequestSchema,
-  sessionSelectModelValueSchema, sessionSummarySchema,
+  sessionSelectModelValueSchema, sessionSelectSubagentModelRequestSchema, sessionSelectSubagentModelValueSchema,
+  sessionSummarySchema,
   sessionUpdateQueueRequestSchema, sessionUpdateQueueValueSchema,
 } from '../src/api/sessions.schema.ts'
 import {
@@ -79,6 +80,9 @@ describe('rpcErrorSchema', () => {
     expect(rpcErrorSchema.parse({ code: 'title-invalid', message: 'm', details: { sessionId: 's' } }).code).toBe('title-invalid')
     // The credentials producer still emits this code, so the branch has to stay.
     expect(rpcErrorSchema.parse({ code: 'credential-rejected', message: 'm', details: { ref: 'r' } }).code).toBe('credential-rejected')
+    // coding.read/write map every log failure onto this code; a missing branch
+    // turns a structured rejection into a client-side ZodError.
+    expect(rpcErrorSchema.parse({ code: 'coding-rejected', message: 'm', details: {} }).code).toBe('coding-rejected')
     expect(rpcErrorSchema.parse({ code: 'internal', message: 'm', details: {} }).code).toBe('internal')
   })
 
@@ -206,6 +210,7 @@ describe('sessions domain schemas', () => {
     expect(sessionModelsRequestSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1')
     expect(sessionModelsValueSchema.parse({
       current: { provider: 'deepseek-official', model: 'deepseek-v4-flash', reasoningEffort: 'max' },
+      subagent: null,
       routable: true,
       groups: [{
         id: 'deepseek-official',
@@ -245,8 +250,24 @@ describe('sessions domain schemas', () => {
       model: 'm',
       reasoningEffort: '',
     })).toThrow()
+    // selectSubagentModel: both absent clears, both present selects, a half pair rejects.
+    expect(sessionSelectSubagentModelRequestSchema.parse({ sessionId: 's1' }).provider).toBeUndefined()
+    expect(sessionSelectSubagentModelRequestSchema.parse({
+      sessionId: 's1',
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+    }).model).toBe('deepseek-v4-pro')
+    expect(() => sessionSelectSubagentModelRequestSchema.parse({
+      sessionId: 's1',
+      provider: 'deepseek-official',
+    })).toThrow(/together/)
+    expect(sessionSelectSubagentModelValueSchema.parse({ selected: null }).selected).toBeNull()
+    expect(sessionSelectSubagentModelValueSchema.parse({
+      selected: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+    }).selected?.model).toBe('deepseek-v4-pro')
     expect(() => sessionModelsValueSchema.parse({
       current: { provider: 'deepseek-official', model: 'm' },
+      subagent: null,
       groups: [{
         id: 'deepseek-official',
         name: 'DeepSeek',

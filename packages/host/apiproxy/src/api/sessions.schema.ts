@@ -249,6 +249,7 @@ export const sessionModelsRequestSchema = z.object({
 /** session.models response value. */
 export const sessionModelsValueSchema = z.object({
   current: modelSelectionSchema,
+  subagent: modelSelectionSchema.nullable(),
   routable: z.boolean(),
   groups: z.array(modelProviderGroupSchema),
   failures: z.array(modelCatalogFailureSchema),
@@ -266,6 +267,20 @@ export const sessionSelectModelRequestSchema = z.object({
 export const sessionSelectModelValueSchema = z.object({
   selected: modelSelectionSchema,
 }) satisfies z.ZodType<Wire<ResponseValue<'session.selectModel'>>>
+
+/** session.selectSubagentModel request payload (provider/model absent clears the override). */
+export const sessionSelectSubagentModelRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+  provider: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+}).refine(payload => (payload.provider === undefined) === (payload.model === undefined), {
+  message: 'a subagent model selection requires provider and model together',
+}) satisfies z.ZodType<Wire<RequestPayload<'session.selectSubagentModel'>>>
+
+/** session.selectSubagentModel response value. */
+export const sessionSelectSubagentModelValueSchema = z.object({
+  selected: modelSelectionSchema.nullable(),
+}) satisfies z.ZodType<Wire<ResponseValue<'session.selectSubagentModel'>>>
 
 /** ContentBlock passthrough: core is merge-extensible — the type discriminant envelope is strict, the rest stays wide. */
 export const contentBlockSchema = z.looseObject({ type: z.string() })

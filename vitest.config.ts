@@ -231,6 +231,7 @@ export default defineConfig({
         'packages/client/ui-model-selection/src/index.ts',
         'packages/client/ui-permission-presets/src/index.ts',
         'packages/client/ui-model-selection/src/client/ModelSelect.tsx',
+        'packages/client/ui-model-selection/src/client/SubagentModelSelect.tsx',
         'packages/client/ui-model-selection/src/client/directory.ts',
         'packages/client/ui-model-selection/src/client/index.ts',
         'packages/client/ui-model-selection/src/client/service.ts',

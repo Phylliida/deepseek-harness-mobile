@@ -45,6 +45,7 @@ import {
   childSessionMeta,
   resolveChildAgentOptions,
   resolveChildDepth,
+  resolveChildRoute,
 } from './child-agent.ts'
 import type { DelegatedPolicyOverrides } from './child-agent.ts'
 import { assertSubagentMaxDepth } from './depth.ts'
@@ -410,14 +411,13 @@ export class SubagentContinuationManager {
     const childDepth = resolveChildDepth(parent, request.maxDepth)
     // Snapshot before any await: invalid descriptor JSON rejects the call
     // before a child exists, and the detached value is what reaches the log.
-    const agentProvider = request.agentOptions?.provider ?? parent.options.provider
-    const agentModel = request.agentOptions?.model ?? parent.options.model
+    const childRoute = resolveChildRoute(parent, request.agentOptions)
     const descriptor = snapshotSubagentDescriptor({
       mode: 'continuable',
       provider: spec.provider,
       label: spec.label,
-      ...agentProvider !== undefined ? { agentProvider } : {},
-      ...agentModel !== undefined ? { agentModel } : {},
+      ...childRoute.provider !== undefined ? { agentProvider: childRoute.provider } : {},
+      ...childRoute.model !== undefined ? { agentModel: childRoute.model } : {},
       ...request.persona !== undefined ? { persona: request.persona } : {},
       ...request.toolFilter !== undefined ? { toolFilter: request.toolFilter } : {},
     })
