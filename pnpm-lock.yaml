@@ -3480,6 +3480,9 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:^
+        version: link:../../session/session-projection
 
   packages/compaction/compaction-autobiographical:
     dependencies:
@@ -3514,9 +3517,15 @@ importers:
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
+      '@deepseek-ai/dsh-session-projection':
+        specifier: workspace:^
+        version: link:../../session/session-projection
       '@deepseek-ai/dsh-token-meter':
         specifier: workspace:^
         version: link:../../llm/token-meter
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/compaction/compaction-basic:
     dependencies:
@@ -5095,6 +5104,9 @@ importers:
       '@deepseek-ai/dsh-agent-presets':
         specifier: workspace:^
         version: link:../../preset/agent-presets
+      '@deepseek-ai/dsh-compaction':
+        specifier: workspace:^
+        version: link:../../compaction/compaction
       '@deepseek-ai/dsh-cordis-host-runner':
         specifier: workspace:^
         version: link:../../extensions/cordis-host-runner

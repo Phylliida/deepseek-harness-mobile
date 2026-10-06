@@ -66,6 +66,9 @@
       "path": "../../session-query/session-query"
     },
     {
+      "path": "../../compaction/compaction"
+    },
+    {
       "path": "../../session/session-title"
     },
     {

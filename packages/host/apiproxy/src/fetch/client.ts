@@ -47,6 +47,7 @@ import {
   sessionSearchValueSchema,
   sessionSelectModelValueSchema,
   sessionSelectSubagentModelValueSchema,
+  sessionSetCompactionConfigValueSchema,
   sessionUpdateQueueValueSchema,
 } from '../api/sessions.schema.ts'
 import {
@@ -113,6 +114,7 @@ export interface IApiClient {
     selectModel(payload: RequestPayload<'session.selectModel'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.selectModel'>>>
     selectSubagentModel(payload: RequestPayload<'session.selectSubagentModel'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.selectSubagentModel'>>>
     rename(payload: RequestPayload<'session.rename'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.rename'>>>
+    setCompactionConfig(payload: RequestPayload<'session.setCompactionConfig'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.setCompactionConfig'>>>
     fork(payload: RequestPayload<'session.fork'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.fork'>>>
     prompt(payload: RequestPayload<'session.prompt'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.prompt'>>>
     attachment(payload: RequestPayload<'session.attachment'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'session.attachment'>>>
@@ -202,6 +204,7 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'session.selectModel': sessionSelectModelValueSchema,
   'session.selectSubagentModel': sessionSelectSubagentModelValueSchema,
   'session.rename': sessionRenameValueSchema,
+  'session.setCompactionConfig': sessionSetCompactionConfigValueSchema,
   'session.fork': sessionForkValueSchema,
   'session.prompt': sessionPromptValueSchema,
   'session.attachment': sessionAttachmentValueSchema,
@@ -444,6 +447,7 @@ export abstract class AbstractApiClient implements IApiClient {
     selectModel: (payload, signal) => this.callUnary('session.selectModel', payload, signal),
     selectSubagentModel: (payload, signal) => this.callUnary('session.selectSubagentModel', payload, signal),
     rename: (payload, signal) => this.callUnary('session.rename', payload, signal),
+    setCompactionConfig: (payload, signal) => this.callUnary('session.setCompactionConfig', payload, signal),
     fork: (payload, signal) => this.callUnary('session.fork', payload, signal),
     prompt: (payload, signal) => this.callUnary('session.prompt', payload, signal),
     attachment: (payload, signal) => this.callUnary('session.attachment', payload, signal),

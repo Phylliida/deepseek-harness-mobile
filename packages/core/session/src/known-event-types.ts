@@ -28,6 +28,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'autobio/memory-progress',
   'command/done',
   'command/run',
+  'compaction/config',
   'compaction/end',
   'compaction/prune',
   'compaction/start',

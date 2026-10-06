@@ -68,6 +68,19 @@ export interface ISession {
    */
   rename(title: string): Promise<RpcResult<{ title: string; seq: number }>>
   /**
+   * Set this session's memory settings: folding on/off and the surface-token
+   * threshold folding starts at. The host appends the latest-wins
+   * `compaction/config` event, which the compaction backend reads on its next
+   * pass and the projections deliver back on the push frame.
+   * @param settings - either knob alone is a valid write; a null
+   *   `operatingWindowTokens` clears the override back to the backend default.
+   * @returns the config event's seq, or the business error.
+   */
+  setCompactionConfig(settings: {
+    enabled?: boolean
+    operatingWindowTokens?: number | null
+  }): Promise<RpcResult<{ seq: number }>>
+  /**
    * Extend the history window backwards (older messages pagination).
    * @returns completion; failures land in snapshot.openState/loadingOlder.
    */

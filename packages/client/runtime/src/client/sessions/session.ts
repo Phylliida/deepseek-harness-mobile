@@ -348,6 +348,20 @@ export class Session implements SessionFace {
     }
   }
 
+  async setCompactionConfig(settings: {
+    enabled?: boolean
+    operatingWindowTokens?: number | null
+  }): Promise<RpcResult<{ seq: number }>> {
+    try {
+      // No optimistic settle: the panel's state is the projection fold, and
+      // the push frame carries it back once the event lands.
+      const { result } = await this.api.sessions.setCompactionConfig({ sessionId: this.sessionId, ...settings })
+      return result
+    } catch (error) {
+      return transportError(error)
+    }
+  }
+
   /**
    * Execute one slash-command line against this session's agent — pure
    * admission semantics (the host executor durably logs the lifecycle;

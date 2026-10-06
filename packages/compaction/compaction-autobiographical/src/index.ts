@@ -29,6 +29,9 @@ import type { TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { RequestContext, Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
+// Type-only: resolves the `sessionProjections` Context declaration the
+// compactionConfig projection registers into.
+import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves the token meter's Context declaration, which the planner's
 // node price comes from.
 import type {} from '@deepseek-ai/dsh-token-meter'
@@ -36,6 +39,7 @@ import { applyFolds } from './apply.ts'
 import { createBridge } from './bridge.ts'
 import { resolveConfig } from './config.ts'
 import { DivergenceError, planFolds, priceSurfaceNode } from './plan.ts'
+import { compactionConfigProjectionDefinition } from './projection.ts'
 import { appendSurfaceNode, recollectionRows, resolveRange, seedFromLog } from './seed.ts'
 import { createStore } from './store.ts'
 import type { LogStore } from './store.ts'
@@ -210,6 +214,12 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       this.runtimes.delete(agent.session.id)
     })
     ctx.effect(() => () => { this.runtimes.clear() }, 'compaction-autobiographical.disposal')
+
+    // The session's memory settings ride the log as `compaction/config` events;
+    // the projection puts the newest of them where the GUI reads it.
+    ctx.inject(['sessionProjections'], (projectionCtx) => {
+      projectionCtx.sessionProjections.register(compactionConfigProjectionDefinition)
+    })
   }
 
   override async compactIfNeeded(
@@ -290,7 +300,12 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // a thrown error, so the guard comes first.
     const routed = agent.session.requestContext()
     if (routed?.contextWindow === undefined) return null
-    const budget = this.computeBudget(routed.contextWindow)
+    const settings = sessionConfig(agent.session)
+    // A session whose memory the user paused folds nothing and forms nothing:
+    // the pass leaves the log and the strategy exactly as it found them, and
+    // formation catches up on the first pass after the pause lifts.
+    if (settings.enabled === false) return null
+    const budget = this.computeBudget(routed.contextWindow, settings.operatingWindowTokens ?? undefined)
     if (budget === undefined) return null
     const runtime = await this.runtimeFor(agent, routed)
     const { session } = agent
@@ -519,11 +534,12 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * The reserve is the breathing room below the operating window, and the library
    * subtracts it again inside its own arithmetic as the response allowance, so the
    * live context it holds is the smaller of the route's window and the configured
-   * one, less twice the reserve. Prompt overhead is not subtracted here beyond
+   * one — or the session's own `compaction/config` override when the user set one —
+   * less twice the reserve. Prompt overhead is not subtracted here beyond
    * that because the estimator's calibration multiplier already accounts for it.
    */
-  private computeBudget(window: number): TokenBudget | undefined {
-    const maxTokens = Math.min(window, this.config.operatingWindowTokens) - this.config.reserveTokens
+  private computeBudget(window: number, operatingWindowTokens?: number): TokenBudget | undefined {
+    const maxTokens = Math.min(window, operatingWindowTokens ?? this.config.operatingWindowTokens) - this.config.reserveTokens
     return maxTokens <= 0 ? undefined : { maxTokens, reserveForResponse: this.config.reserveTokens }
   }
 
@@ -716,6 +732,15 @@ function openTurn(session: Session): number | null {
   const boundary = session.events
     .findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
   return boundary?.type === 'turn/start' ? boundary.data.turn : null
+}
+
+/**
+ * The session's memory settings from its newest `compaction/config` event, both
+ * knobs unset before one lands. Read per pass rather than held: the event may
+ * land between passes, and the pass is the only place the knobs act.
+ */
+function sessionConfig(session: Session): { enabled?: boolean; operatingWindowTokens?: number | null } {
+  return session.events.findLast(event => event.type === 'compaction/config')?.data ?? {}
 }
 
 /**

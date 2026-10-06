@@ -127,6 +127,21 @@ export const sessionRenameValueSchema = z.object({
   seq: z.number().int().nonnegative(),
 }) satisfies z.ZodType<Wire<ResponseValue<'session.rename'>>>
 
+/**
+ * session.setCompactionConfig request payload (either knob alone is a valid
+ * write; a null window clears the override).
+ */
+export const sessionSetCompactionConfigRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+  enabled: z.boolean().optional(),
+  operatingWindowTokens: z.number().int().positive().nullable().optional(),
+}) satisfies z.ZodType<Wire<RequestPayload<'session.setCompactionConfig'>>>
+
+/** session.setCompactionConfig response value (the config event's seq). */
+export const sessionSetCompactionConfigValueSchema = z.object({
+  seq: z.number().int().nonnegative(),
+}) satisfies z.ZodType<Wire<ResponseValue<'session.setCompactionConfig'>>>
+
 /** session.fork request payload (atSeq anchors the completed-turn cut). */
 export const sessionForkRequestSchema = z.object({
   sessionId: sessionIdSchema,

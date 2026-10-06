@@ -510,6 +510,15 @@ export interface ComposerBarInjected {
   /** Cancel the in-flight turn; absent with the session. */
   stop: (() => void) | undefined
   /**
+   * Write the session's memory settings (folding on/off, folding threshold);
+   * absent without a session. The folded state returns through the
+   * `compactionConfig` projection.
+   */
+  setMemoryConfig: ((settings: {
+    enabled?: boolean
+    operatingWindowTokens?: number | null
+  }) => Promise<void>) | undefined
+  /**
    * Submit one slash-command line against this session's agent (the chrome
    * controls' write path — the permission chip submits `/permission <preset>`);
    * absent with the session.

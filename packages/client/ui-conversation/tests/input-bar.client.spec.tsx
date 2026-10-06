@@ -176,6 +176,7 @@ function bench(over?: BenchOptions) {
     useLexicon: bindSnapshotSelector(shell.lexicon),
     useMenuLauncher: bindSnapshotSelector(menuLauncher),
     stop,
+    setMemoryConfig: undefined,
     command: over?.command ?? (() => Promise.resolve(true)),
     // Mirrors the real lookup chain (conversation namespace, then common).
     t: over?.t ?? makeTranslate(zh, commonZh),

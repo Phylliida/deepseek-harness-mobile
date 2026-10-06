@@ -296,6 +296,7 @@ export function apply(ctx: Context): void {
             submissionPolicy.resolve(running, gesture, steeringAvailable),
           toggleCommandMenu: undefined,
           stop: undefined,
+          setMemoryConfig: undefined,
           command: undefined,
           hooks: { notices: ABSENT_NOTICES, lexicon: ABSENT_LEXICON, menuLauncher: ABSENT_MENU_LAUNCHER },
         }
@@ -345,6 +346,7 @@ export function apply(ctx: Context): void {
             // Stop failure surfaces via snapshot.promptError; nothing to restore.
           })
         },
+        setMemoryConfig: settings => scopedConversation(sessions, sessionId).setMemoryConfig(settings),
         command: async (line) => {
           const session = sessions.binding(sessionId)?.session
           if (session === undefined) return false

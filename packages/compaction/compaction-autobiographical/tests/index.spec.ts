@@ -147,6 +147,45 @@ describe('the compile budget', () => {
   })
 })
 
+describe('the session\'s own memory settings', () => {
+  it('compiles against the window the session\'s log sets', async () => {
+    const { engine, agent, session } = build(30, 'index-settings-window')
+    session.append('compaction/config', { operatingWindowTokens: 800 })
+    const compile = vi.spyOn(ContextManager.prototype, 'compile')
+
+    await engine.compactNow(agent, new AbortController().signal)
+
+    expect(compile.mock.calls.at(0)?.[0]).toEqual({ maxTokens: 672, reserveForResponse: 128 })
+  })
+
+  it('drops the window override when the log clears it', async () => {
+    const { engine, agent, session } = build(30, 'index-settings-cleared')
+    session.append('compaction/config', { operatingWindowTokens: 800 })
+    session.append('compaction/config', { operatingWindowTokens: null })
+    const compile = vi.spyOn(ContextManager.prototype, 'compile')
+
+    await engine.compactNow(agent, new AbortController().signal)
+
+    expect(compile.mock.calls.at(0)?.[0]).toEqual({ maxTokens: 572, reserveForResponse: 128 })
+  })
+
+  it('folds nothing while the session\'s memory is paused, and resumes when it lifts', async () => {
+    const { engine, agent, session } = build(30, 'index-settings-paused')
+    session.append('compaction/config', { enabled: false })
+    const compile = vi.spyOn(ContextManager.prototype, 'compile')
+
+    // The pause is the whole pass: no compile, no tick, and the log untouched.
+    const events = session.events.length
+    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    expect(compile).not.toHaveBeenCalled()
+    expect(session.events.length).toBe(events)
+
+    session.append('compaction/config', { enabled: true })
+    await engine.compactNow(agent, new AbortController().signal)
+    expect(compile).toHaveBeenCalled()
+  })
+})
+
 describe('compiling against a refusal', () => {
   it('does not fold when the retry refuses too', async () => {
     const { engine, agent, session } = build(30, 'index-refuse-twice')

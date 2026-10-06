@@ -160,6 +160,7 @@ export class FakeApiClient implements IApiClient {
     selectSubagentModel: (payload: { provider?: string; model?: string }) =>
       this.record('session.selectSubagentModel', payload, this.onSelectSubagentModel(payload)),
     rename: (payload: unknown) => this.record('session.rename', payload, this.onRename(payload)),
+    setCompactionConfig: (payload: unknown) => this.record('session.setCompactionConfig', payload, Promise.resolve(ok({ seq: 0 }))),
     fork: (payload: unknown) => this.record('session.fork', payload, this.onFork(payload)),
     prompt: (payload: unknown) => this.record('session.prompt', payload, this.onPrompt(payload)),
     attachment: (payload: unknown) => this.record('session.attachment', payload, this.onAttachment(payload)),

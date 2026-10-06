@@ -9,6 +9,8 @@
 
 import type { ContentBlock, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+// Type-only: anchors the projection-key merge below to its home package.
+import type {} from '@deepseek-ai/dsh-session-projection/types'
 import type { CompactionId } from './brand.ts'
 
 export type { CompactionId }
@@ -70,6 +72,20 @@ declare module '@deepseek-ai/dsh-session/types' {
      */
     'compaction/end': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null; error?: string }
     /**
+     * Per-session compaction settings, latest-wins — log-only, no surfaceOp.
+     * Written by the host when the user changes a session's memory settings; a
+     * backend that honors it reads the newest event. `enabled: false` pauses
+     * folding and memory formation together; `operatingWindowTokens` overrides
+     * the backend's configured operating window — the surface estimate at
+     * which folding pressure starts — and `null` clears a previous override.
+     * An absent field leaves that setting as it was, so one write may change
+     * either knob alone.
+     */
+    'compaction/config': {
+      enabled?: boolean
+      operatingWindowTokens?: number | null
+    }
+    /**
      * Shadow price of one model-free prune replacement — log-only, no
      * surfaceOp. The shared shadow-price protocol: a surface `replace` event
      * is priced by the metering event immediately before it (`compaction/summary`
@@ -87,6 +103,25 @@ declare module '@deepseek-ai/dsh-session/types' {
       shadowedTokenCount: number
     }
   }
+}
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    /**
+     * The session's compaction settings, latest-wins over its `compaction/config`
+     * events: `enabled` starts true and `operatingWindowTokens` starts null
+     * (the backend's configured default) before the first event lands.
+     */
+    compactionConfig: CompactionConfigProjection
+  }
+}
+
+/** The session's current compaction settings as the newest `compaction/config` event left them. */
+export interface CompactionConfigProjection {
+  /** Whether folding and memory formation run for this session. */
+  enabled: boolean
+  /** The surface estimate at which folding pressure starts, when the session overrides the backend default. */
+  operatingWindowTokens: number | null
 }
 
 /** Result of a successful compaction operation. */

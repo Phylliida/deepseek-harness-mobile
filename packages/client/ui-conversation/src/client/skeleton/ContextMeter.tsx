@@ -8,6 +8,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: the `contextPressure` / `contextBreakdown` projection key merges.
 import type {} from '@deepseek-ai/dsh-token-meter/client'
+// Type-only: the `compactionConfig` projection key merge.
+import type {} from '@deepseek-ai/dsh-compaction/types'
 import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ComposerBarProps } from '../contract/slots.ts'
 import { contextOccupancy, formatTokens } from '../chat/StatsLine.tsx'
@@ -35,12 +37,24 @@ export interface ContextMeterProps {
   useProjection: UseProjection
   /** The owning bar's locale seat, passed down as a plain prop. */
   t: ComposerBarProps['t']
+  /** The bar's memory-settings writer; absent without a session. */
+  setMemoryConfig?: ComposerBarProps['setMemoryConfig']
 }
 
-export function ContextMeter({ useProjection, t }: ContextMeterProps) {
+/** Folding-threshold preset chips, in ascending order. */
+const PRESETS = [32_000, 64_000, 128_000] as const
+
+export function ContextMeter({ useProjection, t, setMemoryConfig }: ContextMeterProps) {
   const pressure = useProjection('contextPressure')
   const breakdown = useProjection('contextBreakdown')
+  const memory = useProjection('compactionConfig')
   const [open, setOpen] = useState(false)
+  // The threshold input's uncommitted text; undefined while the control shows
+  // the projection's value.
+  const [draft, setDraft] = useState<string | undefined>(undefined)
+  // Controls disable while a write is in flight; a rejected write leaves the
+  // projection unchanged, which snaps every control back on its own.
+  const [writing, setWriting] = useState(false)
   const rootRef = useRef<HTMLSpanElement | null>(null)
   const context = contextOccupancy(pressure)
   const available = context !== null
@@ -71,6 +85,22 @@ export function ContextMeter({ useProjection, t }: ContextMeterProps) {
 
   if (context === null) return null
   const percent = context.percent
+
+  const write = (settings: { enabled?: boolean; operatingWindowTokens?: number | null }): void => {
+    if (setMemoryConfig === undefined) return
+    setWriting(true)
+    setMemoryConfig(settings)
+      .catch(() => { /* A rejected write never moved the projection; controls snap back on their own. */ })
+      .finally(() => { setWriting(false) })
+  }
+
+  const commitThreshold = (): void => {
+    if (draft === undefined) return
+    const parsed = Number(draft)
+    setDraft(undefined)
+    if (!Number.isInteger(parsed) || parsed <= 0 || parsed === memory?.operatingWindowTokens) return
+    write({ operatingWindowTokens: parsed })
+  }
   const reading = `${percent}%`
   const [headBefore = '', headAfter = ''] = t('context.aria', { percent: READING_SLOT })
     .split(READING_SLOT)
@@ -145,6 +175,61 @@ export function ContextMeter({ useProjection, t }: ContextMeterProps) {
                 </div>
               ))}
             </dl>
+          )}
+          {memory !== undefined && (
+            <div className={css.section}>
+              <div className={css.row}>
+                <span className={css.rowLabel}>{t('context.memory')}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={memory.enabled}
+                  aria-label={t('context.memory.toggle')}
+                  className={memory.enabled ? css.toggleOn : css.toggle}
+                  disabled={writing || setMemoryConfig === undefined}
+                  onClick={() => { write({ enabled: !memory.enabled }) }}
+                />
+              </div>
+              <div className={css.row}>
+                <label className={css.rowLabel} htmlFor="context-memory-threshold">
+                  {t('context.memory.threshold')}
+                </label>
+                <input
+                  id="context-memory-threshold"
+                  className={css.thresholdInput}
+                  type="number"
+                  min={1}
+                  step={1000}
+                  disabled={writing || setMemoryConfig === undefined || !memory.enabled}
+                  placeholder={t('context.memory.default')}
+                  value={draft ?? (memory.operatingWindowTokens === null ? '' : String(memory.operatingWindowTokens))}
+                  onChange={(e) => { setDraft(e.target.value) }}
+                  onBlur={commitThreshold}
+                  onKeyDown={(e) => { if (e.key === 'Enter') commitThreshold() }}
+                />
+              </div>
+              <div className={css.chips}>
+                {PRESETS.map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={memory.operatingWindowTokens === preset ? css.chipActive : css.chip}
+                    disabled={writing || setMemoryConfig === undefined || !memory.enabled}
+                    onClick={() => { write({ operatingWindowTokens: preset }) }}
+                  >
+                    {`${preset / 1000}k`}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={memory.operatingWindowTokens === null ? css.chipActive : css.chip}
+                  disabled={writing || setMemoryConfig === undefined || !memory.enabled}
+                  onClick={() => { write({ operatingWindowTokens: null }) }}
+                >
+                  {t('context.memory.default')}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

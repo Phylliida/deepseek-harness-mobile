@@ -333,6 +333,22 @@ export interface SessionsApi {
   Promise<RpcResponse<{ title: string; seq: number }>>
 
   /**
+   * Sets this session's memory settings: appends a `compaction/config` event,
+   * latest-wins, which the compaction backend reads on its next pass. An absent
+   * field leaves that setting as it was, so one call may move either knob
+   * alone; a null `operatingWindowTokens` clears the window override back to
+   * the backend's configured default. The event's seq returns so the caller
+   * can settle its projection cell without waiting for the push frame.
+   * Session-backed subagents reject with `agent-busy`.
+   */
+  setCompactionConfig(request: RpcRequest<{
+    sessionId: SessionId
+    enabled?: boolean
+    operatingWindowTokens?: number | null
+  }>):
+  Promise<RpcResponse<{ seq: number }>>
+
+  /**
    * Sends a message. content is core's ContentBlock[] verbatim; mode maps 1:1 — queue→send, steer→steer.
    * A prompt whose content is exactly one text block starting with '/' is a slash command: the host
    * executes it through the command registry (mode-agnostic) and it is never sent to the model. A

@@ -306,6 +306,29 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 ### `compaction/*`
 
+<a id="compactionconfig--log-only"></a>
+
+#### `compaction/config` — log-only
+
+```ts persistence-catalog
+/**
+ * Per-session compaction settings, latest-wins — log-only, no surfaceOp.
+ * Written by the host when the user changes a session's memory settings; a
+ * backend that honors it reads the newest event. `enabled: false` pauses
+ * folding and memory formation together; `operatingWindowTokens` overrides
+ * the backend's configured operating window — the surface estimate at
+ * which folding pressure starts — and `null` clears a previous override.
+ * An absent field leaves that setting as it was, so one write may change
+ * either knob alone.
+ */
+'compaction/config': {
+  enabled?: boolean
+  operatingWindowTokens?: number | null
+}
+```
+
+来源：[`packages/compaction/compaction/src/types.ts:84`](../packages/compaction/compaction/src/types.ts)
+
 <a id="compactionend--log-only"></a>
 
 #### `compaction/end` — log-only

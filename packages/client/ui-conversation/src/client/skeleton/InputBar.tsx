@@ -45,7 +45,7 @@ export type InputBarProps = ComposerBarProps
 
 export function InputBar({
   useSession, useInput, inputActions, keyboard, addImages, removeImage, draftImages,
-  resolveSubmitMode, toggleCommandMenu, stop, command, t,
+  resolveSubmitMode, toggleCommandMenu, stop, setMemoryConfig, command, t,
   renderSlot, useNotices, useLexicon, useMenuLauncher,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
@@ -754,7 +754,7 @@ export function InputBar({
           <div className={css.trailing}>
             {rightItems}
             {renderSlot('conversation.input.model', { locked: modelSeatLocked })}
-            <ContextMeter useProjection={useProjection} t={t} />
+            <ContextMeter useProjection={useProjection} t={t} setMemoryConfig={setMemoryConfig} />
             {interruptible && (
               <Tooltip label={t('input.stop')} side="top" delayMs={500}>
                 <button

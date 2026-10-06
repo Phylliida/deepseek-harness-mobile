@@ -52,6 +52,14 @@ export interface IConversation {
    */
   cancel(): Promise<void>
   /**
+   * Write the scoped session's memory settings (folding on/off, folding
+   * threshold) as a latest-wins `compaction/config` log event.
+   * @param settings - either knob alone is a valid write; a null
+   *   `operatingWindowTokens` clears the override back to the backend default.
+   * @returns completion; failures reject as in send.
+   */
+  setMemoryConfig(settings: { enabled?: boolean; operatingWindowTokens?: number | null }): Promise<void>
+  /**
    * Pull one older history page for the scoped session.
    * @returns completion of the page pull.
    */
@@ -293,6 +301,17 @@ export class ConversationController extends Service implements IConversation {
     const session = this.scopedSession('cancel')
     const result = await session.cancel()
     if (!result.ok) throw new Error(`conversation.cancel failed: ${result.error.code}: ${result.error.message}`)
+  }
+
+  /**
+   * Write the scoped session's memory settings (folding on/off, folding
+   * threshold); the host logs the latest-wins `compaction/config` event and
+   * the projections push carries the folded state back to the panel.
+   */
+  async setMemoryConfig(settings: { enabled?: boolean; operatingWindowTokens?: number | null }): Promise<void> {
+    const session = this.scopedSession('setMemoryConfig')
+    const result = await session.setCompactionConfig(settings)
+    if (!result.ok) throw new Error(`conversation.setMemoryConfig failed: ${result.error.code}: ${result.error.message}`)
   }
 
   /** Pull one older history page for the scoped Session. */

@@ -155,4 +155,96 @@ describe('ContextMeter', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(view.container.querySelector('[role="dialog"]')).toBeNull()
   })
+
+  it('shows the session memory settings and writes each knob alone', async () => {
+    const writes: Array<{ enabled?: boolean; operatingWindowTokens?: number | null }> = []
+    const setMemoryConfig = (settings: { enabled?: boolean; operatingWindowTokens?: number | null }) => {
+      writes.push(settings)
+      return Promise.resolve()
+    }
+    const view = render(
+      <ContextMeter
+        useProjection={projections({
+          contextPressure: { pressureTokens: 32_000, contextWindow: 128_000 },
+          compactionConfig: { enabled: true, operatingWindowTokens: 64_000 },
+        })}
+        t={t}
+        setMemoryConfig={setMemoryConfig}
+      />,
+    )
+    fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
+    const panel = view.container.querySelector('[role="dialog"]')!
+    expect(panel.textContent).toContain('记忆与折叠')
+    expect(panel.textContent).toContain('折叠起始（tokens）')
+    // The override is the input's value and the 64k chip's active state.
+    expect((panel.querySelector('input') as HTMLInputElement).value).toBe('64000')
+    // The toggle moves the enabled knob alone.
+    fireEvent.click(view.getByRole('switch', { name: '开关记忆与折叠' }))
+    expect(writes).toEqual([{ enabled: false }])
+    // The in-flight lock holds the other controls until each write settles.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    // A preset chip moves the window knob alone; the default chip clears it.
+    fireEvent.click(view.getByRole('button', { name: '32k' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    fireEvent.click(view.getByRole('button', { name: '默认' }))
+    expect(writes).toEqual([
+      { enabled: false },
+      { operatingWindowTokens: 32_000 },
+      { operatingWindowTokens: null },
+    ])
+  })
+
+  it('commits a typed threshold on Enter and ignores a non-number', () => {
+    const writes: Array<{ enabled?: boolean; operatingWindowTokens?: number | null }> = []
+    const view = render(
+      <ContextMeter
+        useProjection={projections({
+          contextPressure: { pressureTokens: 32_000, contextWindow: 128_000 },
+          compactionConfig: { enabled: true, operatingWindowTokens: null },
+        })}
+        t={t}
+        setMemoryConfig={(settings) => {
+          writes.push(settings)
+          return Promise.resolve()
+        }}
+      />,
+    )
+    fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
+    const input = view.container.querySelector('input') as HTMLInputElement
+    // No override: the input is empty with the default placeholder.
+    expect(input.value).toBe('')
+    expect(input.placeholder).toBe('默认')
+    fireEvent.change(input, { target: { value: '96000' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(writes).toEqual([{ operatingWindowTokens: 96_000 }])
+    fireEvent.change(input, { target: { value: 'not-a-number' } })
+    fireEvent.blur(input)
+    expect(writes).toHaveLength(1)
+  })
+
+  it('shows no memory section while the compactionConfig projection is absent', () => {
+    const view = meter({ contextPressure: { pressureTokens: 32_000, contextWindow: 128_000 } })
+    fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
+    const panel = view.container.querySelector('[role="dialog"]')!
+    expect(panel.textContent).not.toContain('记忆与折叠')
+  })
+
+  it('disables the window controls while memory is paused', () => {
+    const view = render(
+      <ContextMeter
+        useProjection={projections({
+          contextPressure: { pressureTokens: 32_000, contextWindow: 128_000 },
+          compactionConfig: { enabled: false, operatingWindowTokens: 64_000 },
+        })}
+        t={t}
+        setMemoryConfig={() => Promise.resolve()}
+      />,
+    )
+    fireEvent.click(view.getByRole('button', { name: '上下文已用 25%' }))
+    const input = view.container.querySelector('input') as HTMLInputElement
+    expect(input.disabled).toBe(true)
+    expect((view.getByRole('button', { name: '32k' }) as HTMLButtonElement).disabled).toBe(true)
+    // The toggle itself stays live — it is how the pause lifts.
+    expect((view.getByRole('switch', { name: '开关记忆与折叠' }) as HTMLButtonElement).disabled).toBe(false)
+  })
 })

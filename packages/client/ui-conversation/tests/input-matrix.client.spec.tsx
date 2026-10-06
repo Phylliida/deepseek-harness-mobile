@@ -60,6 +60,7 @@ function mountBar(shell: SessionInputShell, over?: { running?: boolean; disabled
     useMenuLauncher: bindSnapshotSelector(createSnapshotStore<string | null>(null)),
     renderSlot: (() => null) as InputBarProps['renderSlot'],
     stop: vi.fn(),
+    setMemoryConfig: undefined,
     command: () => Promise.resolve(true),
     // Mirrors the real lookup chain (conversation namespace, then common).
     t: makeTranslate(zh, commonZh),

@@ -22,6 +22,9 @@
       "path": "../../llm/token-meter"
     },
     {
+      "path": "../../session/session-projection"
+    },
+    {
       "path": "../../core/session"
     },
     {

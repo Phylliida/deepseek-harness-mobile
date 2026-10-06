@@ -59,6 +59,8 @@ import {
 } from './api/session-search.ts'
 // Type-only: resolves `ctx.get('sessionProjections')` to the projection registry.
 import type {} from '@deepseek-ai/dsh-session-projection'
+// Type-only: puts `compaction/config` in the SessionEventMap the proxy appends into.
+import type {} from '@deepseek-ai/dsh-compaction/types'
 // Type-only: resolves `ctx.get('tasks')` to the background job registry.
 import type {} from '@deepseek-ai/dsh-jobs'
 import type { JobSnapshot } from '@deepseek-ai/dsh-jobs'
@@ -2400,6 +2402,27 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           return err(request, {
             code: 'internal',
             message: `failed to rename session "${sessionId}": ${String(error)}`,
+            details: {},
+          })
+        }
+      },
+
+      async setCompactionConfig(request) {
+        const { sessionId, enabled, operatingWindowTokens } = request.payload
+        const found = await agentFor(sessionId)
+        if ('error' in found) return err(request, found.error)
+        try {
+          // Log-only: the backend reads the newest event on its next pass, and
+          // the projection carries it to the GUI.
+          const event = found.agent.session.append('compaction/config', {
+            ...(enabled !== undefined ? { enabled } : {}),
+            ...(operatingWindowTokens !== undefined ? { operatingWindowTokens } : {}),
+          })
+          return ok(request, { seq: event.seq })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'internal',
+            message: `failed to set memory settings for session "${sessionId}": ${String(error)}`,
             details: {},
           })
         }

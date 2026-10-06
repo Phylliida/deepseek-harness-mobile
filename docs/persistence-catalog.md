@@ -304,6 +304,29 @@ Source: [`packages/interaction/commands/src/types.ts:88`](../packages/interactio
 
 ### `compaction/*`
 
+<a id="compactionconfig--log-only"></a>
+
+#### `compaction/config` — log-only
+
+```ts persistence-catalog
+/**
+ * Per-session compaction settings, latest-wins — log-only, no surfaceOp.
+ * Written by the host when the user changes a session's memory settings; a
+ * backend that honors it reads the newest event. `enabled: false` pauses
+ * folding and memory formation together; `operatingWindowTokens` overrides
+ * the backend's configured operating window — the surface estimate at
+ * which folding pressure starts — and `null` clears a previous override.
+ * An absent field leaves that setting as it was, so one write may change
+ * either knob alone.
+ */
+'compaction/config': {
+  enabled?: boolean
+  operatingWindowTokens?: number | null
+}
+```
+
+Source: [`packages/compaction/compaction/src/types.ts:84`](../packages/compaction/compaction/src/types.ts)
+
 <a id="compactionend--log-only"></a>
 
 #### `compaction/end` — log-only
@@ -316,7 +339,7 @@ Source: [`packages/interaction/commands/src/types.ts:88`](../packages/interactio
 'compaction/end': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null; error?: string }
 ```
 
-Source: [`packages/compaction/compaction/src/types.ts:71`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:73`](../packages/compaction/compaction/src/types.ts)
 
 <a id="compactionprune--log-only"></a>
 
@@ -342,7 +365,7 @@ Source: [`packages/compaction/compaction/src/types.ts:71`](../packages/compactio
 }
 ```
 
-Source: [`packages/compaction/compaction/src/types.ts:81`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:97`](../packages/compaction/compaction/src/types.ts)
 
 <a id="compactionstart--log-only"></a>
 
@@ -357,7 +380,7 @@ Source: [`packages/compaction/compaction/src/types.ts:81`](../packages/compactio
 'compaction/start': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null }
 ```
 
-Source: [`packages/compaction/compaction/src/types.ts:23`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:25`](../packages/compaction/compaction/src/types.ts)
 
 <a id="compactionsummary--log-only"></a>
 
@@ -411,7 +434,7 @@ Source: [`packages/compaction/compaction/src/types.ts:23`](../packages/compactio
 
 Types: [ContentBlock](subsystems/core.md) · [TokenUsage](subsystems/llm-streaming.md)
 
-Source: [`packages/compaction/compaction/src/types.ts:33`](../packages/compaction/compaction/src/types.ts)
+Source: [`packages/compaction/compaction/src/types.ts:35`](../packages/compaction/compaction/src/types.ts)
 
 ### `feedback/*`
 
