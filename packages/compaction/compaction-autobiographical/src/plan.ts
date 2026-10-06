@@ -241,11 +241,26 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
     if (position !== undefined) claim.claimed.push(position)
   }
 
+  // A claim whose ground a landed fold node already stands for — with ground
+  // the claim does not own besides — belongs to a recollection an ancestor's
+  // fold has replaced: the pyramid only merges upward, so a node covering the
+  // claim's keys plus more is a parent's node, and folding the child again
+  // would shadow that ground a second time. The test reads the surface alone,
+  // never a pyramid pointer, because the landed node is itself the proof the
+  // ground is spoken for; equality is kept out so a claim whose own node landed
+  // still reaches the settled check in `land()`.
+  const foldedGround = surface
+    .filter(node => node.foldId !== undefined)
+    .map(node => new Set(node.coverage))
+  const represented = (claim: { keys: ReadonlySet<number> }): boolean =>
+    foldedGround.some(ground =>
+      ground.size > claim.keys.size && [...claim.keys].every(seq => ground.has(seq)))
+
   // Every claim before any widening, because the walk asks who a node already
   // belongs to. Position order settles a contested node: the op that reaches it
   // first owns it, which is also the order the ops are returned in.
   const ordered = [...claims.values()]
-    .filter(claim => claim.claimed.length > 0)
+    .filter(claim => claim.claimed.length > 0 && !represented(claim))
     .sort((left, right) => Math.min(...left.claimed) - Math.min(...right.claimed))
     .map(claim => new PlannedOp(claim, surface, Math.min(...claim.claimed), Math.max(...claim.claimed)))
 

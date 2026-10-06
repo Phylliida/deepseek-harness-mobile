@@ -211,12 +211,16 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         return next()
       })
     }
-    // Dropping the runtime is the whole of disposal. `ContextManager.close()`
-    // calls the store's `close` only when the manager opened it itself, and this
-    // backend always hands its own store in, so there is nothing to close — and
-    // the map entry is the only thing holding the seeded store alive.
-    ctx.on('agent/disposed', ({ agent }) => {
-      this.runtimes.delete(agent.session.id)
+    // The runtime mirrors the session's log, so its lifetime is the session's:
+    // an agent disposal must not drop it, because agents turn over inside a
+    // session while the picker's state — resolutions, receipts, calibration —
+    // lives only in the runtime's memory, and a rebuild re-decides it all from
+    // scratch. Dropping the map entry is the whole of disposal either way:
+    // `ContextManager.close()` calls the store's `close` only when the manager
+    // opened the store itself, and this backend always hands its own store in,
+    // so there is nothing to close.
+    ctx.on('session/disposed', (session) => {
+      this.runtimes.delete(session.id)
     })
     ctx.effect(() => () => { this.runtimes.clear() }, 'compaction-autobiographical.disposal')
 

@@ -170,9 +170,8 @@ describe('automatic folding at a step boundary', () => {
 })
 
 describe('runtime lifetime', () => {
-  it('drops the runtime it opened when the agent is disposed', async () => {
+  it('drops the runtime it opened when the session is disposed', async () => {
     const { engine, agent } = build(30, 'engine-dispose')
-    const agent1 = asAgent(agent.session, agent.options)
 
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     // The session can only be released once its runtime exists, and opening is
@@ -180,7 +179,7 @@ describe('runtime lifetime', () => {
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     expect(runtimes(engine).size).toBe(1)
 
-    agentEvents(contextOf(engine), agent1).emit('agent/disposed', {})
+    contextOf(engine).emit('session/disposed', agent.session as never)
     await vi.waitFor(() => { expect(runtimes(engine).size).toBe(0) })
 
     // A later pass re-seeds from the log rather than reusing what disposal took

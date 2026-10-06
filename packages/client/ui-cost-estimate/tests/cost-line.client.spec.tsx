@@ -2,7 +2,7 @@
 // CostLine (composer dock lead line): projection gating, rate-driven
 // estimate display, budget-share readout, Kimi quota segment, and per-locale copy.
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
@@ -14,7 +14,19 @@ import {
 } from '../src/cost-settings.ts'
 import { en, zh } from '../src/client/locales.ts'
 
-afterEach(cleanup)
+// The inline quota readout reads the clock at render, so every quota assertion
+// runs against the fixtures' base instant.
+const NOW = new Date('2026-08-24T19:00:00.000Z')
+
+beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(NOW)
+})
+
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 // Mirrors the real lookup chain (cost namespace, then common).
 const t = makeTranslate(zh, commonZh) as CostLineProps['t']
@@ -119,26 +131,27 @@ describe('CostLine', () => {
   it('keeps the quota segment when the budget share is disabled', () => {
     const settings = { rates: DEFAULT_COST_RATES, weeklyBudgetUsd: 0 }
     expect(line({ tokenUsage: USAGE }, settings, tEn, QUOTA).container.textContent)
-      .toBe('est. cost ~$5.10 · 5h 21% · wk 32% · mo 12/300')
+      .toBe('est. cost ~$5.10 · 5h 21% 3h · wk 32% 6d2h · mo 12/300')
   })
 
   it('appends the quota segment after the estimate when the Remote reports one', () => {
     expect(line({ tokenUsage: USAGE }, DEFAULT_SETTINGS, t, QUOTA).container.textContent)
-      .toBe('预估费用 ~$5.10 (4.3%) · 5小时 21% · 每周 32% · 每月 12/300')
+      .toBe('预估费用 ~$5.10 (4.3%) · 5小时 21% 3h · 每周 32% 6d2h · 每月 12/300')
     expect(line({ tokenUsage: USAGE }, DEFAULT_SETTINGS, tEn, QUOTA).container.textContent)
-      .toBe('est. cost ~$5.10 (4.3%) · 5h 21% · wk 32% · mo 12/300')
+      .toBe('est. cost ~$5.10 (4.3%) · 5h 21% 3h · wk 32% 6d2h · mo 12/300')
   })
 
   it('shows the quota segment alone before the session bills any tokens', () => {
-    expect(line({}, DEFAULT_SETTINGS, tEn, QUOTA).container.textContent).toBe('5h 21% · wk 32% · mo 12/300')
+    expect(line({}, DEFAULT_SETTINGS, tEn, QUOTA).container.textContent)
+      .toBe('5h 21% 3h · wk 32% 6d2h · mo 12/300')
     expect(line({
       tokenUsage: { uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0 },
-    }, DEFAULT_SETTINGS, t, QUOTA).container.textContent).toBe('5小时 21% · 每周 32% · 每月 12/300')
+    }, DEFAULT_SETTINGS, t, QUOTA).container.textContent).toBe('5小时 21% 3h · 每周 32% 6d2h · 每月 12/300')
   })
 
   it('hides absent allowance rows without disturbing the present ones', () => {
     const windowsOnly: KimiQuotaSnapshot = { ...QUOTA, weekly: null, monthly: null }
     expect(line({ tokenUsage: USAGE }, DEFAULT_SETTINGS, tEn, windowsOnly).container.textContent)
-      .toBe('est. cost ~$5.10 (4.3%) · 5h 21%')
+      .toBe('est. cost ~$5.10 (4.3%) · 5h 21% 3h')
   })
 })

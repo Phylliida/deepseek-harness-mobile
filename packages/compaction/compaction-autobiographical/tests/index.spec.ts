@@ -772,15 +772,29 @@ describe('disposal', () => {
     await engine.compactNow(agent, new AbortController().signal)
     expect(runtimes(engine).size).toBe(1)
 
-    contextOf(engine).emit('agent/disposed', { agent, session } as never)
+    contextOf(engine).emit('session/disposed', session as never)
     await settled()
     expect(runtimes(engine).size).toBe(0)
 
     // Disposing a session that never opened one is a no-op rather than a throw:
     // the log-only paths reach the engine too.
-    contextOf(engine).emit('agent/disposed', { agent, session } as never)
+    contextOf(engine).emit('session/disposed', session as never)
     await settled()
     expect(runtimes(engine).size).toBe(0)
+  })
+
+  it('keeps the runtime when an agent is disposed', async () => {
+    const { engine, agent, session } = build(30, 'index-agent-disposed')
+    await engine.compactNow(agent, new AbortController().signal)
+    const runtime = runtimes(engine).get(session.id)
+
+    // Agents turn over inside a session, and the picker's state — resolutions,
+    // receipts, calibration — lives only in the runtime's memory. Dropping it
+    // here would make the next pass re-decide every resolution from scratch.
+    contextOf(engine).emit('agent/disposed', { agent, session } as never)
+    await settled()
+
+    expect(runtimes(engine).get(session.id)).toBe(runtime)
   })
 
   it('keeps a runtime a disposal left behind when an abandoned open then fails', async () => {
@@ -798,7 +812,7 @@ describe('disposal', () => {
     for (let i = 0; i < 50 && open.mock.calls.length < 1; i += 1) await settled()
     expect(open.mock.calls.length).toBe(1)
 
-    contextOf(engine).emit('agent/disposed', { agent, session } as never)
+    contextOf(engine).emit('session/disposed', session as never)
     await settled()
 
     // The session carries on without the runtime the disposal dropped, so a pass
@@ -827,7 +841,7 @@ describe('disposal', () => {
     await engine.compactNow(agent, new AbortController().signal)
     const folded = session.surface.nodes.length
 
-    contextOf(engine).emit('agent/disposed', { agent, session } as never)
+    contextOf(engine).emit('session/disposed', session as never)
     await settled()
     await engine.compactNow(agent, new AbortController().signal)
 

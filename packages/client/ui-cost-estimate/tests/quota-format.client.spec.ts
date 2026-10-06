@@ -36,14 +36,35 @@ describe('formatWindowLabel', () => {
 })
 
 describe('formatQuotaSegments', () => {
-  it('joins windows, weekly, and monthly rows', () => {
-    expect(formatQuotaSegments(SNAPSHOT, tEn)).toBe('5h 21% · wk 32% · mo 40/300')
-    expect(formatQuotaSegments(SNAPSHOT, t)).toBe('5小时 21% · 每周 32% · 每月 40/300')
+  it('joins windows, weekly, and monthly rows, each with its time remaining', () => {
+    expect(formatQuotaSegments(SNAPSHOT, tEn, NOW)).toBe('5h 21% 2h30m · wk 32% 6d2h · mo 40/300')
+    expect(formatQuotaSegments(SNAPSHOT, t, NOW)).toBe('5小时 21% 2h30m · 每周 32% 6d2h · 每月 40/300')
   })
 
   it('skips absent rows and empties out on a bare snapshot', () => {
-    expect(formatQuotaSegments({ ...SNAPSHOT, monthly: null }, tEn)).toBe('5h 21% · wk 32%')
-    expect(formatQuotaSegments({ fetchedAt: SNAPSHOT.fetchedAt, windows: [], weekly: null, monthly: null }, tEn)).toBe('')
+    expect(formatQuotaSegments({ ...SNAPSHOT, monthly: null }, tEn, NOW)).toBe('5h 21% 2h30m · wk 32% 6d2h')
+    expect(formatQuotaSegments(
+      { fetchedAt: SNAPSHOT.fetchedAt, windows: [], weekly: null, monthly: null }, tEn, NOW)).toBe('')
+  })
+
+  it('drops the time remaining on an elapsed or unreadable reset instant', () => {
+    const snapshot: KimiQuotaSnapshot = {
+      ...SNAPSHOT,
+      windows: [{ windowMinutes: 300, used: 21, limit: 100, resetAt: '2026-08-24T18:00:00.000Z' }],
+      weekly: { used: 32, limit: 100, resetAt: 'not a date' },
+      monthly: null,
+    }
+    expect(formatQuotaSegments(snapshot, tEn, NOW)).toBe('5h 21% · wk 32%')
+  })
+
+  it('reads a sub-minute gap as one minute', () => {
+    const snapshot: KimiQuotaSnapshot = {
+      ...SNAPSHOT,
+      windows: [{ windowMinutes: 300, used: 21, limit: 100, resetAt: '2026-08-24T19:00:30.000Z' }],
+      weekly: null,
+      monthly: null,
+    }
+    expect(formatQuotaSegments(snapshot, tEn, NOW)).toBe('5h 21% 1m')
   })
 })
 

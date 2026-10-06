@@ -106,6 +106,11 @@ function parallelRound(live: Session, ids: readonly string[], step = 1): { call:
  * writes, so the fixture cannot drift from what the engine produces.
  */
 function foldNode(live: Session, id: string, sources: number[]): SessionEvent {
+  // start/end are surface positions, not log seqs: a landed fold node's seq is
+  // newer than the ground it stands in front of, so min/max over the seqs
+  // alone inverts the range once a fold replaces another fold.
+  const nodes = live.surface.nodes
+  const positions = sources.map(seq => nodes.indexOf(seq)).filter(at => at >= 0)
   return live.append('assistant/message', {
     turn: 0,
     step: 0,
@@ -113,7 +118,7 @@ function foldNode(live: Session, id: string, sources: number[]): SessionEvent {
       content: [{ type: 'text', text: `[Recall ${id}]\n\ncontent of ${id}` }],
       source: { ...ROUTE, compactionId: `autobio:${id}` },
     }),
-  }, { surfaceOp: { op: 'replace', start: Math.min(...sources), end: Math.max(...sources) }, sourceEventSeqs: sources })
+  }, { surfaceOp: { op: 'replace', start: nodes[Math.min(...positions)]!, end: nodes[Math.max(...positions)]! }, sourceEventSeqs: sources })
 }
 
 /** A store seeded from the log, as the engine's open path builds it. */
@@ -406,6 +411,88 @@ describe('planFolds', () => {
       seqOf,
       summaries: [summary('L1-0', 1)],
       ranges: new Map([...known, ['L1-0', span(ask, answer)]]),
+    })
+
+    expect(ops).toEqual([])
+  })
+
+  it('stops folding a recollection once a landed parent stands for its ground', () => {
+    const live = started('plan-parent-landed')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const reply = userEvent(live, 'reply')
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
+
+    // The reported cycle: the child landed, then the parent landed over the
+    // child's node and the reply. The surface's one node now stands for the
+    // child's ground plus more, so neither level has anything left to fold —
+    // and a claim for the child is dropped rather than folded a second time.
+    const child = foldNode(live, 'L1-0', [ask, answer])
+    foldNode(live, 'L2-6', [child.seq, reply])
+    const ops = plan(live, {
+      store,
+      seqOf,
+      resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1], [ids[2]!, 2]]),
+      summaries: [summary('L1-0', 1, { parentId: 'L2-6' }), summary('L2-6', 2)],
+      ranges: new Map([['L1-0', span(ask, answer)], ['L2-6', span(ask, reply)]]),
+    })
+
+    expect(ops).toEqual([])
+  })
+
+  it('stops at the top of a chain of landed ancestors', () => {
+    const live = started('plan-chain-landed')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const reply = userEvent(live, 'reply')
+    const more = textEvent(live, 'more')
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
+
+    // L1-0 landed, L2-6 landed over it and the reply, L3-43 landed over both
+    // and the last message. No pyramid pointer is read to settle this: the top
+    // node stands for every level's ground, and that is the whole answer.
+    const child = foldNode(live, 'L1-0', [ask, answer])
+    const parent = foldNode(live, 'L2-6', [child.seq, reply])
+    foldNode(live, 'L3-43', [parent.seq, more])
+    const ops = plan(live, {
+      store,
+      seqOf,
+      resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1], [ids[2]!, 2], [ids[3]!, 3]]),
+      summaries: [
+        summary('L1-0', 1, { parentId: 'L2-6' }),
+        summary('L2-6', 2, { parentId: 'L3-43' }),
+        summary('L3-43', 3),
+      ],
+      ranges: new Map([
+        ['L1-0', span(ask, answer)],
+        ['L2-6', span(ask, reply)],
+        ['L3-43', span(ask, more)],
+      ]),
+    })
+
+    expect(ops).toEqual([])
+  })
+
+  it('drops a claim whose ground a landed parent already replaced, though it never landed itself', () => {
+    const live = started('plan-parent-only')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const reply = userEvent(live, 'reply')
+    const { store, seqOf } = seeded(live)
+    const ids = mirrored(store)
+
+    // L1-0 never landed; L2-6 folded the raw span directly. The child's claim
+    // would shadow ground the parent's node already replaced, so it is dropped
+    // where the claims are built rather than reaching the surface.
+    foldNode(live, 'L2-6', [ask, answer, reply])
+    const ops = plan(live, {
+      store,
+      seqOf,
+      resolutions: new Map([[ids[0]!, 1], [ids[1]!, 1], [ids[2]!, 2]]),
+      summaries: [summary('L1-0', 1, { parentId: 'L2-6' }), summary('L2-6', 2)],
+      ranges: new Map([['L1-0', span(ask, answer)], ['L2-6', span(ask, reply)]]),
     })
 
     expect(ops).toEqual([])
