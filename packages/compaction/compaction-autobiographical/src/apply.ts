@@ -38,30 +38,40 @@ import type { FoldOp } from './plan.ts'
  * span each op declares, and the content it would carry, since the log accepts
  * lossless JSON only and this backend replays captured reasoning verbatim.
  *
+ * A span is read the way the session reads it: both ends are live surface nodes,
+ * and the op's citations cover every node between them. Citations are not
+ * required to be live themselves — an op that takes a landed fold node cites the
+ * ground under it too, which that node replaced and which is no longer a surface
+ * node of its own, and a fold a merge produced is exactly that case.
+ *
  * Spans must also be pairwise disjoint: a node two ops both replace is a node
  * whose replacement the second op can no longer name, and the surface protocol
  * refuses the range rather than land a second node for one position.
  *
  * @param session - the live session the ops would land in.
  * @param ops - the folds to land, in the order they would land.
- * @throws {@link DivergenceError} when an op's surface span is not on the live
- *   surface, when two ops overlap, or when an op's content is not storable.
+ * @throws {@link DivergenceError} when an op's span does not name two live
+ *   surface nodes in order, when an op leaves a node it spans uncited, when two
+ *   ops overlap, or when an op's content is not storable.
  */
 export function assertFoldOpsApply(session: Session, ops: readonly FoldOp[]): void {
-  const live = new Set(session.surface.nodes)
+  const nodes = session.surface.nodes
   for (const op of ops) {
     // The span is a surface-POSITION range, so a fold node carrying a late
     // replacement seq sits inside it: membership, not seq ordering, is what the
     // session resolves a replacement against.
-    const span = op.coveredNodes.filter(seq => live.has(seq))
-    if (span.length !== op.coveredNodes.length) {
+    const start = nodes.indexOf(op.startSeq)
+    const end = nodes.indexOf(op.endSeq)
+    if (start === -1 || end === -1 || start > end) {
       throw new DivergenceError(
-        `fold for ${op.summaryId} names a node the surface does not hold: ${op.coveredNodes.filter(seq => !live.has(seq)).join(', ')}`,
+        `fold for ${op.summaryId} spans ${op.startSeq}..${op.endSeq}, which the surface does not hold`,
       )
     }
-    if (op.coveredNodes[0] !== op.startSeq || op.coveredNodes.at(-1) !== op.endSeq) {
+    const cited = new Set(op.coveredNodes)
+    const uncited = nodes.slice(start, end + 1).filter(seq => !cited.has(seq))
+    if (uncited.length > 0) {
       throw new DivergenceError(
-        `fold for ${op.summaryId} spans ${op.startSeq}..${op.endSeq} but covers ${String(op.coveredNodes[0])}..${String(op.coveredNodes.at(-1))}`,
+        `fold for ${op.summaryId} does not cite the nodes it spans: ${uncited.join(', ')}`,
       )
     }
     if (!isJsonValue(foldBlocks(op.summary))) {

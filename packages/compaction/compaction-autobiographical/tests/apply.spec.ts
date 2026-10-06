@@ -106,6 +106,33 @@ describe('applyFold', () => {
     expect(node?.type === 'assistant/message' && node.data.turn).toBe(0)
   })
 
+  it('lands a fold that takes a landed fold node along with the ground under it', () => {
+    const { session, ask, answer } = live()
+    applyFold(session, op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask, answer] }), null, 0, ROUTE)
+    const landed = session.surface.nodes.at(-1) as number
+    const tail = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'more' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+
+    // A merge leaves the higher recollection standing over ground a lower fold
+    // already replaced, so its op cites that ground beside the nodes it takes.
+    // The session requires a replacement to cite the nodes it spans rather than
+    // to cite nothing else, so an op of this form is landable and a preflight
+    // that demanded every citation be a live surface node would refuse it.
+    const result = applyFold(session, op({
+      summaryId: 'L2-1',
+      level: 2,
+      startSeq: landed,
+      endSeq: tail,
+      shadowedSeqs: [landed, tail],
+      coveredNodes: [landed, ask, answer, tail],
+    }), null, 0, ROUTE)
+
+    expect(result.compactionId).toBe('autobio:L2-1')
+    expect(session.surface.nodes).toEqual([session.events.at(-2)?.seq])
+  })
+
   // Everything below is refused before the first bracket event reaches the log.
   // The session would refuse these mid-bracket otherwise, and a refused replace
   // leaves a `compaction/start` no `compaction/end` ever closes: the compaction
@@ -121,14 +148,14 @@ describe('applyFold', () => {
     expect(session.events.filter(event => event.type.startsWith('compaction/'))).toEqual([])
   })
 
-  it('refuses a span that does not cover the nodes the op cites', () => {
+  it('refuses a span whose citations leave a node it spans uncited', () => {
     const { session, ask, answer } = live()
 
     // The session resolves a replacement's range positionally and refuses a range
-    // that names a node the op did not cite, so an op whose span and citations
-    // disagree is a plan that cannot land.
+    // that names a node the op did not cite, so an op whose citations miss one of
+    // the nodes it spans is a plan that cannot land.
     expect(() => applyFold(session, op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask], coveredNodes: [ask] }), null, 0, ROUTE))
-      .toThrow(/spans 0..1 but covers 0/)
+      .toThrow(/does not cite the nodes it spans: 1/)
     expect(session.events.filter(event => event.type.startsWith('compaction/'))).toEqual([])
   })
 

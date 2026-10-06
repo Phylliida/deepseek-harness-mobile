@@ -10,9 +10,11 @@
  */
 
 import { ContextManager } from '@animalabs/context-manager'
+import type { SummaryEntry } from '@animalabs/context-manager'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AutobiographicalCompactionEngine } from '../src/index.ts'
 import { build, contextOf, settle, transcript } from './harness.ts'
@@ -229,5 +231,117 @@ describe('calibration', () => {
     // A pass that appends nothing new finds no unreported usage, so the mark has
     // to survive the pass that fed it.
     expect(reported).toHaveBeenCalledTimes(1)
+  })
+})
+
+/** One merge-quarantine record, as the engine writes it when a run exhausts its attempts. */
+type QuarantineRecord = {
+  key: string
+  level: number
+  sourceIds: string[]
+  attempts: number
+  lastOutcome: string
+  lastStopReason?: string
+  quarantinedAt: number
+}
+
+/** The quarantine surface of a session's opened runtime, reached as `runtimes` is. */
+async function quarantineSurface(engine: AutobiographicalCompactionEngine, sessionId: string): Promise<{
+  getMergeQuarantineStatus(): { records: QuarantineRecord[] }
+  mergeQuarantine: Map<string, QuarantineRecord>
+  summaries: SummaryEntry[]
+  store: { getStateJson(id: string): { id: string }[] }
+}> {
+  const opened = await (engine as unknown as {
+    runtimes: Map<string, Promise<{
+      strategy: {
+        getMergeQuarantineStatus(): { records: QuarantineRecord[] }
+        mergeQuarantine: Map<string, QuarantineRecord>
+        summaries: SummaryEntry[]
+      }
+      store: { getStateJson(id: string): { id: string }[] }
+    }>>
+  }).runtimes.get(sessionId)
+  const { strategy, store } = opened!
+  // The surface is rebuilt rather than spread: both fields beside the method are
+  // what the spec reaches, and spreading an instance drops the prototype the
+  // method lives on.
+  return {
+    getMergeQuarantineStatus: () => strategy.getMergeQuarantineStatus(),
+    mergeQuarantine: strategy.mergeQuarantine,
+    summaries: strategy.summaries,
+    store,
+  }
+}
+
+describe('work a cancelled turn left behind', () => {
+  it('retries a run an aborted turn quarantined, and leaves a refusal quarantined', async () => {
+    const { engine, agent, session } = build(6, 'engine-quarantine')
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    const runtime = await quarantineSurface(engine, session.id)
+    // A quarantined record survives only while its sources exist unmerged: the
+    // engine's own sweep clears a record whose run it can no longer find, which
+    // would empty the map without the lift being what did it. Anchoring both
+    // records on one real, unmerged recollection is what makes them live debt.
+    const [first, last] = runtime.store.getStateJson('messages').map(message => message.id)
+    runtime.summaries.push({
+      id: 'L3-90',
+      level: 3,
+      content: 'content of L3-90',
+      tokens: 5,
+      created: 0,
+      sourceLevel: 2,
+      sourceIds: [first as string, last as string],
+      sourceRange: { first: first as string, last: last as string },
+    })
+    const record = (key: string, lastStopReason: string): QuarantineRecord => ({
+      key, level: 2, sourceIds: ['L3-90'], attempts: 5,
+      lastOutcome: lastStopReason === 'abort' ? 'unusable_empty' : 'refusal',
+      lastStopReason, quarantinedAt: 0,
+    })
+    runtime.mergeQuarantine.set('aborted', record('aborted', 'abort'))
+    runtime.mergeQuarantine.set('refused', record('refused', 'refusal'))
+    const keys = (): string[] => runtime.getMergeQuarantineStatus().records.map(entry => entry.key)
+
+    // A pass with no newer user message is the same conversation still running, so
+    // the run stays out of the queue instead of being retried on every step: the
+    // quarantine is the hold-off, and no pass lifts it by itself.
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    expect(keys()).toEqual(['aborted', 'refused'])
+
+    // The next user message is the chat resuming. An abort is the turn going away
+    // rather than an answer about that ground, so releasing it costs nothing but a
+    // retry; a refusal is the model's answer about the same ground, and retrying it
+    // would buy the same verdict.
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'carry on' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+
+    expect(keys()).toEqual(['refused'])
+  })
+
+  it('kicks no tick under the signal a step was cancelled with', async () => {
+    const { engine, agent, calls } = build(30, 'engine-cancelled-step', { auto: true })
+    const events = agentEvents(contextOf(engine), asAgent(agent.session, agent.options))
+    const step = (signal: AbortSignal): Promise<unknown> => events.waterfall(
+      'agent/pre-step',
+      { messages: [], turn: 30, step: 0, signal },
+      async () => ({ kind: 'enter' as const, messages: [] }),
+    )
+
+    // The pass runs either way; what a dead signal costs is the tick, whose calls
+    // would all abort on arrival while the engine counts every one of them as a
+    // rejection of the work it was retrying.
+    await step(AbortSignal.abort())
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(calls).toEqual([])
+
+    // The same step with a live signal is what proves the guard and not an empty
+    // queue kept the first one quiet.
+    await step(new AbortController().signal)
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(calls.length).toBeGreaterThan(0)
   })
 })

@@ -126,6 +126,11 @@ interface Runtime {
   recorded: number
   /** Seq of the newest event fed to calibration, so one usage is reported once. */
   calibrated: number
+  /**
+   * Seq of the newest user message this runtime has seen. A pass that finds a
+   * newer one is the chat resuming after a turn that may have been cancelled.
+   */
+  lastAsk: number
   /** Background work chain; a turn never awaits it. */
   tickChain: Promise<void>
 }
@@ -312,6 +317,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     this.syncSurface(runtime, session)
     this.syncToolDefinitions(runtime, session)
     this.feedCalibration(runtime, session)
+    this.releaseCancelledQuarantine(runtime, session)
 
     const reached = await compileFolds(runtime, budget, this.config.reserveTokens, (message) => { this.warn(message) })
 
@@ -322,7 +328,10 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // once at open. A refusal is not an exception to it: compressing is what
     // raises the floor the next compile finds, so a session over budget has to
     // keep forming memory or it stays over budget for good.
-    this.kickTick(runtime, session, pass.signal)
+    // A signal that is already dead is: a tick kicked under one spends its calls
+    // on instant aborts, and the engine counts every one of those as a rejection
+    // of the work being retried. The next live pass kicks its own tick.
+    if (pass.signal?.aborted !== true) this.kickTick(runtime, session, pass.signal)
     if (!reached) return null
 
     const { resolutions, summaries } = internals(runtime.strategy)
@@ -530,6 +539,30 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   }
 
   /**
+   * Lift the quarantine a cancelled turn caused, once the chat is live again.
+   *
+   * An aborted turn spends a merge's whole attempt budget on calls that were
+   * cancelled before they answered, and the engine then keeps that run out of its
+   * queue until something clears it: the span would stay unfolded for the life of
+   * the runtime. A refusal is the opposite case — the model did answer about that
+   * ground, so retrying buys the same verdict and the record stays where it is.
+   *
+   * The trigger is the newest user message rather than a clock, because that is
+   * the chat resuming; the clear re-enqueues the run, and the tick this pass kicks
+   * is what retries it.
+   */
+  private releaseCancelledQuarantine(runtime: Runtime, session: Session): void {
+    const asked = newestAsk(session)
+    if (asked === runtime.lastAsk) return
+    runtime.lastAsk = asked
+    for (const record of runtime.strategy.getMergeQuarantineStatus().records) {
+      // Both bridge failure routes record the same reason: a stream that ended in
+      // error and one that was aborted are one thing to a turn that went away.
+      if (record.lastStopReason === 'abort') runtime.strategy.clearMergeQuarantine(record.key)
+    }
+  }
+
+  /**
    * The compile budget, or nothing when the session has not routed a model yet.
    * The reserve is the breathing room below the operating window, and the library
    * subtracts it again inside its own arithmetic as the response allowance, so the
@@ -623,6 +656,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       declaredSystem: undefined,
       recorded,
       calibrated: 0,
+      lastAsk: newestAsk(agent.session),
       tickChain: Promise.resolve(),
     }
   }
@@ -777,6 +811,11 @@ function manualFailure(error: unknown): ManualCompactionError {
   return error instanceof DivergenceError
     ? new ManualCompactionError('changed', describe(error), { cause: error })
     : new ManualCompactionError('summary', describe(error), { cause: error })
+}
+
+/** The seq of the newest user message in the log, or zero when the session has none. */
+function newestAsk(session: Session): number {
+  return session.events.findLast(event => event.type === 'user/message')?.seq ?? 0
 }
 
 /** The newest assistant step that reported usage, and the seq it reported at. */
