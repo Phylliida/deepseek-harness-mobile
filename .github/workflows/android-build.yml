@@ -98,7 +98,7 @@ jobs:
           ls -lh "$APK"
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dsh-debug-apk
           path: ${{ steps.apk.outputs.path }}
