@@ -66,13 +66,44 @@ private releaseCancelledQuarantine(runtime: Runtime, session: Session): void {
 
 ## Known limits
 
-- **Chunk quarantine is untouched.** `getCompressionQuarantineStatus()` exposes only `{count, keys}`
-  (`:3306-3316`), so the wrapper cannot tell an abort-caused chunk record from a refusal-caused one;
-  clearing blindly would turn genuine refusals into a per-turn retry loop. Fixing it properly means an
-  abort-aware outcome in the engine (a dependency patch) rather than a wrapper predicate.
+- **Chunk quarantine is covered for transport failures only.** A tick that saw a `TRANSPORT`/`TIMEOUT`
+  call failure releases the quarantine keys it wrote (`src/index.ts:479`); the wrapper still cannot
+  read a record's reason, so the tell is the tick, not the record. A genuine refusal that shares a
+  tick with an unrelated transport failure is released once and re-quarantines on a healthy tick.
 - **A deterministic error that throws rather than finishes** still retries every tick. The engine's
   guard for it keys off `error.retryable === false` (`:4278-4283`), which DSH errors never carry —
   `HarnessError` has only a `code` (`packages/llm/llm/src/error.ts:16-23`). Pre-existing, unchanged.
+
+## Addendum: connection failures (2026-10-07)
+
+A mid-stream connection failure arrives as a `finish` chunk of kind `error` with code `TRANSPORT`
+(pi-ai classifies "Connection error." that way). Mapped to `stopReason: 'abort'` it read as a verdict:
+a chunk whose canonical call ended that way quarantined immediately, and one whose fallback rungs died
+on the connection quarantined on `provider_error` outcomes — both for the life of the runtime.
+
+Two wrapper-side changes close it:
+
+**1. The bridge throws a transient finish instead of reporting it** — `src/bridge.ts:239`. An `error`
+finish carrying a `TRANSPORT` or `TIMEOUT` failure fires the terminal `onText` tap as before, then
+throws an `LlmError`. The engine's transient path takes it: the work stays queued and the next pass's
+tick retries, one attempt per pass, forever. An `aborted` finish keeps the `abort` stop reason — the
+cancelled-turn release above is keyed on it.
+
+**2. A tick that saw a transport failure lifts the quarantine it wrote** — `src/index.ts:479`. The
+fallback ladder catches a thrown call per rung (`autobiographical.ts:6042,6152,6236`) rather than
+letting it escape, so a genuine verdict plus a dead connection in one tick still exhausts into
+quarantine. The tick snapshots `getCompressionQuarantineStatus().keys` before it runs; after it
+settles, any new key from a tick whose `onText` tap reported a transient failure is cleared through
+`clearCompressionRefusalQuarantine`. The record names no reason the wrapper can read, so the tick is
+the tell: a refusal sharing the tick is released once, retries, and re-quarantines on a healthy tick —
+the price of keeping a connection failure from retiring a span for good. Quarantines from before the
+fix are not retroactively cleared.
+
+Verified: `npx vitest run packages/compaction/compaction-autobiographical` — 233 passing (four new:
+the throw, the terminal tap under it, the lift with its refusal control, and a down-then-healed
+session folding without intervention); `tsc -b` and oxlint clean on the changed files.
+
+## Deferred
 
 ## Verification
 

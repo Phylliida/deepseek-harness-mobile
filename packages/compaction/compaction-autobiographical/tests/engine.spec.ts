@@ -15,6 +15,7 @@ import { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AutobiographicalCompactionEngine } from '../src/index.ts'
 import { build, contextOf, settle, transcript } from './harness.ts'
@@ -342,5 +343,104 @@ describe('work a cancelled turn left behind', () => {
     await step(new AbortController().signal)
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(calls.length).toBeGreaterThan(0)
+  })
+})
+
+describe('memory formation on a dead transport', () => {
+  /** Wait out the tick chain the last pass kicked. */
+  async function ticks(engine: AutobiographicalCompactionEngine, sessionId: string): Promise<void> {
+    const opened = await runtimes(engine).get(sessionId)
+    await (opened as { tickChain: Promise<void> }).tickChain
+  }
+
+  /** The chunk-quarantine count of a session's open runtime. */
+  async function chunkQuarantine(engine: AutobiographicalCompactionEngine, sessionId: string): Promise<number> {
+    const opened = await runtimes(engine).get(sessionId)
+    return (opened as {
+      strategy: { getCompressionQuarantineStatus(): { count: number } }
+    }).strategy.getCompressionQuarantineStatus().count
+  }
+
+  it('never quarantines on a transport failure, and folds once the connection is back', async () => {
+    let healthy = false
+    const { engine, agent, session } = build(30, 'engine-transport-down', {}, undefined, {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        void options
+        if (!healthy) {
+          yield { type: 'finish', reason: { kind: 'error', failure: { code: 'TRANSPORT', message: 'connection refused' } } }
+          return
+        }
+        const text = 'memory: the agent asked and was answered.'
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+        yield { type: 'usage', usage: { inputTokens: 100, outputTokens: 20 } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    })
+
+    // While the transport is down the bridge throws, the tick rejects, and the
+    // chunk stays queued: no pass spends an attempt budget against it and
+    // nothing is quarantined.
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await ticks(engine, session.id)
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await ticks(engine, session.id)
+    expect(await chunkQuarantine(engine, session.id)).toBe(0)
+
+    // The connection's return is the retry: the queued span compresses and the
+    // fold lands without anything having been cleared by hand.
+    healthy = true
+    const { result } = await settle(engine, agent)
+    expect(result?.compactionId).toMatch(/^autobio:L1-/)
+    expect(await chunkQuarantine(engine, session.id)).toBe(0)
+  })
+
+  it('lifts a quarantine written when a fallback rung died mid-tick on transport', async () => {
+    const calls: GenerateOptions[] = []
+    const { engine, agent, session } = build(30, 'engine-transport-ladder', {
+      // The source-only rung gives the fallback ladder a second call to die on;
+      // with no recall frontier the curve-variant rungs plan empty.
+      strategy: { recentWindowTokens: 0, compressionSourceOnlyFallback: true },
+    }, undefined, {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        calls.push(options)
+        // The canonical call's abort is a verdict-shaped stop, so the library
+        // climbs its fallback ladder; the rung after it dies on the connection.
+        yield {
+          type: 'finish',
+          reason: calls.length === 1
+            ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'the turn went away' } }
+            : { kind: 'error', failure: { code: 'TRANSPORT', message: 'connection refused' } },
+        }
+      },
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await ticks(engine, session.id)
+
+    // The ladder's own bookkeeping would have retired the span — the rung scored
+    // a provider error and the budget ran out — but the tick that wrote the
+    // quarantine also saw the transport failure, so the record is lifted and the
+    // span retries on the next pass.
+    expect(warn.mock.calls.some(([line]) => String(line).includes('released a chunk quarantine'))).toBe(true)
+    expect(await chunkQuarantine(engine, session.id)).toBe(0)
+  })
+
+  it('keeps a quarantine the model\'s own verdicts earned', async () => {
+    const { engine, agent, session } = build(30, 'engine-abort-quarantine', {}, undefined, {
+      async *stream(): AsyncIterable<StreamChunk> {
+        yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'the turn went away' } } }
+      },
+    })
+
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await ticks(engine, session.id)
+
+    // Same ladder, same exhaustion, but the tick saw no transport failure: the
+    // record stays. This is the control — it proves the fixture really drives a
+    // chunk to quarantine, so the zero above means the lift did it.
+    expect(await chunkQuarantine(engine, session.id)).toBe(1)
   })
 })

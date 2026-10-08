@@ -36,7 +36,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // node price comes from.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { applyFolds } from './apply.ts'
-import { createBridge } from './bridge.ts'
+import { createBridge, isTransientFailure } from './bridge.ts'
 import { resolveConfig } from './config.ts'
 import { DivergenceError, planFolds, priceSurfaceNode } from './plan.ts'
 import { compactionConfigProjectionDefinition } from './projection.ts'
@@ -113,6 +113,13 @@ interface Runtime {
    * kicked it has returned, so the signal has to outlive that pass.
    */
   cancellation: { signal: AbortSignal | undefined }
+  /**
+   * Whether the tick chain's current link saw a call fail on transport. The
+   * bridge sets it through the text tap; the chain resets it when a tick starts
+   * and reads it when the tick settles, both inside the chain, so one tick's
+   * failure is never attributed to the next tick's quarantine.
+   */
+  transport: { failed: boolean }
   /** The tool declaration set the strategy was last handed, by identity. */
   declaredTools: readonly ToolSchema[] | undefined
   /** The system prompt the strategy was last handed. */
@@ -437,15 +444,49 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // The session may have been disposed while the tick ran.
       if (this.runtimes.has(session.id)) this.appendMemory(runtime, session)
     }
-    runtime.tickChain = runtime.tickChain
-      .then(() => runtime.manager.tick())
-      .then(
-        () => { settle() },
-        (error: unknown) => {
-          settle()
-          this.warn(`memory formation failed: ${describe(error)}`)
-        },
-      )
+    // The chain itself never rejects: the next pass chains onto it, and a
+    // rejected link would silently drop every later tick.
+    runtime.tickChain = runtime.tickChain.then(async () => {
+      // Both reads happen inside the chain, which serializes ticks: the snapshot
+      // is this tick's own baseline, and a failure one tick saw is never
+      // attributed to the quarantine the next one wrote.
+      const quarantined = new Set(runtime.strategy.getCompressionQuarantineStatus().keys)
+      runtime.transport.failed = false
+      let failure: unknown
+      try {
+        await runtime.manager.tick()
+      } catch (error: unknown) {
+        failure = error
+      }
+      settle()
+      if (failure !== undefined) this.warn(`memory formation failed: ${describe(failure)}`)
+      await this.releaseTransportQuarantine(runtime, quarantined)
+    })
+  }
+
+  /**
+   * Lift a chunk quarantine the tick just wrote against a dead transport. The
+   * library's refusal ladder scores a thrown call as a `provider_error` outcome
+   * rather than letting it escape, so a chunk whose canonical call refused — or
+   * ended for any other reason — can still quarantine when every rung after it
+   * died on the connection. The record names no reason the wrapper can read, so
+   * the tell is the tick itself: a quarantine key that appeared during a tick in
+   * which a call failed on transport was written against a connection that could
+   * not answer, and releasing it costs a genuine refusal one extra ladder on the
+   * next pass — the price of keeping a connection failure from retiring a span
+   * for good.
+   */
+  private async releaseTransportQuarantine(runtime: Runtime, before: ReadonlySet<string>): Promise<void> {
+    if (!runtime.transport.failed) return
+    try {
+      for (const key of runtime.strategy.getCompressionQuarantineStatus().keys) {
+        if (before.has(key)) continue
+        await runtime.strategy.clearCompressionRefusalQuarantine(key)
+        this.warn('released a chunk quarantine written on a transport failure; the span retries on the next pass')
+      }
+    } catch (error: unknown) {
+      this.warn(`could not release a transport-written quarantine: ${describe(error)}`)
+    }
   }
 
   /**
@@ -621,6 +662,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     const recorded = attemptFromLog(agent.session)
     const progress: Runtime['progress'] = { attempt: recorded, active: false, buffer: '', usage: undefined }
     const cancellation: Runtime['cancellation'] = { signal: undefined }
+    const transport: Runtime['transport'] = { failed: false }
     // No estimator is handed over: the manager's own default is density-aware
     // and its calibration reports against the wire, so a fixed-density one here
     // would only overwrite the first of those.
@@ -642,6 +684,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         // after the pass that kicked it has returned.
         signal: () => cancellation.signal,
         onText: (delta, done, usage, failure) => {
+          if (failure !== undefined && isTransientFailure(failure)) transport.failed = true
           this.captureText(agent.session, progress, delta, done, usage, failure)
         },
       }),
@@ -656,6 +699,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       known: seed.known,
       progress,
       cancellation,
+      transport,
       declaredTools: undefined,
       declaredSystem: undefined,
       recorded,

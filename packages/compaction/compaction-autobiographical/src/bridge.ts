@@ -8,9 +8,25 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical/bridge
  */
 
-import { BlockAssembler, CallId, createAssistantMessage, createMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, CallId, LlmError, createAssistantMessage, createMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, LlmRuntime, Message, TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock as MembraneBlock, Membrane, NormalizedRequest, NormalizedResponse } from '@animalabs/membrane'
+
+/**
+ * Failure codes that mean the answer never left the wire — a dropped connection
+ * or a deadline — rather than the model declining the work.
+ */
+const TRANSIENT_FAILURE_CODES = new Set(['TRANSPORT', 'TIMEOUT'])
+
+/**
+ * Whether the failure text a call ended with names a transport failure. The text
+ * is `${code} ${message}` by construction below, so the code is its first word;
+ * the engine reads this to tell work a sick connection lost from work the
+ * model's own verdict refused.
+ */
+export function isTransientFailure(failure: string): boolean {
+  return TRANSIENT_FAILURE_CODES.has(failure.split(' ', 1)[0] as string)
+}
 
 /** What the library hands the bridge, plus the harness services the call needs. */
 export interface BridgeOptions {
@@ -195,8 +211,11 @@ export function createBridge(options: BridgeOptions): Membrane {
         }
       } catch (error: unknown) {
         // The library classifies a thrown call as abort without the text;
-        // echo it so a quarantine is diagnosable from the console.
-        failure = error instanceof Error ? error.message : String(error)
+        // echo it so a quarantine is diagnosable from the console. An LlmError
+        // is echoed with its code, the same shape a finish chunk's failure
+        // takes, so the reader can classify either one.
+        failure = error instanceof LlmError ? `${error.code} ${error.message}`
+          : error instanceof Error ? error.message : String(error)
         warn?.(`compression call threw: ${failure}`)
         onText?.('', true, assembler.usage, failure)
         throw error
@@ -210,6 +229,16 @@ export function createBridge(options: BridgeOptions): Membrane {
       // The terminal tap closes the attempt either way: a call that streamed no
       // text and failed has no other record of having been made.
       onText?.('', true, assembler.usage, failure)
+      // A dead transport is not a model verdict. Returned as an `abort` stop
+      // reason it would be scored as one — the refusal ladder would spend its
+      // attempts on a connection that cannot answer, and exhaustion quarantines
+      // the span for the life of the runtime. Throw instead, and the library
+      // takes its transient path: the work stays queued and the next pass
+      // retries it. A genuine abort keeps the stop reason, because the
+      // cancelled-turn release is keyed on it.
+      if (finish.kind === 'error' && TRANSIENT_FAILURE_CODES.has(finish.failure.code)) {
+        throw new LlmError(finish.failure.message, finish.failure.code, finish.failure)
+      }
       const content = toMembraneBlocks(assembler.blocks(), messages)
       const text = content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')
       return {

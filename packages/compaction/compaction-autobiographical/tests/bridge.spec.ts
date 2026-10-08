@@ -9,7 +9,7 @@
  * rather than a silent abort.
  */
 
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, LlmError } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock as MembraneBlock, NormalizedRequest, NormalizedResponse } from '@animalabs/membrane'
@@ -330,6 +330,28 @@ describe('createBridge', () => {
       // wrote nothing before it failed is still a request, and this is all the
       // chat has to show for it.
       expect(tones).toEqual([['', true, undefined, 'rate_limit slow down']])
+    })
+
+    it.each(['TRANSPORT', 'TIMEOUT'])('throws a %s finish rather than reporting it as an abort', async (code) => {
+      const tones: Array<[string, boolean, string | undefined]> = []
+      const error = await complete(
+        {
+          llm: runtime([{ type: 'finish', reason: { kind: 'error', failure: { code, message: 'the connection dropped' } } }]),
+          onText: (delta, done, _usage, failure) => tones.push([delta, done, failure]),
+        },
+        request(),
+      ).then(
+        () => { throw new Error('expected the call to throw') },
+        (caught: unknown) => caught,
+      )
+
+      // A dead connection is thrown, not scored: reported as an abort the
+      // library would read it as a verdict and retire the span; thrown, the
+      // work stays queued and the next pass retries it.
+      expect(error).toBeInstanceOf(LlmError)
+      expect((error as LlmError).code).toBe(code)
+      // The terminal tone still fired before the throw, so the attempt has its row.
+      expect(tones).toEqual([['', true, `${code} the connection dropped`]])
     })
 
     it('hands the stream the cancellation armed for the call', async () => {
