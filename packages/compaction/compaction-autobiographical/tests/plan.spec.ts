@@ -848,6 +848,31 @@ describe('planFolds', () => {
     expect(ops[0]?.shadowedSeqs).toEqual([landed.seq, answer])
   })
 
+  it('counts once the ground a merge-produced fold cites beside its child node', () => {
+    const live = started('plan-cited-twice')
+    const ask = userEvent(live, 'ask')
+    const answer = textEvent(live, 'answer')
+    const { store, seqOf } = seeded(live)
+    // The fold a merge produces cites the child node and the ground under it
+    // too, so expanding its citations reaches the same leaves twice — once
+    // through the child, once directly. An op that owns this node still cites
+    // each leaf once: the session refuses a citation list that repeats a seq,
+    // and the preflight reads a repeat as two folds claiming one node.
+    const child = foldNode(live, 'L1-9', [ask, answer])
+    const merged = foldNode(live, 'L1-10', [child.seq, ask, answer])
+
+    const ops = planFolds(store, live, {
+      price: priceSurfaceNode,
+      resolutions: new Map([[mirrored(store)[0]!, 1], [mirrored(store)[1]!, 1]]),
+      summaries: [summary('L1-0', 1)],
+      seeded: new Map([['L1-0', span(ask, answer)]]),
+      seqOf,
+    })
+
+    expect(ops[0]?.shadowedSeqs).toEqual([merged.seq])
+    expect(ops[0]?.coveredNodes).toEqual([merged.seq, ask, answer])
+  })
+
   it('reads coverage from the seeded range when the entry cites nothing', () => {
     const live = started('plan-seeded-only')
     const ask = userEvent(live, 'ask')

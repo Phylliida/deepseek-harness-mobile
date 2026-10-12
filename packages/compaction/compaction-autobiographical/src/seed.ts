@@ -458,6 +458,10 @@ function slice(surface: ReadonlyArray<readonly [number, string]>, firstSeq: numb
  * (`sourceEventSeqs must reference earlier events`), so every expansion step
  * descends in seq and the walk terminates.
  *
+ * The ground is a set: a merge-produced fold cites a child fold's node and the
+ * ground under it too, so the same leaf can arrive by two paths, and counting it
+ * twice reports one node covering it as two folds claiming it.
+ *
  * Expanded once per seq and remembered, because the same nodes are reached again
  * from every fold above them.
  */
@@ -473,7 +477,7 @@ function groundOf(
   const event = events.get(seq)
   const sources = event !== undefined && isReplacementSurfaceEvent(event) ? event.sourceEventSeqs : undefined
   const ground = sources?.length
-    ? sources.flatMap(source => groundOf(events, source, expanded))
+    ? [...new Set(sources.flatMap(source => groundOf(events, source, expanded)))]
     : [seq]
   expanded.set(seq, ground)
   return ground
