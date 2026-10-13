@@ -80,20 +80,24 @@ describe('assembled coding gate', () => {
   it('covers after idle minutes, lifts on any interaction, and covers again after more idle', async () => {
     mountGateApp()
     // Boot counts as arrival: the app opens uncovered and the row is up.
-    await screen.findByRole('button', { name: 'New Session' }, { timeout: 15_000 })
+    await screen.findByRole('button', { name: 'Coding time stats' }, { timeout: 15_000 })
     expect(screen.queryByRole('dialog', { name: 'Coded today' })).toBeNull()
 
-    // One real interaction restamps the local idle clock, then the clock is
-    // frozen so the idle boundary is exactly testable.
-    fireEvent.pointerMove(window)
+    // The clock is frozen first, so the idle timer the next interaction arms
+    // runs on it and the idle boundary is exactly testable.
     vi.useFakeTimers()
     try {
+      fireEvent.pointerMove(window)
       act(() => { vi.advanceTimersByTime(IDLE_MARGIN_MS) })
       const cover = screen.getByRole('dialog', { name: 'Coded today' })
-      expect(within(cover).getByText('0m')).toBeTruthy()
+      // The idle stretch is still inside the ten-minute bridge, so it counts
+      // as the live tail of the run.
+      expect(within(cover).getByText('2m')).toBeTruthy()
       expect(within(cover).getByText('Move the mouse or press a key to return')).toBeTruthy()
 
-      // Any interaction lifts the cover — even a bare pointer drift.
+      // Any interaction lifts the cover — even a bare pointer drift, and even
+      // after an hour under it.
+      act(() => { vi.advanceTimersByTime(60 * 60_000) })
       fireEvent.pointerMove(window)
       expect(screen.queryByRole('dialog', { name: 'Coded today' })).toBeNull()
 

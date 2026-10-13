@@ -19,7 +19,7 @@
  * @module @deepseek-ai/dsh-compaction-autobiographical/plan
  */
 
-import { deriveEventMessage } from '@deepseek-ai/dsh-session/surface'
+import { deriveEventMessage, isReplacementSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
 import { estimateMessage } from '@deepseek-ai/dsh-token-meter/src/estimate.ts'
@@ -27,7 +27,7 @@ import type { MessageId, StoredMessage, SummaryEntry } from '@animalabs/context-
 import { MESSAGES_STATE } from './store.ts'
 import type { LogStore } from './store.ts'
 import type { RecollectionRange } from './types.ts'
-import { recollectionRows, resolveRange, surfaceGround } from './seed.ts'
+import { extent, recollectionRows, resolveRange, surfaceGround } from './seed.ts'
 
 /** One planned fold: shadow `startSeq..endSeq` with a single recollection node. */
 export interface FoldOp {
@@ -110,23 +110,26 @@ export const RECALL_HEADER = /^\[Recall ([^\]\s]+)\]/
 
 /**
  * The recollection a fold node announces. The identity rides the compaction id
- * on the message's model source, not the prose: a summary carrying captured
- * reasoning is replayed without a header, because prepending one to verbatim
- * `responseContent` would break the signatures it exists to carry. Reading the
- * identity there is what makes a reopened session's folds recoverable: a log
- * replayed from the first event rebuilds the pyramid from these ids alone.
+ * on the message's model source, not the prose: a recollection the library
+ * returned with a stored response lands without a header. Reading the identity
+ * there is what makes a reopened session's folds recoverable: a log replayed
+ * from the first event rebuilds the pyramid from these ids alone.
  *
  * The `[Recall <id>]` header is the fallback, and it is load-bearing: a fold
  * written before that convention landed names its recollection in the text —
  * its `autobio-session-<id>-<n>` compaction id does not match the prefix — and
  * a node read as "not a fold" is ground the planner folds a second time.
  *
+ * Only a replacement is a fold node. The model reads its own recollections, so
+ * an ordinary reply can open with the same header, and taking it for a fold
+ * would cite its seq twice in every op that spans it.
+ *
  * @param event - the logged event to read.
  * @returns the recollection id, or `undefined` when the event is not a fold
  *   node.
  */
 export function foldIdOf(event: SessionEvent): string | undefined {
-  if (event.type !== 'assistant/message') return undefined
+  if (event.type !== 'assistant/message' || !isReplacementSurfaceEvent(event)) return undefined
   // An assistant message's source is a model source, so the compaction id needs
   // no narrowing.
   const { compactionId } = event.data.message.source
@@ -150,10 +153,16 @@ export function foldCompactionId(summaryId: string): string {
 }
 
 /**
- * What a fold node says. Captured reasoning blocks replay verbatim — the
- * signatures cover their content, and the models that need them back need them
- * back unmutated — so the recall header is only added where there is room for
- * it, on the text fallback that legacy entries and stubs take.
+ * What a fold node says: the text of the response the library stored for the
+ * recollection, verbatim, or the recall header over its prose when it stored
+ * none — the fallback legacy entries and stubs take.
+ *
+ * Only the stored response's text blocks land. It is written in the library's
+ * vocabulary, whose `thinking` blocks the harness has no block for: a serializer
+ * drops them and the token meter prices them as raw JSON. Nor is there anything
+ * to replay — the bridge captures a call's reasoning as text, with no signature
+ * a provider could verify — and the library prices a recollection at its
+ * stripped render (`carrierPolicy: 'live-strip'`), which is the text.
  *
  * @param summary - the minted recollection to render.
  * @returns the blocks for the replacement message, which the caller lands
@@ -161,7 +170,9 @@ export function foldCompactionId(summaryId: string): string {
  *   of when the message source cannot carry it.
  */
 export function foldBlocks(summary: SummaryEntry): ContentBlock[] {
-  if (summary.responseContent?.length) return summary.responseContent as ContentBlock[]
+  const text = (summary.responseContent ?? []).flatMap(block =>
+    block.type === 'text' ? [{ type: 'text' as const, text: block.text }] : [])
+  if (text.length > 0) return text
   return [{ type: 'text', text: `[Recall ${summary.id}]\n\n${summary.content}` }]
 }
 
@@ -241,28 +252,41 @@ export function planFolds(store: LogStore, session: Session, inputs: PlanInputs)
     if (position !== undefined) claim.claimed.push(position)
   }
 
-  // A claim whose ground a landed fold node already stands for — with ground
-  // the claim does not own besides — belongs to a recollection an ancestor's
-  // fold has replaced: the pyramid only merges upward, so a node covering the
-  // claim's keys plus more is a parent's node, and folding the child again
-  // would shadow that ground a second time. The test reads the surface alone,
-  // never a pyramid pointer, because the landed node is itself the proof the
-  // ground is spoken for; equality is kept out so a claim whose own node landed
-  // still reaches the settled check in `land()`.
-  const foldedGround = surface
-    .filter(node => node.foldId !== undefined)
-    .map(node => new Set(node.coverage))
-  const represented = (claim: { keys: ReadonlySet<number> }): boolean =>
-    foldedGround.some(ground =>
-      ground.size > claim.keys.size && [...claim.keys].every(seq => ground.has(seq)))
+  // A claim whose ground another recollection's landed node already stands for
+  // is represented, and folding it would shadow that ground a second time: a
+  // node covering the claim's keys plus more is a parent's, and the pyramid only
+  // merges upward. A node covering exactly the claim's ground represents it too
+  // unless the claim is coarser — folds only coarsen, so an L2 replaces the L1 it
+  // consolidated but the L1 never takes that ground back, which is what would let
+  // a flipping resolution trade the two nodes forever. The test reads the surface
+  // alone, never a pyramid pointer, because the landed node is itself the proof
+  // the ground is spoken for; a claim's own node is left to the settled check in
+  // `land()`.
+  const levelOf = new Map(inputs.summaries.map(summary => [summary.id, summary.level]))
+  const folded = surface.flatMap(node => node.foldId === undefined
+    ? []
+    : [{ id: node.foldId, ground: new Set(node.coverage), level: levelOf.get(node.foldId) }])
+  const represented = (claim: { summary: SummaryEntry; keys: ReadonlySet<number> }): boolean =>
+    folded.some(({ id, ground, level }) =>
+      id !== claim.summary.id
+      && [...claim.keys].every(seq => ground.has(seq))
+      && (ground.size > claim.keys.size || (level !== undefined && level >= claim.summary.level)))
 
   // Every claim before any widening, because the walk asks who a node already
   // belongs to. Position order settles a contested node: the op that reaches it
   // first owns it, which is also the order the ops are returned in.
   const ordered = [...claims.values()]
-    .filter(claim => claim.claimed.length > 0 && !represented(claim))
-    .sort((left, right) => Math.min(...left.claimed) - Math.min(...right.claimed))
-    .map(claim => new PlannedOp(claim, surface, Math.min(...claim.claimed), Math.max(...claim.claimed)))
+    .filter(claim => !represented(claim))
+    .flatMap((claim) => {
+      // Ground under another recollection's node is not this claim's to take
+      // unless the claim owns that node's whole footprint: replacing the node
+      // would take that recollection off the surface with it.
+      const placed = claim.claimed.filter(at => !foreign(surface[at] as SurfaceNode, claim.summary.id, claim.keys))
+      const reach = extent(placed)
+      return reach === undefined ? [] : [{ claim, ...reach }]
+    })
+    .sort((left, right) => left.first - right.first)
+    .map(({ claim, first, last }) => new PlannedOp(claim, surface, first, last))
 
   // One op at a time, in plan order. A sibling's claim is what its fold replaces,
   // and widening is where a span grows past what it started with — so both are
@@ -475,9 +499,16 @@ class PlannedOp {
     /* v8 ignore next -- unreachable: the span tested above is non-empty and comes
        from the same run, and widening only widens it. */
     if (held.length === 0) return []
-    this.from = Math.min(...held)
-    this.to = Math.max(...held)
+    // `span` lists the run in surface order, so its ends are its bounds.
+    this.from = held[0] as number
+    this.to = held.at(-1) as number
     const landed = this.surface.slice(this.from, this.to + 1)
+    // Another recollection's node inside the span is one this fold would hide
+    // without standing for its ground. The claim's ends were placed clear of such
+    // nodes and widening stops at a landed node, so only a node between two parts
+    // of the claim reaches here; the op waits for a coarser recollection that
+    // owns both sides.
+    if (landed.some(node => foreign(node, this.claim.summary.id, this.claim.keys))) return []
 
     const covered: number[] = []
     for (const node of landed) {
@@ -510,15 +541,14 @@ class PlannedOp {
    * Move the span over the tool nodes the fold would otherwise leave half a
    * round of, in both directions.
    *
-   * Backward takes the results standing between the fold and the node that calls
-   * for them, one node at a time, and stops at that call node. A round answers
-   * its calls on separate nodes, so the result nearest the fold need not be the
-   * round's only one — reaching the call node is what makes the round whole. The
-   * walk leaves alone anything the span already answers and a node answering
-   * several calls at once, which belongs to a round whose other half the span
-   * never claimed. It stops at ground a sibling has landed on rather than
-   * crossing it to reach the call beyond, which is what leaves the sibling its
-   * own round.
+   * Backward runs only while the span holds a result whose call it does not: a
+   * span holding no such result is no half-round, and growing it would fold
+   * ground nothing claimed. The walk takes every node between the span and the
+   * call node, because a round answers its calls on separate nodes and those
+   * nodes stand between the call and the span; a node it takes can bring results
+   * of its own, whose calls it then needs as well. It stops at ground a sibling
+   * has landed on, or at a landed fold node: the call beyond is already folded
+   * away, so the result can be too.
    *
    * Forward mirrors it: results of calls the span holds are taken as a
    * contiguous run, and the walk stops at a node that asks for a tool of its own
@@ -530,38 +560,21 @@ class PlannedOp {
   private widen(taken: ReadonlySet<number>): void {
     let from = this.from
     let to = this.to
-    // Backward: the node that declares the calls a span's results answer. A span
-    // whose left edge is already a call node holds its round's head and stops
-    // here; one that starts on a result is half a round, and the walk is what
-    // finishes it. Everything the walk crosses is a result answering a call the
-    // span already takes, so the round comes back whole.
-    const answered = new Set(this.surface.slice(from, to + 1).flatMap(node => node.results))
-    /* v8 ignore next -- the left-edge test: every fixture's backward reach starts
-       on a result node, which is the case the walk exists for; a span whose left
-       edge declares the calls already holds its round's head. */
-    while (from > 0 && !(this.surface[from] as SurfaceNode).calls.length) {
+    // Backward: the calls the span's results answer, until every one is held.
+    const held = this.surface.slice(from, to + 1)
+    const declared = new Set(held.flatMap(node => node.calls))
+    const missing = new Set(held.flatMap(node => node.results).filter(id => !declared.has(id)))
+    while (from > 0 && missing.size > 0) {
       const at = from - 1
       const node = this.surface[at] as SurfaceNode
-      // Ground a sibling has landed on is not this fold's to reach through: the
-      // walk stops in front of it rather than crossing it to the call beyond.
-      if (taken.has(at)) break
-      // Calls the span does not answer are another round's, and the walk stops in
-      // front of the node that declares them.
-      if (node.calls.some(id => !answered.has(id))) break
-      // The node whose calls these results answer is the round's head, and the
-      // last node the walk takes.
-      if (node.calls.length > 0) {
-        from = at
-        break
-      }
-      // A node that brings no result the span is missing is not part of this
-      // round either.
-      /* v8 ignore next -- the `node.results.length === 0` half: a node with no
-         results and no calls is not a surface node, since a message with no
-         blocks contributes none. */
-      if (node.results.length === 0 || node.results.every(id => answered.has(id))) break
-      for (const id of node.results) answered.add(id)
+      if (taken.has(at) || node.foldId !== undefined) break
       from = at
+      for (const id of node.calls) {
+        declared.add(id)
+        missing.delete(id)
+      }
+      // A node left of every call the span holds cannot answer one of them.
+      for (const id of node.results) missing.add(id)
     }
 
     // Forward: results the span's calls are still waiting for.
@@ -624,6 +637,20 @@ function owns(node: SurfaceNode, summaryId: string, keys: ReadonlySet<number>): 
   if (node.foldId === summaryId) return false
   if (node.foldId === undefined) return node.coverage.some(seq => keys.has(seq))
   return node.coverage.every(seq => keys.has(seq))
+}
+
+/**
+ * Whether one node is another recollection's landed node that a fold for
+ * `summaryId` may not replace: the claim does not cover its whole footprint, so
+ * replacing it would take that recollection off the surface.
+ *
+ * @param node - the surface node to test.
+ * @param summaryId - the recollection doing the folding.
+ * @param keys - the log seqs that recollection's ground is claimed at.
+ * @returns whether the node must stay out of the fold's span.
+ */
+function foreign(node: SurfaceNode, summaryId: string, keys: ReadonlySet<number>): boolean {
+  return node.foldId !== undefined && node.foldId !== summaryId && !owns(node, summaryId, keys)
 }
 
 /**

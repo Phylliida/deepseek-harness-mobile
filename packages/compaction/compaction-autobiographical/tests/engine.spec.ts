@@ -18,7 +18,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AutobiographicalCompactionEngine } from '../src/index.ts'
-import { build, contextOf, settle, transcript } from './harness.ts'
+import { build, contextOf, manualPass, settle, transcript } from './harness.ts'
 
 /** The engine's open runtimes, reached past the private map a pass holds them in. */
 function runtimes(engine: AutobiographicalCompactionEngine): Map<string, Promise<unknown>> {
@@ -58,11 +58,7 @@ describe('manual compaction entry points', () => {
       },
     }
 
-    const { result } = await settle(
-      engine,
-      maintenance,
-      (_context, signal) => engine.compactNow(maintenance, signal),
-    )
+    const { result } = await settle(engine, maintenance, manualPass(engine, maintenance))
 
     // The claim is what keeps manual work from racing the loop, so a fold that
     // reached the log outside it would be the bug this case exists to catch.
@@ -275,14 +271,14 @@ async function quarantineSurface(engine: AutobiographicalCompactionEngine, sessi
 }
 
 describe('work a cancelled turn left behind', () => {
-  it('retries a run an aborted turn quarantined, and leaves a refusal quarantined', async () => {
+  it('lifts no merge quarantine when the chat resumes', async () => {
     const { engine, agent, session } = build(6, 'engine-quarantine')
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     const runtime = await quarantineSurface(engine, session.id)
     // A quarantined record survives only while its sources exist unmerged: the
     // engine's own sweep clears a record whose run it can no longer find, which
-    // would empty the map without the lift being what did it. Anchoring both
-    // records on one real, unmerged recollection is what makes them live debt.
+    // would empty the map whatever this test is about. Anchoring the records on
+    // one real, unmerged recollection is what makes them live debt.
     const [first, last] = runtime.store.getStateJson('messages').map(message => message.id)
     runtime.summaries.push({
       id: 'L3-90',
@@ -299,27 +295,84 @@ describe('work a cancelled turn left behind', () => {
       lastOutcome: lastStopReason === 'abort' ? 'unusable_empty' : 'refusal',
       lastStopReason, quarantinedAt: 0,
     })
-    runtime.mergeQuarantine.set('aborted', record('aborted', 'abort'))
+    runtime.mergeQuarantine.set('final', record('final', 'abort'))
     runtime.mergeQuarantine.set('refused', record('refused', 'refusal'))
     const keys = (): string[] => runtime.getMergeQuarantineStatus().records.map(entry => entry.key)
 
-    // A pass with no newer user message is the same conversation still running, so
-    // the run stays out of the queue instead of being retried on every step: the
-    // quarantine is the hold-off, and no pass lifts it by itself.
-    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
-    expect(keys()).toEqual(['aborted', 'refused'])
-
-    // The next user message is the chat resuming. An abort is the turn going away
-    // rather than an answer about that ground, so releasing it costs nothing but a
-    // retry; a refusal is the model's answer about the same ground, and retrying it
-    // would buy the same verdict.
+    // A cancelled call never reaches merge quarantine — it is thrown as retryable
+    // and the merge stays queued — so what is quarantined was answered: a refusal,
+    // or a failure the provider's policy does not retry. A user message lifts
+    // neither, since each lift would spend another five calls on the same verdict.
     session.append('user/message', createUserMessage({
       content: [{ type: 'text', text: 'carry on' }],
       source: { kind: 'user' },
     }), { surfaceOp: 'append' })
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
 
-    expect(keys()).toEqual(['refused'])
+    expect(keys()).toEqual(['final', 'refused'])
+  })
+
+  it('keeps the work a cancelled turn cut off queued, and spends no call on the dead signal', async () => {
+    let healthy = false
+    const calls: { aborted: boolean }[] = []
+    const { engine, agent, session } = build(30, 'engine-cancelled-turn', { auto: true }, undefined, {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        const { signal } = options
+        calls.push({ aborted: signal?.aborted === true })
+        if (!healthy) {
+          // The call outlives the step that kicked it, until the turn is cancelled.
+          if (signal !== undefined && !signal.aborted) {
+            await new Promise<void>((resolve) => { signal.addEventListener('abort', () => { resolve() }, { once: true }) })
+          }
+          yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'the turn went away' } } }
+          return
+        }
+        const text = 'memory: the agent asked and was answered.'
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    })
+    const events = agentEvents(contextOf(engine), asAgent(agent.session, agent.options))
+    const step = (signal: AbortSignal, at: number): Promise<unknown> => events.waterfall(
+      'agent/pre-step',
+      { messages: [], turn: 30, step: at, signal },
+      async () => ({ kind: 'enter' as const, messages: [] }),
+    )
+    const opened = async () => await runtimes(engine).get(session.id) as {
+      tickChain: Promise<void>
+      strategy: {
+        getCompressionQuarantineStatus(): { count: number }
+        getMergeQuarantineStatus(): { count: number }
+      }
+    }
+    const drained = async (): Promise<void> => {
+      for (let round = 0; round < 10; round++) {
+        await (await opened()).tickChain
+        await new Promise(resolve => setTimeout(resolve, 5))
+      }
+    }
+
+    // Three steps queue three ticks behind one call that will not answer.
+    const turn = new AbortController()
+    for (let at = 1; at <= 3; at++) await step(turn.signal, at)
+    turn.abort()
+    await drained()
+
+    // The cancelled call is the only one made: the ticks queued behind it are
+    // skipped rather than run on a signal that already fired, and nothing the
+    // cancellation touched is quarantined.
+    expect(calls).toEqual([{ aborted: false }])
+    const { strategy } = await opened()
+    expect(strategy.getCompressionQuarantineStatus().count).toBe(0)
+    expect(strategy.getMergeQuarantineStatus().count).toBe(0)
+
+    // The next live step picks the same work back up.
+    healthy = true
+    await step(new AbortController().signal, 4)
+    await drained()
+    expect(session.events.some(event => event.type === 'autobio/memory' && event.data.memory !== undefined)).toBe(true)
   })
 
   it('kicks no tick under the signal a step was cancelled with', async () => {
@@ -361,13 +414,13 @@ describe('memory formation on a dead transport', () => {
     }).strategy.getCompressionQuarantineStatus().count
   }
 
-  it('never quarantines on a transport failure, and folds once the connection is back', async () => {
+  it.each(['TRANSPORT', 'TIMEOUT', 'RATE_LIMIT', 'SERVER', 'EMPTY_RESPONSE'])('never quarantines on a %s failure, and folds once the provider answers', async (code) => {
     let healthy = false
-    const { engine, agent, session } = build(30, 'engine-transport-down', {}, undefined, {
+    const { engine, agent, session } = build(30, `engine-retryable-${code}`, {}, undefined, {
       async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
         void options
         if (!healthy) {
-          yield { type: 'finish', reason: { kind: 'error', failure: { code: 'TRANSPORT', message: 'connection refused' } } }
+          yield { type: 'finish', reason: { kind: 'error', failure: { code, message: 'try later' } } }
           return
         }
         const text = 'memory: the agent asked and was answered.'
@@ -379,16 +432,16 @@ describe('memory formation on a dead transport', () => {
       },
     })
 
-    // While the transport is down the bridge throws, the tick rejects, and the
-    // chunk stays queued: no pass spends an attempt budget against it and
-    // nothing is quarantined.
+    // While the provider cannot answer the bridge throws a retryable failure, the
+    // tick rejects, and the chunk stays queued: no pass spends an attempt budget
+    // against it and nothing is quarantined.
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     await ticks(engine, session.id)
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     await ticks(engine, session.id)
     expect(await chunkQuarantine(engine, session.id)).toBe(0)
 
-    // The connection's return is the retry: the queued span compresses and the
+    // The provider's return is the retry: the queued span compresses and the
     // fold lands without anything having been cleared by hand.
     healthy = true
     const { result } = await settle(engine, agent)
@@ -396,7 +449,7 @@ describe('memory formation on a dead transport', () => {
     expect(await chunkQuarantine(engine, session.id)).toBe(0)
   })
 
-  it('lifts a quarantine written when a fallback rung died mid-tick on transport', async () => {
+  it('lifts a quarantine written when a fallback rung failed retryably mid-tick', async () => {
     const calls: GenerateOptions[] = []
     const { engine, agent, session } = build(30, 'engine-transport-ladder', {
       // The source-only rung gives the fallback ladder a second call to die on;
@@ -405,12 +458,13 @@ describe('memory formation on a dead transport', () => {
     }, undefined, {
       async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
         calls.push(options)
-        // The canonical call's abort is a verdict-shaped stop, so the library
-        // climbs its fallback ladder; the rung after it dies on the connection.
+        // The canonical call's final failure is answered as an unusable response,
+        // so the library climbs its fallback ladder; the rung after it dies on the
+        // connection.
         yield {
           type: 'finish',
           reason: calls.length === 1
-            ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'the turn went away' } }
+            ? { kind: 'error', failure: { code: 'INVALID_REQUEST', message: 'refused' } }
             : { kind: 'error', failure: { code: 'TRANSPORT', message: 'connection refused' } },
         }
       },
@@ -422,25 +476,83 @@ describe('memory formation on a dead transport', () => {
 
     // The ladder's own bookkeeping would have retired the span — the rung scored
     // a provider error and the budget ran out — but the tick that wrote the
-    // quarantine also saw the transport failure, so the record is lifted and the
+    // quarantine also saw a retryable failure, so the record is lifted and the
     // span retries on the next pass.
     expect(warn.mock.calls.some(([line]) => String(line).includes('released a chunk quarantine'))).toBe(true)
     expect(await chunkQuarantine(engine, session.id)).toBe(0)
   })
 
-  it('keeps a quarantine the model\'s own verdicts earned', async () => {
-    const { engine, agent, session } = build(30, 'engine-abort-quarantine', {}, undefined, {
+  it('keeps a quarantine that final answers earned', async () => {
+    const { engine, agent, session } = build(30, 'engine-final-quarantine', {}, undefined, {
       async *stream(): AsyncIterable<StreamChunk> {
-        yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'the turn went away' } } }
+        yield { type: 'finish', reason: { kind: 'error', failure: { code: 'INVALID_REQUEST', message: 'refused' } } }
       },
     })
 
     await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
     await ticks(engine, session.id)
 
-    // Same ladder, same exhaustion, but the tick saw no transport failure: the
+    // Same ladder, same exhaustion, but the tick saw no retryable failure: the
     // record stays. This is the control — it proves the fixture really drives a
     // chunk to quarantine, so the zero above means the lift did it.
     expect(await chunkQuarantine(engine, session.id)).toBe(1)
+  })
+
+  it('lifts only the quarantines the failing tick wrote, and reports a lift that fails', async () => {
+    const { engine } = build(1, 'engine-lift-partial')
+    const cleared: string[] = []
+    const runtime = {
+      transient: { failed: true },
+      strategy: {
+        getCompressionQuarantineStatus: () => ({ keys: ['older', 'newer', 'stuck'] }),
+        clearCompressionRefusalQuarantine: async (key: string): Promise<void> => {
+          if (key === 'stuck') throw new Error('the store closed')
+          cleared.push(key)
+        },
+      },
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const release = (engine as unknown as {
+      releaseRetryableQuarantine(r: unknown, before: ReadonlySet<string>): Promise<void>
+    }).releaseRetryableQuarantine.bind(engine)
+
+    await release(runtime, new Set(['older']))
+
+    // A record the tick did not write predates the failure, so it is not this
+    // tick's to lift.
+    expect(cleared).toEqual(['newer'])
+    expect(warn.mock.calls.flat().join('\n')).toContain('could not release a quarantine written during a retryable failure: the store closed')
+  })
+
+  it('forms memory past a quarantined chunk instead of spending every pass on it', async () => {
+    let failing = true
+    const calls: GenerateOptions[] = []
+    const { engine, agent, session } = build(30, 'engine-quarantine-skip', {}, undefined, {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        calls.push(options)
+        if (failing) {
+          yield { type: 'finish', reason: { kind: 'error', failure: { code: 'INVALID_REQUEST', message: 'refused' } } }
+          return
+        }
+        const text = 'memory: the agent asked and was answered.'
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      },
+    })
+
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await ticks(engine, session.id)
+    expect(await chunkQuarantine(engine, session.id)).toBe(1)
+
+    // The quarantined chunk returns to the front of the queue on every compile.
+    // A pass's tick moves past it to the next chunk rather than ending on it.
+    failing = false
+    const before = calls.length
+    await engine.compactIfNeeded(agent, 'pressure', SIGNAL)
+    await ticks(engine, session.id)
+    expect(calls.length).toBe(before + 1)
+    expect(session.events.some(event => event.type === 'autobio/memory' && event.data.memory !== undefined)).toBe(true)
   })
 })

@@ -12,6 +12,7 @@ import {
   sessionModelsValueSchema, sessionPromptRequestSchema, sessionPromptValueSchema,
   sessionSearchRequestSchema, sessionSearchValueSchema, sessionSelectModelRequestSchema,
   sessionSelectModelValueSchema, sessionSelectSubagentModelRequestSchema, sessionSelectSubagentModelValueSchema,
+  sessionSelectUserModelRequestSchema, sessionSelectUserModelValueSchema,
   sessionSummarySchema,
   sessionUpdateQueueRequestSchema, sessionUpdateQueueValueSchema,
 } from '../src/api/sessions.schema.ts'
@@ -265,6 +266,23 @@ describe('sessions domain schemas', () => {
     expect(sessionSelectSubagentModelValueSchema.parse({
       selected: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
     }).selected?.model).toBe('deepseek-v4-pro')
+    // selectUserModel: all three absent disarms, all three present arms, a half set rejects.
+    expect(sessionSelectUserModelRequestSchema.parse({ sessionId: 's1' }).provider).toBeUndefined()
+    expect(sessionSelectUserModelRequestSchema.parse({
+      sessionId: 's1',
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+      prompt: 'You want the workspace tidy.',
+    }).prompt).toBe('You want the workspace tidy.')
+    expect(() => sessionSelectUserModelRequestSchema.parse({
+      sessionId: 's1',
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-pro',
+    })).toThrow(/together/)
+    expect(sessionSelectUserModelValueSchema.parse({ selected: null }).selected).toBeNull()
+    expect(sessionSelectUserModelValueSchema.parse({
+      selected: { provider: 'deepseek-official', model: 'deepseek-v4-pro', prompt: 'x' },
+    }).selected?.prompt).toBe('x')
     expect(() => sessionModelsValueSchema.parse({
       current: { provider: 'deepseek-official', model: 'm' },
       subagent: null,

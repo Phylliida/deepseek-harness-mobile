@@ -255,6 +255,48 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* The user-model goal editor: same inset rhythm as the menu's status
+ * strips, menu-surface tokens so it reads as part of the card. */
+.goal {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--dsw-alias-border-inverted);
+  border-radius: 8px;
+  outline: none;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  resize: none;
+}
+
+.goal:focus-visible {
+  border-color: var(--dsw-alias-border-l3);
+}
+
+.goal::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* The armed summary above the disarm row: model line in the option's name
+ * tone, goal in the description tone, wrapping over as many lines as it
+ * needs. */
+.armed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 8px;
+}
+
+.armedGoal {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .cellChevron {
   flex: 0 0 auto;
   color: var(--dsw-alias-label-tertiary);

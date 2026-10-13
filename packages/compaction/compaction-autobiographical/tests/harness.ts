@@ -7,9 +7,10 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CompactionAgentContext, CompactionResult, ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
-import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createUserMessage, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, ResolvedRetryPolicy, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import AutobiographicalCompactionEngine from '../src/index.ts'
@@ -27,6 +28,21 @@ import type { AutobiographicalCompactionConfig } from '../src/types.ts'
  */
 export function provideTokenMeter(ctx: Context): void {
   ctx.provide('tokenMeter', new TokenMeter(new Context()) as never)
+}
+
+/**
+ * A fake LLM runtime: the given stream, plus the retry policy a provider resolves
+ * to when its configuration names none — the one the engine reads when a runtime
+ * opens.
+ *
+ * @param llm - the fake whose `stream` answers the compression calls.
+ * @returns the fake with the runtime's retry-policy lookup.
+ */
+export function fakeLlm(llm: { stream: (options: GenerateOptions) => AsyncIterable<StreamChunk> }): {
+  stream: (options: GenerateOptions) => AsyncIterable<StreamChunk>
+  providerRetryPolicy: (provider: string) => ResolvedRetryPolicy
+} {
+  return { stream: options => llm.stream(options), providerRetryPolicy: () => resolveRetryPolicy(undefined, 'test') }
 }
 
 /** Answers every compression call with one recollection-shaped block. */
@@ -124,7 +140,7 @@ export function reopen(
 } {
   const calls: GenerateOptions[] = []
   const ctx = into ?? new Context()
-  ctx.provide('llm', (llm ?? summarizer(calls)) as never)
+  ctx.provide('llm', fakeLlm(llm ?? summarizer(calls)) as never)
   // The engine prices a fold's shadowed nodes with this meter, so a fixture
   // without one could not plan a fold at all.
   provideTokenMeter(ctx)
@@ -187,6 +203,26 @@ export function contextOf(engine: AutobiographicalCompactionEngine): Context {
 }
 
 /** How `settle` drives the engine — either entry point reaches the same pass. */
+/**
+ * A manual pass for {@link settle}, reading a refusal as a pass that landed
+ * nothing. The fixtures keep no verbatim tail, so once every older message is
+ * folded the strategy plans to fold the newest one as well, and the library
+ * refuses that layout as structural; a manual pass reports a refusal to its
+ * caller, which for settling is the same as finding nothing to fold. A refusal
+ * is the classified failure with no cause behind it — anything that threw is
+ * still thrown.
+ *
+ * @param engine - the engine whose `compactNow` runs the pass.
+ * @param agent - the agent the pass claims maintenance on.
+ * @returns the pass function.
+ */
+export function manualPass(engine: AutobiographicalCompactionEngine, agent: ManualCompactAgentContext): PassFn {
+  return (_context, signal) => engine.compactNow(agent, signal).catch((error: unknown) => {
+    if (error instanceof ManualCompactionError && error.code === 'summary' && error.cause === undefined) return null
+    throw error
+  })
+}
+
 export type PassFn = (
   agent: CompactionAgentContext,
   signal: AbortSignal,

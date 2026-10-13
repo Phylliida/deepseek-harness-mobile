@@ -485,19 +485,25 @@ Source: [`packages/coding/coding-activity/src/index.ts:44`](../packages/coding/c
 
 ## `@deepseek-ai/dsh-compaction-autobiographical`
 
-Requires: `llm` · `compaction`
+Requires: `llm` · `tokenMeter`
 
 ```ts config-catalog
 /** Knobs accepted by the plugin config; every field is optional. */
 export interface AutobiographicalCompactionConfig {
   /**
-   * Ceiling for the context the strategy keeps live, reached by folding aged
-   * history. Default 65_536: models degrade well before their advertised window,
-   * so the operating point stays there regardless of route. A configured value
-   * is the ceiling itself rather than a floor under the route's own window.
+   * The window the pass compiles against: the live context is held below
+   * `min(routed window, this) − reserveTokens`, reached by folding aged history.
+   * Default 65_536: models degrade well before their advertised window, so the
+   * operating point stays there regardless of route. A configured value is the
+   * ceiling itself rather than a floor under the route's own window.
    */
   operatingWindowTokens?: number
-  /** Tokens reserved for the model's response inside the compile budget; default 8192. */
+  /**
+   * Tokens kept out of the live context for the model's response; default 8192.
+   * The library subtracts them from the compile budget after the pass already
+   * has, so the live ceiling is the window less twice this value — headroom that
+   * also covers the system prompt and tool schemas the strategy never sees.
+   */
   reserveTokens?: number
   /** Register the step-boundary folding listener; default true. */
   auto?: boolean
@@ -826,6 +832,12 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * Output-token cap for the auxiliary user-model calls that answer the
+   * agent's questions and approval requests.
+   * @default 4096
+   */
+  userModelMaxTokens?: number
 }
 ```
 
@@ -3007,6 +3019,24 @@ export type ApprovalPolicy = 'ask' | 'never'
 
 Source: [`packages/interaction/user-approval/src/index.ts:177`](../packages/interaction/user-approval/src/index.ts)
 
+<a id="deepseek-aidsh-user-model-driver"></a>
+
+## `@deepseek-ai/dsh-user-model-driver`
+
+Requires: `agents` · `sessions` · `llm` · `jobs`
+
+```ts config-catalog
+/** Validated driver tuning. */
+export interface Config {
+  /** Maximum user-model replies per arming before the driver disarms. Default 20. */
+  maxReplies?: number
+  /** Generation budget per reply. Default 4096. */
+  maxTokens?: number
+}
+```
+
+Source: [`packages/user-model/user-model-driver/src/index.ts:38`](../packages/user-model/user-model-driver/src/index.ts)
+
 <a id="deepseek-aidsh-web"></a>
 
 ## `@deepseek-ai/dsh-web`
@@ -3254,6 +3284,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-cordis` — requires `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect` ([`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts))
 - `@deepseek-ai/dsh-tool-memory` — requires `tools` · `memory` · `systemPrompt` ([`packages/memory/tool-memory/src/index.ts`](../packages/memory/tool-memory/src/index.ts))
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
+- `@deepseek-ai/dsh-user-model` ([`packages/user-model/user-model/src/index.ts`](../packages/user-model/user-model/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
 

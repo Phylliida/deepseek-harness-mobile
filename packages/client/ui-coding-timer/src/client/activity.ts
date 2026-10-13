@@ -20,7 +20,7 @@ export const ACTIVITY_EVENTS = [
 
 /**
  * Restamping granularity. pointermove alone floods during normal use; one
- * stamp per second is invisible against the two-minute bridge and bounds the
+ * stamp per second is invisible against the ten-minute bridge and bounds the
  * write frequency.
  */
 export const STAMP_THROTTLE_MS = 1000

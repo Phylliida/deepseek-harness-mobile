@@ -56,14 +56,16 @@ export function CodingGate({ useGate, useActivity, setGate, t }: CodingGateProps
   const covered = covers && ready && now - activity.lastLocalActivity >= idleMs
 
   // Uncovered and approaching the idle boundary: arm one timer to the exact
-  // boundary. Covered, nothing times — the next interaction's stamp is the
-  // only way out, and it publishes through the snapshot.
+  // boundary, measured from the clock rather than `now`, which holds the
+  // last fire and can be an arbitrarily old cover instant. Covered, nothing
+  // times — the next interaction's stamp is the only way out, and it
+  // publishes through the snapshot.
   useEffect(() => {
     if (covered || !covers || !ready) return
     const boundary = activity.lastLocalActivity + idleMs
     const timer = window.setTimeout(
       () => { setNow(Date.now()) },
-      Math.max(boundary - now, 250),
+      Math.max(boundary - Date.now(), 250),
     )
     return () => { window.clearTimeout(timer) }
   }, [covered, covers, ready, activity.lastLocalActivity, idleMs, now])

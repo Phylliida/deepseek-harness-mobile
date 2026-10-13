@@ -20,6 +20,7 @@ import { DivergenceError, foldBlocks, foldIdOf, planFolds, priceSurfaceNode } fr
 import type { FoldOp, PlanInputs } from '../src/plan.ts'
 import type { RecollectionRange } from '../src/types.ts'
 import { SessionEvent } from '@deepseek-ai/dsh-session'
+import { applyFolds } from '../src/apply.ts'
 import { seedFromLog } from '../src/seed.ts'
 import { LogStore, MESSAGES_STATE } from '../src/store.ts'
 
@@ -228,17 +229,41 @@ describe('fold identity', () => {
   })
 })
 
+describe('legacy fold identity', () => {
+  it('reads no recollection off a legacy fold node that carries no text', () => {
+    const live = Session.create(SessionId('plan-fold-id-textless'))
+    const ask = userEvent(live, 'ask')
+    live.append('assistant/message', {
+      turn: 0,
+      step: 0,
+      message: createAssistantMessage({
+        content: [{ type: 'reasoning', text: 'no header to read' }],
+        source: { ...ROUTE, compactionId: 'autobio-session-x-1' },
+      }),
+    }, { surfaceOp: { op: 'replace', start: ask, end: ask }, sourceEventSeqs: [ask] })
+
+    expect(foldIdOf(live.events.at(-1) as SessionEvent)).toBeUndefined()
+  })
+})
+
 describe('foldBlocks', () => {
-  it('replays captured reasoning verbatim, signatures and all', () => {
-    const captured: ContentBlock[] = [
-      { type: 'reasoning', text: 'private thinking', signature: 'sig' } as ContentBlock,
+  it('lands the text of the stored response verbatim, and its thinking not at all', () => {
+    // The library stores a response in its own vocabulary; `thinking` has no
+    // harness block, and the bridge captured it with no signature to replay.
+    const stored: MembraneBlock[] = [
+      { type: 'thinking', thinking: 'private thinking' },
       { type: 'text', text: 'the answer' },
     ]
-    // The strategy keeps whatever the provider streamed; the harness block is the
-    // one that has to survive the round trip, signature and all.
-    const replayed = foldBlocks(summary('L1-0', 1, { responseContent: captured as MembraneBlock[] }))
-    expect(replayed).toBe(captured)
-    expect(replayed[0]).toMatchObject({ type: 'reasoning', signature: 'sig' })
+    expect(foldBlocks(summary('L1-0', 1, { responseContent: stored }))).toEqual([
+      { type: 'text', text: 'the answer' },
+    ])
+  })
+
+  it('falls back to a headed text block when the stored response holds no text', () => {
+    const stored: MembraneBlock[] = [{ type: 'thinking', thinking: 'private thinking' }]
+    expect(foldBlocks(summary('L1-0', 1, { responseContent: stored }))).toEqual([
+      { type: 'text', text: '[Recall L1-0]\n\ncontent of L1-0' },
+    ])
   })
 
   it('falls back to a headed text block when there is nothing captured', () => {
@@ -1133,5 +1158,222 @@ describe('planFolds', () => {
 
     expect(ops[0]?.shadowedSeqs).toEqual([ask])
     expect(ops[0]?.shadowedSeqs).not.toContain(answer)
+  })
+})
+
+describe('planFolds across folds that already landed', () => {
+  /** The store id mirrored for one log seq. */
+  function idAt(store: LogStore, seqOf: ReadonlyMap<string, number>, seq: number): string {
+    return mirrored(store).find(id => seqOf.get(id) === seq) as string
+  }
+
+  /** The surface as recollection ids where a fold node stands and seqs elsewhere. */
+  function shown(live: Session): Array<string | number> {
+    return live.surface.nodes.map((seq) => {
+      const event = live.events.find(one => one.seq === seq) as SessionEvent
+      return foldIdOf(event) ?? seq
+    })
+  }
+
+  it('leaves an earlier recollection on the surface when a later one claims ground it widened over', () => {
+    // L1-0's chunk ends between the two results of a parallel round, so its fold
+    // widens forward over the second result to keep the round whole. L1-1 then
+    // claims that result too, and must fold only what is still raw.
+    const live = started('plan-widened-over')
+    const ask = userEvent(live, 'go')
+    const { call, results: [first, second] } = parallelRound(live, ['call-a', 'call-b'])
+    const next = userEvent(live, 'next')
+    userEvent(live, 'tail')
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+    const older = summary('L1-0', 1)
+    const newer = summary('L1-1', 1)
+    const ranges = new Map([['L1-0', span(ask, first as number)], ['L1-1', span(second as number, next)]])
+    const resolved = new Map([ask, call, first as number].map(seq => [id(seq), 1]))
+
+    const one = plan(live, { store, seqOf, ranges, resolutions: resolved, summaries: [older] })
+    expect(one.map(op => op.shadowedSeqs)).toEqual([[ask, call, first, second]])
+    applyFolds(live, one, 0, 1, ROUTE)
+
+    for (const seq of [second as number, next]) resolved.set(id(seq), 1)
+    const two = plan(live, { store, seqOf, ranges, resolutions: resolved, summaries: [older, newer] })
+    expect(two.map(op => [op.summaryId, op.shadowedSeqs])).toEqual([['L1-1', [next]]])
+    applyFolds(live, two, 0, 2, ROUTE)
+
+    expect(shown(live).slice(0, 2)).toEqual(['L1-0', 'L1-1'])
+  })
+
+  it('widens backward only for a result whose call is outside the span', () => {
+    // The span opens on an answer, not on a result: the complete round before it
+    // is no half of anything, and stays raw for the recollection that owns it.
+    const live = started('plan-no-backward')
+    userEvent(live, 'go')
+    toolRound(live, 'call-done')
+    const answer = textEvent(live, 'the answer', 1)
+    const next = userEvent(live, 'next')
+    userEvent(live, 'tail')
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+
+    const ops = plan(live, {
+      store, seqOf,
+      ranges: new Map([['L1-1', span(answer, next)]]),
+      resolutions: new Map([[id(answer), 1], [id(next), 1]]),
+      summaries: [summary('L1-1', 1)],
+    })
+
+    expect(ops.map(op => op.shadowedSeqs)).toEqual([[answer, next]])
+  })
+
+  it('takes the call behind a result the backward walk brings in', () => {
+    // A node answering one call while asking another is the head of the span's
+    // round and the tail of the one before; folding it without that earlier call
+    // would leave the call visible with its result hidden.
+    const live = started('plan-mixed-head')
+    userEvent(live, 'go')
+    const asks = (content: ContentBlock[], step: number): number => live.append('assistant/message', {
+      turn: 0,
+      step,
+      message: createAssistantMessage({ content, source: ROUTE }),
+    }, { surfaceOp: 'append' }).seq
+    const earlier = asks([{ type: 'tool-call', id: CallId('call-0'), name: 'read', arguments: '{}' }], 1)
+    const mixed = asks([
+      { type: 'tool-result', toolCallId: CallId('call-0'), content: [{ type: 'text', text: 'ok' }] },
+      { type: 'tool-call', id: CallId('call-1'), name: 'read', arguments: '{}' },
+    ], 2)
+    const result = live.append('tool/result', {
+      turn: 0,
+      step: 2,
+      message: createToolResultMessage({ callId: CallId('call-1'), content: [{ type: 'text', text: 'ok' }], isError: false }),
+    }, { surfaceOp: 'append' }).seq
+    const next = userEvent(live, 'next')
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+
+    const ops = plan(live, {
+      store, seqOf,
+      ranges: new Map([['L1-0', span(result, next)]]),
+      resolutions: new Map([[id(result), 1], [id(next), 1]]),
+      summaries: [summary('L1-0', 1)],
+    })
+
+    expect(ops.map(op => op.shadowedSeqs)).toEqual([[earlier, mixed, result, next]])
+  })
+
+  it('reads a reply that opens with a recall header as an ordinary node', () => {
+    // The model reads its own recollections and can echo their header; only a
+    // replacement is a fold node, so the reply folds like any other.
+    const live = started('plan-header-echo')
+    const ask = userEvent(live, 'go')
+    const echo = textEvent(live, '[Recall L1-7]\n\nI recall we were looking at the planner.', 1)
+    const next = userEvent(live, 'next')
+    userEvent(live, 'tail')
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+
+    const ops = plan(live, {
+      store, seqOf,
+      ranges: new Map([['L1-0', span(ask, next)]]),
+      resolutions: new Map([ask, echo, next].map(seq => [id(seq), 1])),
+      summaries: [summary('L1-0', 1)],
+    })
+
+    expect(foldIdOf(live.events.find(event => event.seq === echo) as SessionEvent)).toBeUndefined()
+    expect(ops.map(op => op.coveredNodes)).toEqual([[ask, echo, next]])
+    expect(() => applyFolds(live, ops, 0, 2, ROUTE)).not.toThrow()
+  })
+
+  it('never folds a recollection back over the coarser one that replaced it', () => {
+    // An L2 standing over exactly its child's ground replaces the child; a
+    // resolution that flips back to L1 must not trade the two nodes, or every
+    // flip starts the same compaction id again.
+    const live = started('plan-one-way')
+    const a = userEvent(live, 'a')
+    const b = textEvent(live, 'b')
+    const c = userEvent(live, 'c')
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+    const summaries = [summary('L1-0', 1), summary('L1-1', 1), summary('L2-0', 2)]
+    const ranges = new Map([['L1-0', span(a, b)], ['L1-1', span(c, c)], ['L2-0', span(a, c)]])
+    const pass = (level: number, step: number): FoldOp[] => {
+      const ops = plan(live, { store, seqOf, ranges, summaries, resolutions: new Map([[id(a), level], [id(b), level]]) })
+      applyFolds(live, ops, 0, step, ROUTE)
+      return ops
+    }
+
+    expect(pass(1, 1).map(op => op.summaryId)).toEqual(['L1-0'])
+    expect(pass(2, 2).map(op => op.summaryId)).toEqual(['L2-0'])
+    expect(pass(1, 3)).toEqual([])
+    expect(pass(2, 4)).toEqual([])
+    expect(live.events.filter(event => event.type === 'compaction/start').map(event => event.data.compactionId))
+      .toEqual(['autobio:L1-0', 'autobio:L2-0'])
+  })
+
+  it('plans nothing for a claim whose ground lies only under other recollections\' nodes', () => {
+    const live = started('plan-claim-under-foreign')
+    const a = userEvent(live, 'a')
+    const b = textEvent(live, 'b')
+    const c = userEvent(live, 'c')
+    const d = textEvent(live, 'd')
+    userEvent(live, 'tail')
+    foldNode(live, 'L1-5', [a, b])
+    foldNode(live, 'L1-7', [c, d])
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+
+    // L2-6 stands over `b` and `c`, each under a node that also holds ground the
+    // claim does not: replacing either would take that recollection's other
+    // half off the surface, so the claim has nothing of its own to replace.
+    const ops = plan(live, {
+      store, seqOf,
+      ranges: new Map([['L1-5', span(a, b)], ['L1-7', span(c, d)], ['L2-6', span(b, c)]]),
+      resolutions: new Map([[id(b), 2], [id(c), 2]]),
+      summaries: [summary('L1-5', 1), summary('L1-7', 1), summary('L2-6', 2)],
+    })
+
+    expect(ops).toEqual([])
+  })
+
+  it('stops widening backward at a landed fold that already took the call', () => {
+    // The call is hidden inside a landed recollection, so hiding its result too
+    // leaves no half round on the wire.
+    const live = started('plan-backward-fold')
+    const ask = userEvent(live, 'go')
+    const { call, result } = toolRound(live, 'call-folded')
+    const next = userEvent(live, 'next')
+    userEvent(live, 'tail')
+    foldNode(live, 'L1-0', [ask, call])
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+
+    const ops = plan(live, {
+      store, seqOf,
+      ranges: new Map([['L1-0', span(ask, call)], ['L1-1', span(result, next)]]),
+      resolutions: new Map([[id(result), 1], [id(next), 1]]),
+      summaries: [summary('L1-0', 1), summary('L1-1', 1)],
+    })
+
+    expect(ops.map(op => op.shadowedSeqs)).toEqual([[result, next]])
+  })
+
+  it('waits while another recollection\'s node sits inside its span', () => {
+    // Folding around the node would hide that recollection without standing for
+    // its ground; the claim waits for a coarser recollection that owns both sides.
+    const live = started('plan-foreign-inside')
+    const a = userEvent(live, 'a')
+    const b = textEvent(live, 'b')
+    const c = userEvent(live, 'c')
+    foldNode(live, 'L1-5', [b])
+    const { store, seqOf } = seeded(live)
+    const id = (seq: number): string => idAt(store, seqOf, seq)
+
+    const ops = plan(live, {
+      store, seqOf,
+      ranges: new Map([['L1-6', span(a, c)], ['L1-5', span(b, b)]]),
+      resolutions: new Map([[id(a), 1], [id(c), 1]]),
+      summaries: [summary('L1-5', 1), summary('L1-6', 1)],
+    })
+
+    expect(ops).toEqual([])
   })
 })

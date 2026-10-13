@@ -17,26 +17,31 @@ import {
 } from 'react'
 import clsx from 'clsx'
 import type { ModelReasoningEffort, ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { UseProjection } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   IconCheckOutline16, IconChevronDownOutline14, IconChevronRightOutline14,
   IconWarningOutline16, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelSelectInjected } from './slots.ts'
+import { UserModelSelect } from './UserModelSelect.tsx'
 import { SubagentModelSelect } from './SubagentModelSelect.tsx'
 import css from './ModelSelect.module.css'
 
 /**
- * The composer seat's occupant: the subagent-model trigger sits left of the
- * session model seat, both over the same injected directory face.
- * @param props - owner share + injected face + the standard locale seat.
- * @returns the subagent and session model triggers.
+ * The composer seat's occupant: the user-model and subagent-model triggers
+ * sit left of the session model seat, all over the same injected directory
+ * face.
+ * @param props - owner share + injected face + the standard kit's projection
+ * hook + the standard locale seat.
+ * @returns the user-model, subagent, and session model triggers.
  */
 export function ModelSeats(
-  props: ModelSelectInjected & { locked: boolean } & PropsLocale<'model'>,
+  props: ModelSelectInjected & { locked: boolean; useProjection: UseProjection } & PropsLocale<'model'>,
 ) {
   return (
     <>
+      <UserModelSelect {...props} />
       <SubagentModelSelect {...props} />
       <ModelSelect {...props} />
     </>

@@ -21,7 +21,7 @@ export interface CodingSpanView {
 export interface CodingActivityLogView {
   /** Monotonic revision the view was read at; concurrent writers never see a stale write's id. */
   revision: number
-  /** Canonical bridge-merged spans (ascending; adjacent gaps are never under the two-minute bridge). */
+  /** Canonical bridge-merged spans (ascending; adjacent gaps are never under the ten-minute bridge). */
   spans: CodingSpanView[]
 }
 

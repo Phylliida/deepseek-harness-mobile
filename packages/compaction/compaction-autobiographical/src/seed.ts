@@ -98,6 +98,7 @@ export function seedFromLog(store: LogStore, session: Session): {
   const surface = [...idAtSeq].sort((a, b) => a[0] - b[0])
 
   const known = new Map<string, RecollectionRange>()
+  const levels = new Map<string, number>()
   const folds = foldNodes(session)
   const children = new Map<string, string[]>()
   const logged = readMemoryLog(session)
@@ -117,10 +118,15 @@ export function seedFromLog(store: LogStore, session: Session): {
     // Message ids when nothing has folded the ground, and the ids still on the surface
     // when something has — an L1 above a fold is not a leaf the recall curve can walk.
     // Every level above names recollections, and the ones it names are the outermost
-    // inside its interval.
+    // lower-level ones inside its interval.
     const sources = memory.level === 1
       ? slice(surface, firstSeq, lastSeq).map(([, id]) => id)
-      : childrenOf([...known].filter(([, child]) => child.covered.firstSeq >= firstSeq && child.covered.lastSeq <= lastSeq))
+      : childrenOf([...known].flatMap(([id, child]) => {
+        const level = levels.get(id) as number
+        return level < memory.level && child.covered.firstSeq >= firstSeq && child.covered.lastSeq <= lastSeq
+          ? [{ id, level, covered: child.covered }]
+          : []
+      }))
 
     // Skipped, not stubbed: an entry citing ground that does not exist would have no
     // sources to resolve and no range to cover, and `recallCurveLeafIds` rejects it
@@ -162,11 +168,15 @@ export function seedFromLog(store: LogStore, session: Session): {
       created: memory.created,
     } satisfies SummaryEntry)
 
-    for (const child of sources) {
-      const parented = children.get(child)
-      if (parented === undefined) children.set(child, [memory.id])
-      else parented.push(memory.id)
+    // A level-1 entry's sources are messages, which have no `mergedInto` to stamp.
+    if (memory.level > 1) {
+      for (const child of sources) {
+        const parented = children.get(child)
+        if (parented === undefined) children.set(child, [memory.id])
+        else parented.push(memory.id)
+      }
     }
+    levels.set(memory.id, memory.level)
     known.set(memory.id, {
       covered: ground,
       cited,
@@ -180,14 +190,15 @@ export function seedFromLog(store: LogStore, session: Session): {
   // consolidate, and reads `mergedInto` directly on the merge ladder. Left unset, a
   // seeded pyramid looks like an unmerged backlog and opening it repopulates the
   // merge queue over children it already merged — one compression call per reopen.
-  // The deepest parent is the one that stands, because a parent minted after a
-  // child absorbed it is the node the pyramid narrowed to.
+  // A child names the parent that consolidated it directly, as the library's own
+  // merge stamps it; an entry two levels up reaches it through that parent. Of two
+  // parents that both cite one child — a consolidation minted again — the later
+  // one stands.
+  const rows = store.getStateJson(ids.summaries.id) as SummaryEntry[]
+  const rowAt = new Map(rows.map((entry, at) => [entry.id, at]))
   for (const [child, parents] of children) {
-    const rows = store.getStateJson(ids.summaries.id) as SummaryEntry[]
-    const at = rows.findIndex(entry => entry.id === child)
-    /* v8 ignore next -- unreachable: a child is named by an entry this loop wrote
-       into the slot, and nothing between the two writes removes one. */
-    if (at < 0) continue
+    // Every child is a recollection seeding wrote into the slot above.
+    const at = rowAt.get(child) as number
     store.editStateItem(
       ids.summaries.id,
       at,
@@ -256,6 +267,30 @@ export function resolveRange(
 type ResolvedRange = { firstSeq: number; lastSeq: number }
 
 /**
+ * The lowest and highest of a list of numbers, by a loop: a deep fold can stand
+ * for more seqs, and a claim can hold more positions, than a spread call accepts.
+ *
+ * @param values - log seqs or surface positions, in any order.
+ * @returns both ends, or undefined for an empty list.
+ */
+export function extent(values: readonly number[]): { first: number; last: number } | undefined {
+  if (values.length === 0) return undefined
+  let first = Infinity
+  let last = -Infinity
+  for (const value of values) {
+    if (value < first) first = value
+    if (value > last) last = value
+  }
+  return { first, last }
+}
+
+/** {@link extent} as a seq range. */
+function seqRange(seqs: readonly number[]): ResolvedRange | undefined {
+  const ends = extent(seqs)
+  return ends === undefined ? undefined : { firstSeq: ends.first, lastSeq: ends.last }
+}
+
+/**
  * Resolves recollections to the log span they cover by walking the chain above
  * each one. A recollection spans the union of what its own sources resolve to.
  */
@@ -299,8 +334,7 @@ class Ranges {
       const range = this.over(source, below)
       if (range !== undefined) seqs.push(range.firstSeq, range.lastSeq)
     }
-    if (seqs.length === 0) return undefined
-    return { firstSeq: Math.min(...seqs), lastSeq: Math.max(...seqs) }
+    return seqRange(seqs)
   }
 }
 
@@ -541,63 +575,66 @@ function foldNodes(session: Session): Map<string, FoldNode> {
     const sources = event.sourceEventSeqs as number[]
     const ground = sources.flatMap(seq => groundOf(events, seq, expanded))
     folds.set(id, {
-      covered: { firstSeq: Math.min(...ground), lastSeq: Math.max(...ground) },
-      cited: { firstSeq: Math.min(...sources), lastSeq: Math.max(...sources) },
+      covered: seqRange(ground) as ResolvedRange,
+      cited: seqRange(sources) as ResolvedRange,
       at: event.seq,
     })
   }
   return folds
 }
 
-/**
- * The recollections one recollection of recollections stands over.
- *
- * These are the outermost of the recollections inside it: an intermediate one carries
- * its own children's ground, so it is the layer the level above consolidated, and the
- * ones beneath it stay its own. Measured against the red-lemma log, which has 27
- * landed level-2 recollections, that reading places children under 23 of them and
- * adopts 117, where reading the interval a landed fold cites places 18 and adopts 55.
- *
- * Order is the pyramid's own, so the ids come out in the order the leaves they stand
- * over were laid down — `recallCurveLeafIds` reads a parent's leaves as the
- * concatenation of its children's, and a child out of place puts its leaves out of
- * order there.
- *
- * @param inside - the recollections whose ground falls inside the interval being read,
- * oldest first.
- * @returns the ids of the layer, as the parent cites them.
- */
-function childrenOf(inside: ReadonlyArray<readonly [string, RecollectionRange]>): string[] {
-  const layer: Array<readonly [string, RecollectionRange]> = []
-  for (const [id, child] of inside) {
-    const nested = layer.some(([, kept]) => again(kept.covered, child.covered))
-    /* v8 ignore next -- the `if` branch: both outcomes are ordinary, and the one that
-       pushes is the common case a log of layers is made of. */
-    if (!nested) layer.push([id, child])
-  }
-  return layer.map(([id]) => id)
+/** A lower-level recollection whose ground falls inside a parent's interval. */
+interface Candidate {
+  readonly id: string
+  readonly level: number
+  readonly covered: { readonly firstSeq: number; readonly lastSeq: number }
 }
 
 /**
- * Whether one recollection's ground holds another's, the two being distinct entries.
+ * The recollections one recollection of recollections stands over: the outermost
+ * of the lower-level ones inside its interval, in position order.
  *
- * Equal spans count as neither: a recollection whose ground is exactly its child's stands
- * over that child, which is what a fold whose node cited only the one child it reached
- * leaves behind, and both are layers of the interval above them — the ground one takes
- * is not what separates one layer from the next.
+ * Outermost is decided widest first. A recollection inside one already chosen is
+ * that one's own source, a layer further down, so it is left out: an L3 cites the
+ * L2s, not the L1s under them, and its leaves are counted once. Of two with
+ * exactly the same ground the higher level stands over the other, and of two at
+ * one level the one minted later.
+ *
+ * Position order is the pyramid's own, so the ids come out in the order the
+ * leaves they stand over were laid down — `recallCurveLeafIds` reads a parent's
+ * leaves as the concatenation of its children's, and a child out of place puts
+ * its leaves out of order there. Mint order is not position order: a chunk
+ * released from quarantine is minted after newer ground.
+ *
+ * @param inside - the lower-level recollections whose ground falls inside the
+ *   interval being read, in mint order.
+ * @returns the ids of the layer, as the parent cites them.
+ */
+function childrenOf(inside: readonly Candidate[]): string[] {
+  const width = (candidate: Candidate): number => candidate.covered.lastSeq - candidate.covered.firstSeq
+  const widest = inside
+    .map((candidate, minted) => ({ candidate, minted }))
+    .sort((left, right) => width(right.candidate) - width(left.candidate)
+      || right.candidate.level - left.candidate.level
+      || right.minted - left.minted)
+  const layer: Candidate[] = []
+  for (const { candidate } of widest) {
+    if (!layer.some(kept => within(kept.covered, candidate.covered))) layer.push(candidate)
+  }
+  return layer
+    .sort((left, right) => left.covered.firstSeq - right.covered.firstSeq)
+    .map(candidate => candidate.id)
+}
+
+/**
+ * Whether one recollection's ground lies inside another's, ends included.
  *
  * @param outer - the ground of the recollection already in the layer.
  * @param inner - the ground of the recollection being placed.
- * @returns whether `inner` sits strictly inside `outer`.
+ * @returns whether `inner` sits inside `outer`.
  */
-function again(outer: { firstSeq: number; lastSeq: number }, inner: { firstSeq: number; lastSeq: number }): boolean {
-  /* v8 ignore next 4 -- the second bound and the `lastSeq` disjunct: a candidate whose
-     ground starts inside the parent's always ends inside it too, because a span is the
-     union of the spans beneath it. Equal spans are the legacy fold that re-took one child
-     whole, and they reach the disjunct's left half. */
-  return inner.firstSeq >= outer.firstSeq
-    && inner.lastSeq <= outer.lastSeq
-    && (inner.firstSeq > outer.firstSeq || inner.lastSeq < outer.lastSeq)
+function within(outer: { firstSeq: number; lastSeq: number }, inner: { firstSeq: number; lastSeq: number }): boolean {
+  return inner.firstSeq >= outer.firstSeq && inner.lastSeq <= outer.lastSeq
 }
 
 /**

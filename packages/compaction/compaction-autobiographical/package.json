@@ -44,7 +44,7 @@
     "zod": "^4.4.3"
   },
   "dependencies": {
-    "@animalabs/context-manager": "^0.10.1",
+    "@animalabs/context-manager": "0.10.1",
     "@animalabs/membrane": "^0.5.69",
     "@deepseek-ai/schemastery": "workspace:^"
   },

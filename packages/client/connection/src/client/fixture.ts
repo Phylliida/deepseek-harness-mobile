@@ -1526,6 +1526,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   ]))
   /** Per-session subagent route overrides; absent means children inherit the session's selection. */
   const subagentModelSelections = new Map<SessionId, ModelSelection>()
+  const userModelSelections = new Map<SessionId, { provider: string; model: string; prompt: string }>()
   const attachments = new Map<string, { attachment: ImageAttachmentRef; data: string }>([[
     String(FIXTURE_IMAGE_REF.attachmentId),
     { attachment: FIXTURE_IMAGE_REF, data: FIXTURE_IMAGE_DATA },
@@ -2419,6 +2420,17 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         subagentModelSelections.set(sessionId, selected)
         return ok(request, { selected })
       },
+      selectUserModel: (request) => {
+        const { sessionId, provider, model, prompt } = request.payload
+        // The wire schema requires all three fields; all-absent is the disarm.
+        if (provider === undefined || model === undefined || prompt === undefined) {
+          userModelSelections.delete(sessionId)
+          return ok(request, { selected: null })
+        }
+        const selected = { provider, model, prompt }
+        userModelSelections.set(sessionId, selected)
+        return ok(request, { selected })
+      },
       prompt: (request) => {
         const { sessionId: id, mode, content } = request.payload
         const summary = summaryOf(id)
@@ -3128,6 +3140,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'session.models': return this.api.sessions.models(request)
       case 'session.selectModel': return this.api.sessions.selectModel(request)
       case 'session.selectSubagentModel': return this.api.sessions.selectSubagentModel(request)
+      case 'session.selectUserModel': return this.api.sessions.selectUserModel(request)
       case 'session.rename': return this.api.sessions.rename(request)
       case 'session.setCompactionConfig': return this.api.sessions.setCompactionConfig(request)
       case 'session.fork': return this.api.sessions.fork(request)

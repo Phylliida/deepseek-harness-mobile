@@ -26,7 +26,7 @@ The strategy's only output is a layout. The backend diffs that layout against th
 
 ## Reuse the published packages instead of vendoring source
 
-`@animalabs/context-manager` and `@animalabs/membrane` are npm dependencies. A `MembraneBridge` adapts the library's `complete()` onto `ctx.llm.stream()`, so credentials, routing, retry, and usage stay in the harness adapters and only request assembly is ours. Membrane is on the graph either way, because the library value-imports the native formatter.
+`@animalabs/context-manager` and `@animalabs/membrane` are npm dependencies. A `MembraneBridge` adapts the library's `complete()` onto `ctx.llm.stream()`, so credentials, routing, and usage stay in the harness adapters and only request assembly is ours. `ctx.llm.stream()` does not retry, so the bridge reports a failed call as membrane's own `complete()` would — retryable per the routed provider's retry policy, or final — and the library's policy decides when to try again ([review fixes](../bug-fix/2026-10-12-autobiographical-compaction-review-fixes.md)). Membrane is on the graph either way, because the library value-imports the native formatter.
 
 Vendoring, the [Cordis approach](../../../../vendor/README.md), was rejected. The library is 26k lines of source over a Rust N-API store; vendored outside the coverage gate's `packages/*/*/src` include scope it would become a large code home nothing measures, and vendored inside a package it would drag external source under per-file 100% coverage plus a standing review burden of foreign code. A dependency keeps the update path to a version bump and confines harness-owned code to the store shim, the planner, and the bridge.
 
@@ -34,7 +34,7 @@ Vendoring, the [Cordis approach](../../../../vendor/README.md), was rejected. Th
 
 The seam's convention for a replacement is a `user/message` built by `compactCheckpointSource` and framed to the model as established background. A recollection is neither background nor the user's: it is the agent's own past. It therefore lands as an `assistant/message` whose `compactionId` is the library's fold id and the seam transaction's id at once, so a later pass recognizes a fold node from the source and parses no prose back out.
 
-Its text still opens with a `[Recall <id>]` header, which is the convention folds written before `compactionId` carried and the fallback the replay reads for them. The source id is authoritative where both exist; the header is strictly a fallback.
+A recollection without a stored response opens its text with a `[Recall <id>]` header, which is the convention folds written before `compactionId` carried and the fallback the replay reads for them; one with a stored response lands that response's text. The source id is authoritative where both exist; the header is strictly a fallback.
 
 The cost is stated rather than hidden: a consumer that identifies a compaction checkpoint by message source will not recognize a fold node, so any future seam-level checkpoint bookkeeping must either learn this second shape or treat fold nodes as ordinary assistant messages.
 
@@ -42,7 +42,7 @@ The cost is stated rather than hidden: a consumer that identifies a compaction c
 
 The backend calls `manager.compile(budget)` to resolve the layout, then plans from the entries the strategy says it holds. Planning partitions the surface by recollection and annotates each node with the original seqs it covers, expanding a fold node down to the events it stands for so coverage stays comparable across fold levels. The span the strategy keeps verbatim is read from its own recent-window start; deriving either from anything else would duplicate the resolver inside this package.
 
-The budget is the adapter-reported context window, overridable by config and capped by `operatingWindowTokens`. A frontier that cannot fit even at its coarsest resolution raises `OverBudgetError`, which the backend retries once at the measured floor and otherwise absorbs: the surface stays as it was and the provider's own overflow recovery remains the terminal authority. Folding is likewise not gated on the seam's pressure triggers — a span folds when the strategy's resolution for it says so, which is what makes the schedule continuous rather than reactive.
+The budget is the adapter-reported context window, overridable by config and capped by `operatingWindowTokens`. A frontier that cannot fit even at its coarsest resolution raises `OverBudgetError`, which the backend retries once at the measured floor when that still fits the routed window and otherwise absorbs — a refusal whose `actual` is within its budget is structural and is not retried, and a manual call reports every refusal to its caller: the surface stays as it was and the provider's own overflow recovery remains the terminal authority. Folding is likewise not gated on the seam's pressure triggers — a span folds when the strategy's resolution for it says so, which is what makes the schedule continuous rather than reactive.
 
 ## Voice integrity constrains the memory-formation route
 
@@ -58,7 +58,7 @@ It is also the source of the backend's central limitation. A planned resolution 
 
 The library refuses to compress a chunk containing tool blocks until the host has declared the agent's tool definitions, because a tools-less replay of a tool transcript trips provider refusal classifiers. The backend therefore pushes the schemas the live request carries into the context on every pass, mapped into the library's own type. Without that the backend would look healthy on prose-only sessions and never fold the tool-heavy sessions that most need it — the failure is a silent deferral, not an error.
 
-The compression call still declares no tools on the wire: the compression path cannot continue a tool-call answer, and the library's own retry policy assumes the summarizer may answer on-pattern, so declaring them would invite a reply the path has to reject.
+The compression call declares the request's tools on the wire: a summarizer request that replays tool history without them reads to a provider's safety classifier as a foreign agent trace, and the library's refusal ladder escalates from a request that carries them.
 
 ## Automatic folding is a load-time setting
 

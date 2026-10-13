@@ -10,13 +10,21 @@ import {
 const M = 60_000
 
 describe('mergeSpans', () => {
-  it('merges overlaps and bridge gaps, keeping strict two-minute gaps disjoint', () => {
-    // Tap stamps at whole minutes 1..11 (user's example): totals 1 + 2 + 1.
-    const stamps = [1, 2, 5, 6, 7, 10, 11].map(minute => ({ start: minute * M, end: minute * M }))
+  it('merges overlaps and bridge gaps, keeping strict ten-minute gaps disjoint', () => {
+    // Stamps at 2:34, 2:43, 2:52, 3:22, 3:25, 3:29: windows of 18 and 7 minutes.
+    const stamps = [154, 163, 172, 202, 205, 209].map(minute => ({ start: minute * M, end: minute * M }))
     expect(mergeSpans(stamps)).toEqual([
-      { start: 1 * M, end: 2 * M },
-      { start: 5 * M, end: 7 * M },
-      { start: 10 * M, end: 11 * M },
+      { start: 154 * M, end: 172 * M },
+      { start: 202 * M, end: 209 * M },
+    ])
+  })
+
+  it('keeps a lone stamp as a zero-length anchor', () => {
+    // Taps at minutes 0, 5, and 30: the first two bridge, the third anchors alone.
+    const stamps = [0, 5, 30].map(minute => ({ start: minute * M, end: minute * M }))
+    expect(mergeSpans(stamps)).toEqual([
+      { start: 0, end: 5 * M },
+      { start: 30 * M, end: 30 * M },
     ])
   })
 
@@ -47,12 +55,12 @@ describe('mergeSpans', () => {
 
   it('sorts, clamps inverted spans, and contains stamps inside a span', () => {
     expect(mergeSpans([
-      { start: 10 * M, end: 12 * M },
-      { start: 11 * M, end: 11 * M },
+      { start: 30 * M, end: 32 * M },
+      { start: 31 * M, end: 31 * M },
       { start: 5 * M, end: 4 * M },
     ])).toEqual([
       { start: 5 * M, end: 5 * M },
-      { start: 10 * M, end: 12 * M },
+      { start: 30 * M, end: 32 * M },
     ])
   })
 })
@@ -68,9 +76,9 @@ describe('foldEntry', () => {
   })
 
   it('merges whole spans against existing ones out of order', () => {
-    expect(foldEntry([{ start: 10 * M, end: 11 * M }], { spans: [{ start: 0, end: M }] })).toEqual([
+    expect(foldEntry([{ start: 30 * M, end: 31 * M }], { spans: [{ start: 0, end: M }] })).toEqual([
       { start: 0, end: M },
-      { start: 10 * M, end: 11 * M },
+      { start: 30 * M, end: 31 * M },
     ])
   })
 

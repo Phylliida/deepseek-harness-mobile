@@ -297,6 +297,22 @@ export const sessionSelectSubagentModelValueSchema = z.object({
   selected: modelSelectionSchema.nullable(),
 }) satisfies z.ZodType<Wire<ResponseValue<'session.selectSubagentModel'>>>
 
+/** session.selectUserModel request payload (provider/model/prompt all absent disarms). */
+export const sessionSelectUserModelRequestSchema = z.object({
+  sessionId: sessionIdSchema,
+  provider: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  prompt: z.string().min(1).optional(),
+}).refine(payload => (payload.provider === undefined) === (payload.model === undefined)
+  && (payload.provider === undefined) === (payload.prompt === undefined), {
+  message: 'arming the user-model requires provider, model, and prompt together',
+}) satisfies z.ZodType<Wire<RequestPayload<'session.selectUserModel'>>>
+
+/** session.selectUserModel response value. */
+export const sessionSelectUserModelValueSchema = z.object({
+  selected: modelSelectionSchema.extend({ prompt: z.string() }).nullable(),
+}) satisfies z.ZodType<Wire<ResponseValue<'session.selectUserModel'>>>
+
 /** ContentBlock passthrough: core is merge-extensible — the type discriminant envelope is strict, the rest stays wide. */
 export const contentBlockSchema = z.looseObject({ type: z.string() })
 

@@ -5,6 +5,7 @@
  * merge lives here.
  */
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
+import type { UserModelSelection } from '@deepseek-ai/dsh-user-model/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ModelDirectoryState } from './directory.ts'
 
@@ -28,4 +29,10 @@ export interface ModelSelectInjected {
    * @returns whether the host accepted the selection.
    */
   selectSubagent: (selection: ModelSelection | null) => Promise<boolean>
+  /**
+   * Arm or disarm the session's user-model companion.
+   * @param selection - route plus the human's goal prompt, or null to disarm.
+   * @returns whether the host accepted the selection.
+   */
+  selectUserModel: (selection: UserModelSelection | null) => Promise<boolean>
 }

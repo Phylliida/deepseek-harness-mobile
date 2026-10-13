@@ -103,9 +103,9 @@ export interface AutobiographicalMemoryEventData extends StrategyStats {
   /** Present when the tick minted a recollection; absent when it only advanced the pyramid. */
   memory?: AutobiographicalMemoryMint
   /**
-   * The newest settled call's provider-reported usage. Memory formation pays
-   * real tokens outside any turn, so the tokenUsage projection folds these
-   * records into the session's cost accounting.
+   * Provider-reported usage summed over every call settled since the previous
+   * record. Memory formation pays real tokens outside any turn, so the tokenUsage
+   * projection folds these records into the session's cost accounting.
    */
   usage?: TokenUsage
 }
@@ -138,21 +138,4 @@ declare module '@deepseek-ai/dsh-session/types' {
     /** Live memory-formation text, and the terminal flush that closes the attempt. */
     'autobio/memory-progress': AutobiographicalMemoryProgressEventData
   }
-}
-
-/**
- * Fixed-density sizing for one surface node. Deliberately crude, and only ever
- * reported: `compaction/summary` carries `shadowedTokenCount` as the fold's
- * claim on the ground it replaces, which the token meter delta-accounts.
- *
- * The compile budget does not read this. The manager prices its own store with a
- * density-aware estimator, so passing this one to `ContextManager.open` would
- * replace a measured heuristic with a cruder one and misprice every pick.
- *
- * @param text - the rendered text to size.
- * @returns the text's length divided by four and rounded up, so text of any
- *   length reports at least one token.
- */
-export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4)
 }

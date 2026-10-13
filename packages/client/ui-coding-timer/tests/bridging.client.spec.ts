@@ -17,7 +17,7 @@ describe('displaySpans', () => {
   })
 
   it('does not extend a tail whose bridge window has closed', () => {
-    const d = displaySpans({ spans: [{ start: 0, end: M }], pendingStamps: [] }, 4 * M)
+    const d = displaySpans({ spans: [{ start: 0, end: M }], pendingStamps: [] }, 11 * M)
     expect(d.live).toBe(false)
     expect(d.spans).toEqual([{ start: 0, end: M }])
   })

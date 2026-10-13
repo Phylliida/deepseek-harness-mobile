@@ -7,14 +7,19 @@
  * is associative and commutative, so stamps and spans from concurrent devices
  * merge to the same document regardless of arrival order. A stamp with no
  * neighbor inside the bridge window survives as a zero-length span: it counts
- * no time itself but anchors a future bridge, exactly the timer rule (taps
- * at minutes 1, 2, 5, 6, 7, 10, 11 total 1 + 2 + 1 minutes).
+ * no time itself but anchors a future bridge, exactly the timer rule (stamps
+ * at 2:34, 2:43, 2:52, 3:22, 3:25, 3:29 total 18 + 7 minutes).
  *
  * @module @deepseek-ai/dsh-coding-activity/document
  */
 
-/** Adjacent interactions closer than this bridge into one continuous coding span. */
-export const CODING_ACTIVITY_BRIDGE_MS = 120_000
+/**
+ * Adjacent interactions closer than this bridge into one continuous coding
+ * span. Widening the bridge needs no migration: spans canonicalized under a
+ * narrower bridge re-merge on the next fold exactly as their raw stamps
+ * would under the wider one. Narrowing it cannot split stored spans.
+ */
+export const CODING_ACTIVITY_BRIDGE_MS = 600_000
 
 /** On-disk and wire format version; there is no migration promise across versions. */
 export const CODING_ACTIVITY_FORMAT_VERSION = 1
@@ -63,7 +68,10 @@ export interface CodingActivityEntry {
   spans?: CodingSpan[]
 }
 
-/** @returns the empty v1 document. */
+/**
+ * Build the document an absent file stands for.
+ * @returns the empty v1 document: revision 0, no spans.
+ */
 export function emptyCodingActivityDocument(): CodingActivityDocument {
   return { version: CODING_ACTIVITY_FORMAT_VERSION, revision: 0, spans: [] }
 }
@@ -72,7 +80,7 @@ export function emptyCodingActivityDocument(): CodingActivityDocument {
  * Canonicalize a span set: sort by start, clamp inverted spans, and
  * bridge-merge — a following span whose start is strictly less than
  * {@link CODING_ACTIVITY_BRIDGE_MS} after the merged run's end joins the run
- * (a gap of exactly the bridge width does NOT: "less than two minutes" is
+ * (a gap of exactly the bridge width does NOT: "less than ten minutes" is
  * strict). The result is ascending and bridge-disjoint.
  * @param spans - spans in any order, possibly overlapping or inverted.
  * @returns the canonical sorted, merged list.

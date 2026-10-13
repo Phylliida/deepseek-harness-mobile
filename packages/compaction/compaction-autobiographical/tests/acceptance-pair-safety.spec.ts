@@ -24,7 +24,7 @@ import AutobiographicalCompactionEngine from '../src/index.ts'
 import { planFolds, priceSurfaceNode } from '../src/plan.ts'
 import { seedFromLog } from '../src/seed.ts'
 import { LogStore, MESSAGES_STATE } from '../src/store.ts'
-import { provideTokenMeter, summarizer } from './harness.ts'
+import { fakeLlm, provideTokenMeter, summarizer } from './harness.ts'
 
 const ROUTE = { provider: 'test', model: 'test-model' }
 
@@ -98,7 +98,7 @@ function toolEngine(id: string, turns: number): {
   const { session, pairs } = toolTranscript(id, turns)
   const calls: never[] = []
   const ctx = new Context()
-  ctx.provide('llm', summarizer(calls as never) as never)
+  ctx.provide('llm', fakeLlm(summarizer(calls as never)) as never)
   provideTokenMeter(ctx)
   const engine = new AutobiographicalCompactionEngine(ctx, {
     operatingWindowTokens: 700,

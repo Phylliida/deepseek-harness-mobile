@@ -30,6 +30,7 @@ export interface RpcMethodMap {
   'session.models': SessionsApi['models']
   'session.selectModel': SessionsApi['selectModel']
   'session.selectSubagentModel': SessionsApi['selectSubagentModel']
+  'session.selectUserModel': SessionsApi['selectUserModel']
   'session.rename': SessionsApi['rename']
   'session.setCompactionConfig': SessionsApi['setCompactionConfig']
   'session.fork': SessionsApi['fork']

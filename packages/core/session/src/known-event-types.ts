@@ -62,6 +62,9 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'tool/result',
   'turn/end',
   'turn/start',
+  'user-model/armed',
+  'user-model/disarmed',
+  'user-model/request',
   'user/message',
   'web/deepseek-search-llm-request',
 ])

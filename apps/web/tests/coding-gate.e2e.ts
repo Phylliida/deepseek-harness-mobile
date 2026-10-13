@@ -35,7 +35,7 @@ describe('web e2e: coding gate', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-coding-gate'))
     // Boot counts as arrival: the UI starts open and the cover waits out the
     // first idle stretch.
-    await page.getByRole('button', { name: 'New Session' }).waitFor({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Coding time stats' }).waitFor({ timeout: 30_000 })
 
     // Touching the app records activity on the shared log.
     await page.mouse.move(400, 300)
@@ -71,7 +71,7 @@ describe('web e2e: coding gate', () => {
     // A reload reads the persisted preference: no cover even after idling.
     await page.reload({ waitUntil: 'load' })
     await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
-    await page.getByRole('button', { name: 'New Session' }).waitFor({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Coding time stats' }).waitFor({ timeout: 30_000 })
     await page.waitForTimeout((IDLE_MINUTES + 1) * 60_000)
     expect(await page.getByRole('dialog', { name: 'Coded today' }).count()).toBe(0)
     expect(tripwire.pageErrors).toEqual([])

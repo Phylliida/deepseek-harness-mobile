@@ -162,11 +162,11 @@ describe('a pyramid replayed from the log', () => {
     /* oxlint-enable typescript/no-deprecated */
   })
 
-  it('binds a recollection to the deepest parent the log names for it', () => {
-    // Every level names the recollections it absorbed, so a pyramid three deep names
-    // each leaf twice. The entry that stands over a leaf's ground is the one nothing
-    // above it names: pointing a leaf at an intermediate parent leaves the intermediate
-    // standing for ground the level above it already consolidated.
+  it('binds each recollection to the parent that consolidated it', () => {
+    // A pyramid three deep holds every leaf under an L2 and every L2 under the L3.
+    // The L3 cites the L2s, not the L1s beneath them, and each entry names the
+    // parent that consolidated it directly — the shape the library's own merges
+    // leave, where an entry two levels up is reached through the one between.
     const live = pyramid('reopen-deep', { exchanges: 4, pack: 2 })
     const packed = live.events.flatMap(event => event.type === 'autobio/memory' && event.data.memory?.level === 2
       ? [event.data.memory]
@@ -194,11 +194,77 @@ describe('a pyramid replayed from the log', () => {
     seedFromLog(store, live)
     const byId = new Map(rows(store).map(entry => [entry.id, entry]))
 
+    expect(byId.get('L3-0')?.sourceIds).toEqual(['L2-0', 'L2-1'])
+    expect(byId.get('L3-0')?.sourceRange).toEqual({
+      first: byId.get('L1-0')?.sourceIds[0],
+      last: byId.get('L1-3')?.sourceIds.at(-1),
+    })
     /* oxlint-disable typescript/no-deprecated -- the field the merge ladder reads */
     expect(byId.get('L2-0')?.mergedInto).toBe('L3-0')
     expect(byId.get('L2-1')?.mergedInto).toBe('L3-0')
-    for (let index = 0; index < 4; index++) expect(byId.get(`L1-${index}`)?.mergedInto).toBe('L3-0')
+    expect(byId.get('L1-0')?.mergedInto).toBe('L2-0')
+    expect(byId.get('L1-1')?.mergedInto).toBe('L2-0')
+    expect(byId.get('L1-2')?.mergedInto).toBe('L2-1')
+    expect(byId.get('L1-3')?.mergedInto).toBe('L2-1')
     expect(byId.get('L3-0')?.mergedInto).toBeUndefined()
+    /* oxlint-enable typescript/no-deprecated */
+  })
+
+  it('orders a recollection\'s sources by where their ground lies, not by when they were minted', () => {
+    // A chunk released from quarantine is minted after newer ground: here the
+    // first exchange's recollection is the second one written. Its parent still
+    // cites its children in position order and bounds its range by the first
+    // and last leaf, so the recall curve walks the leaves in order.
+    const live = Session.create(SessionId('reopen-out-of-order'))
+    live.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 100_000 })
+    const exchanges = [0, 1, 2].map((turn) => {
+      live.append('turn/start', { turn })
+      const ask = live.append('user/message', createUserMessage({
+        content: [{ type: 'text', text: `ask ${turn}` }],
+        source: { kind: 'user' },
+      }), { surfaceOp: 'append' }).seq
+      const answer = live.append('assistant/message', {
+        turn,
+        step: 0,
+        message: createAssistantMessage({ content: [{ type: 'text', text: `answer ${turn}` }], source: { provider: 'test', model: 'test-model' } }),
+      }, { surfaceOp: 'append' }).seq
+      live.append('turn/end', { turn, reason: { kind: 'completed' } })
+      return { firstSeq: ask, lastSeq: answer }
+    })
+    const [first, second, third] = exchanges as [typeof exchanges[0], typeof exchanges[0], typeof exchanges[0]]
+    live.append('autobio/memory', mint('L1-0', 1, second))
+    live.append('autobio/memory', mint('L1-1', 1, first))
+    live.append('autobio/memory', mint('L1-2', 1, third))
+    live.append('autobio/memory', mint('L2-3', 2, { firstSeq: first.firstSeq, lastSeq: third.lastSeq }))
+
+    const store = createStore()
+    const { known } = seedFromLog(store, live)
+    const byId = new Map(rows(store).map(entry => [entry.id, entry]))
+
+    expect(byId.get('L2-3')?.sourceIds).toEqual(['L1-1', 'L1-0', 'L1-2'])
+    expect(byId.get('L2-3')?.sourceRange).toEqual({
+      first: byId.get('L1-1')?.sourceIds[0],
+      last: byId.get('L1-2')?.sourceIds.at(-1),
+    })
+    expect(known.get('L2-3')?.covered).toEqual({ firstSeq: first.firstSeq, lastSeq: third.lastSeq })
+  })
+
+  it('stamps a child with the later of two parents that consolidated it', () => {
+    // A consolidation minted twice over the same children — a reopen that lost
+    // the first record's announcement, say — leaves the later parent standing.
+    const live = pyramid('reopen-two-parents', { exchanges: 2, pack: 2 })
+    const packed = live.events.flatMap(event => event.type === 'autobio/memory' && event.data.memory?.level === 2
+      ? [event.data.memory]
+      : [])
+    live.append('autobio/memory', mint('L2-9', 2, packed[0]?.sourceRange as { firstSeq: number; lastSeq: number }))
+
+    const store = createStore()
+    seedFromLog(store, live)
+    const byId = new Map(rows(store).map(entry => [entry.id, entry]))
+
+    /* oxlint-disable typescript/no-deprecated -- the field the merge ladder reads */
+    expect(byId.get('L1-0')?.mergedInto).toBe('L2-9')
+    expect(byId.get('L1-1')?.mergedInto).toBe('L2-9')
     /* oxlint-enable typescript/no-deprecated */
   })
 

@@ -39,6 +39,9 @@
       "path": "../../runtime-diagnostics/invariants"
     },
     {
+      "path": "../../user-model/user-model"
+    },
+    {
       "path": "../../api/remotes/tsconfig.client.json"
     }
   ]

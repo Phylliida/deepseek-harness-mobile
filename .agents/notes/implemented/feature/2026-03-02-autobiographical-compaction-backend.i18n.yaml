@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-03-02-autobiographical-compaction-backend.md
-2026-03-02-autobiographical-compaction-backend.md: a287ea94a875e230addee12881be64ff7b68d86c
-2026-03-02-autobiographical-compaction-backend.zh.md: 774ad6dbcdbcc4dff28194176b031e63d293ef96
+2026-03-02-autobiographical-compaction-backend.md: 05e94c61b477c2065c10b003b12e610ea7fccf01
+2026-03-02-autobiographical-compaction-backend.zh.md: c3bd91f1cbc1637ab9f9d3a651583cfca6c2ccbb

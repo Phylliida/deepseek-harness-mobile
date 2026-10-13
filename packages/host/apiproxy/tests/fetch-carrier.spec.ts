@@ -107,6 +107,21 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
           },
         }
       },
+      async selectUserModel(request) {
+        return {
+          rpcId: request.rpcId,
+          result: {
+            ok: true,
+            value: {
+              selected: request.payload.provider === undefined
+                  || request.payload.model === undefined
+                  || request.payload.prompt === undefined
+                ? null
+                : { provider: request.payload.provider, model: request.payload.model, prompt: request.payload.prompt },
+            },
+          },
+        }
+      },
       async fork(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { sessionId: 's-fork' as never } } }
       },
@@ -379,6 +394,17 @@ describe('unary round trip (handler ⇄ client, no network)', () => {
         },
       },
     })
+    const userModel = await c.sessions.selectUserModel({
+      sessionId: 's' as never,
+      provider: 'deepseek-official',
+      model: 'deepseek-v4-flash',
+      prompt: 'You want the workspace tidy.',
+    })
+    expect(userModel.result).toMatchObject({
+      ok: true,
+      value: { selected: { provider: 'deepseek-official', model: 'deepseek-v4-flash', prompt: 'You want the workspace tidy.' } },
+    })
+    expect((await c.sessions.selectUserModel({ sessionId: 's' as never })).result).toEqual({ ok: true, value: { selected: null } })
     const renamed = await c.sessions.rename({ sessionId: 's' as never, title: 'named' })
     expect(renamed.result).toMatchObject({ ok: true, value: { title: 'named', seq: 0 } })
     expect((await c.sessions.prompt({ sessionId: 's' as never, mode: 'queue', content: [{ type: 'text', text: 'x' }] })).result.ok).toBe(true)

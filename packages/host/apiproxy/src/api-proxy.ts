@@ -89,7 +89,7 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import type { CallId } from '@deepseek-ai/dsh-llm/brand'
 import type { ScopeKey } from '@deepseek-ai/dsh-scope'
-import type { ApprovalOutcome, ApprovalRequestId } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalOutcome, ApprovalRequest, ApprovalRequestId } from '@deepseek-ai/dsh-user-approval'
 // Side-effect type import: resolves the `approval/request` waterfall and
 // `ctx.get('approval')` without a value dependency on the seam (optional composition).
 import type {} from '@deepseek-ai/dsh-user-approval'
@@ -102,6 +102,12 @@ import type {
   AskUserQuestionAnswer, AskUserQuestionItem, AskUserQuestionRequest,
 } from '@deepseek-ai/dsh-user-questions'
 import { UserQuestionError } from '@deepseek-ai/dsh-user-questions'
+import {
+  buildUserModelTranscript, callUserModel, parseUserModelApproval, parseUserModelQuestions,
+  readUserModelSelection, renderUserModelApprovalPrompt, renderUserModelQuestionsPrompt,
+  renderUserModelSystemPrompt,
+} from '@deepseek-ai/dsh-user-model'
+import type { UserModelApprovalRequest } from '@deepseek-ai/dsh-user-model'
 import { DirectoryPickerError } from '@deepseek-ai/dsh-host-directory-picker'
 import {
   ApiRemoteSessionNotFound as SessionNotFound,
@@ -138,6 +144,9 @@ const SESSION_SEARCH_PROVIDER_CALL_LIMIT = 100
 const COLD_SUMMARY_BATCH_SIZE = 16
 /** Default maximum artifact size eligible for one cold blankness read. */
 export const DEFAULT_COLD_BLANK_PROBE_MAX_BYTES = 1024
+
+/** Default output-token cap for user-model question and approval calls. */
+export const DEFAULT_USER_MODEL_MAX_TOKENS = 4096
 
 /** Conversation message event types (the pagination counting unit). */
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
@@ -663,6 +672,8 @@ export interface ApiProxyDefaults {
   sessionExportCompressionLevel?: SessionLogCompressionLevel
   /** Maximum artifact size eligible for one cold blankness read. */
   coldBlankProbeMaxBytes?: number
+  /** Output-token cap for user-model question and approval calls; defaults to 4096. */
+  userModelMaxTokens?: number
   /**
    * Whether handing a path to the native opener can work at all — the
    * `hasDocument` capability the preset roster reports, and the switch
@@ -1112,6 +1123,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ?? DEFAULT_SESSION_LOG_COMPRESSION_LEVEL
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
+  const userModelMaxTokens = defaults.userModelMaxTokens ?? DEFAULT_USER_MODEL_MAX_TOKENS
   /** The seed model each create/resume declares; re-read so it never goes stale. */
   const agentOptions = (): AgentOptions => {
     const { provider, model } = defaults.defaultModelSelection()
@@ -1384,13 +1396,50 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     })
   }
 
+  /**
+   * Offer an armed user-model the question first. Any failure — call error,
+   * parse error, abort — falls back to the human so a user-model hiccup can
+   * never wedge the agent on a question nobody answers.
+   */
+  async function tryUserModelQuestions(agent: Agent, request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer | undefined> {
+    const selection = readUserModelSelection(agent.session.events)
+    if (selection === null) return undefined
+    try {
+      const text = await callUserModel({
+        llm: ctx.llm,
+        session: agent.session,
+        purpose: 'question',
+        provider: selection.provider,
+        model: selection.model,
+        system: renderUserModelSystemPrompt(selection),
+        messages: [
+          ...buildUserModelTranscript(agent.session.deriveMessages(), selection),
+          createUserMessage({
+            content: [{ type: 'text', text: renderUserModelQuestionsPrompt(request.questions) }],
+            source: { kind: 'user' },
+          }),
+        ],
+        maxTokens: userModelMaxTokens,
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+      })
+      return parseUserModelQuestions(text, request.questions)
+    } catch (error: unknown) {
+      ctx.logger.warn(
+        `api-proxy: user-model could not answer a question; the human keeps it: ${String(error)}`)
+      return undefined
+    }
+  }
+
   const disposeProvider = ctx.userQuestions.registerProvider({
-    ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> {
-      const sessionId = request.agent?.id
-      if (sessionId === undefined) {
-        return Promise.reject(new UserQuestionError(
-          'web user interaction requires an agent-owned session', 'ASK_MISSING_AGENT'))
+    async ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> {
+      const agent = request.agent
+      if (agent === undefined) {
+        throw new UserQuestionError(
+          'web user interaction requires an agent-owned session', 'ASK_MISSING_AGENT')
       }
+      const sessionId = agent.id
+      const userModelAnswer = await tryUserModelQuestions(agent, request)
+      if (userModelAnswer !== undefined) return userModelAnswer
       return new Promise<AskUserQuestionAnswer>((resolve, reject) => {
         const rpcId = RpcId(randomUUID())
         const pending: PendingQuestion = {
@@ -1430,6 +1479,65 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   // the same rpcId (the refresh-recovery baseline) — and withdraws on the
   // ask's own abort signal (turn cancel), pushing `cancelled` to subscribers.
   if (ctx.get('approval') !== undefined) {
+    /**
+     * Build the user-model's approval prompt. The tool call with its
+     * arguments already streams in the transcript; the callId lookup adds the
+     * exact arguments to the prompt line so the user-model judges the precise
+     * invocation rather than its own memory of the transcript summary.
+     */
+    function approvalPromptOf(req: ApprovalRequest): UserModelApprovalRequest {
+      const prompt: { tool: string; args?: unknown; description?: string } = { tool: req.toolName }
+      if (req.callId !== undefined) {
+        for (const message of req.agent.session.deriveMessages()) {
+          for (const block of message.content) {
+            if (block.type !== 'tool-call' || block.id !== req.callId) continue
+            try {
+              prompt.args = JSON.parse(block.arguments)
+            } catch {
+              // Unparseable raw JSON still frames better than an omitted line.
+              prompt.args = block.arguments
+            }
+          }
+        }
+      }
+      if (req.reason !== undefined) prompt.description = req.reason
+      return prompt
+    }
+
+    /**
+     * Offer an armed user-model the approval first. Any failure — call
+     * error, parse error, abort — falls back to the human so a user-model
+     * hiccup can never wedge the agent on an approval nobody decides.
+     */
+    async function tryUserModelApproval(req: ApprovalRequest): Promise<ApprovalOutcome | undefined> {
+      const selection = readUserModelSelection(req.agent.session.events)
+      if (selection === null) return undefined
+      try {
+        const text = await callUserModel({
+          llm: ctx.llm,
+          session: req.agent.session,
+          purpose: 'approval',
+          provider: selection.provider,
+          model: selection.model,
+          system: renderUserModelSystemPrompt(selection),
+          messages: [
+            ...buildUserModelTranscript(req.agent.session.deriveMessages(), selection),
+            createUserMessage({
+              content: [{ type: 'text', text: renderUserModelApprovalPrompt(approvalPromptOf(req)) }],
+              source: { kind: 'user' },
+            }),
+          ],
+          maxTokens: userModelMaxTokens,
+          ...(req.signal === undefined ? {} : { signal: req.signal }),
+        })
+        return parseUserModelApproval(text) ? 'allowed-once' : 'rejected'
+      } catch (error: unknown) {
+        ctx.logger.warn(
+          `api-proxy: user-model could not decide an approval; the human keeps it: ${String(error)}`)
+        return undefined
+      }
+    }
+
     // Teardown parity with the question provider above: a gateway disposed
     // while approvals are pending settles every entry as 'cancelled' (the
     // service's fail-closed vocabulary), so no ask promise dangles past the
@@ -1437,12 +1545,14 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ctx.effect(() => () => {
       for (const pending of [...pendingApprovals.values()]) pending.resolve('cancelled')
     }, 'api-proxy: approval registry teardown')
-    ctx.on('approval/request', (req, next) => {
+    ctx.on('approval/request', async (req, next) => {
       // Dispatch rides a microtask behind the service's own signal check: an
       // abort landing in that window would register the abort listener AFTER
       // the signal fired — never invoked, entry pending forever, zombie frame
       // on every mux replay. Settle synchronously instead of publishing.
-      if (req.signal?.aborted === true) return Promise.resolve<ApprovalOutcome>('cancelled')
+      if (req.signal?.aborted === true) return 'cancelled'
+      const userModelOutcome = await tryUserModelApproval(req)
+      if (userModelOutcome !== undefined) return userModelOutcome
       // The audit pair `approval/asked` is already appended by the service
       // before dispatch, but dispatch rides a microtask: parallel tool calls
       // can append several asked events before any answerer runs. THIS
@@ -2368,6 +2478,34 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           const resolved = await ctx.llm.resolveCallConfig({ provider, model })
           override.current = { provider: resolved.provider, model: resolved.model }
           return ok(request, { selected: { provider: resolved.provider, model: resolved.model } })
+        } catch (error: unknown) {
+          return err(request, {
+            code: 'model-unavailable',
+            message: error instanceof Error ? error.message : String(error),
+            details: { provider, model },
+          })
+        }
+      },
+
+      async selectUserModel(request) {
+        const { sessionId, provider, model, prompt } = request.payload
+        const found = await agentFor(sessionId)
+        if ('error' in found) return err(request, found.error)
+        // The wire schema requires all three fields together; all-absent is
+        // the disarm. Both arms are durable session events so the state
+        // survives cold resume.
+        if (provider === undefined || model === undefined || prompt === undefined) {
+          found.agent.session.append('user-model/disarmed', { reason: 'user' })
+          return ok(request, { selected: null })
+        }
+        try {
+          const resolved = await ctx.llm.resolveCallConfig({ provider, model })
+          found.agent.session.append('user-model/armed', {
+            provider: resolved.provider, model: resolved.model, prompt,
+          })
+          return ok(request, {
+            selected: { provider: resolved.provider, model: resolved.model, prompt },
+          })
         } catch (error: unknown) {
           return err(request, {
             code: 'model-unavailable',

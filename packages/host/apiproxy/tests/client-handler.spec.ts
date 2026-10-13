@@ -58,6 +58,11 @@ function scriptedApi(overrides: {
           ? null
           : { provider: r.payload.provider, model: r.payload.model },
       }),
+      selectUserModel: r => ok(r, {
+        selected: r.payload.provider === undefined || r.payload.model === undefined || r.payload.prompt === undefined
+          ? null
+          : { provider: r.payload.provider, model: r.payload.model, prompt: r.payload.prompt },
+      }),
       rename: r => ok(r, { title: 'renamed', seq: 0 }),
       setCompactionConfig: r => ok(r, { seq: 0 }),
       fork: r => ok(r, { sessionId: sid('s-fork') }),

@@ -25,6 +25,7 @@ import type {
   ManualCompactAgentContext,
 } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
+import { assertNever } from '@deepseek-ai/dsh-llm'
 import type { TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { isJsonValue } from '@deepseek-ai/dsh-session'
 import type { RequestContext, Session, SessionEvent } from '@deepseek-ai/dsh-session'
@@ -36,7 +37,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 // node price comes from.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { applyFolds } from './apply.ts'
-import { createBridge, isTransientFailure } from './bridge.ts'
+import { createBridge } from './bridge.ts'
 import { resolveConfig } from './config.ts'
 import { DivergenceError, planFolds, priceSurfaceNode } from './plan.ts'
 import { compactionConfigProjectionDefinition } from './projection.ts'
@@ -73,7 +74,7 @@ interface Pass {
   /** Step within that turn the replacement message is stamped with. */
   readonly step: number
   /** Cancellation for the calls this pass kicks. */
-  readonly signal?: AbortSignal
+  readonly signal: AbortSignal
 }
 
 /** The live context-manager stack for one session. */
@@ -112,14 +113,23 @@ interface Runtime {
    * The bridge reads it when a call starts: the tick runs after the pass that
    * kicked it has returned, so the signal has to outlive that pass.
    */
-  cancellation: { signal: AbortSignal | undefined }
+  cancellation: { signal: AbortSignal }
   /**
-   * Whether the tick chain's current link saw a call fail on transport. The
-   * bridge sets it through the text tap; the chain resets it when a tick starts
-   * and reads it when the tick settles, both inside the chain, so one tick's
-   * failure is never attributed to the next tick's quarantine.
+   * Aborted when the engine drops this runtime — session disposal or plugin
+   * unload. Every call the runtime makes runs under it as well as under the
+   * pass's cancellation, and a retired runtime writes nothing more to the log:
+   * the session may have reopened another runtime under the same id.
    */
-  transport: { failed: boolean }
+  retirement: AbortController
+  /** Calls the bridge has started, which tells a tick that called the model from one that did not. */
+  calls: { started: number }
+  /**
+   * Whether the tick chain's current link saw a call fail retryably. The bridge
+   * sets it through the text tap; the chain resets it when a tick starts and reads
+   * it when the tick settles, both inside the chain, so one tick's failure is
+   * never attributed to the next tick's quarantine.
+   */
+  transient: { failed: boolean }
   /** The tool declaration set the strategy was last handed, by identity. */
   declaredTools: readonly ToolSchema[] | undefined
   /** The system prompt the strategy was last handed. */
@@ -133,13 +143,34 @@ interface Runtime {
   recorded: number
   /** Seq of the newest event fed to calibration, so one usage is reported once. */
   calibrated: number
-  /**
-   * Seq of the newest user message this runtime has seen. A pass that finds a
-   * newer one is the chat resuming after a turn that may have been cancelled.
-   */
-  lastAsk: number
   /** Background work chain; a turn never awaits it. */
   tickChain: Promise<void>
+}
+
+/** What one folding pass did, for each entry point to report its own way. */
+type FoldOutcome =
+  /** A fold landed; the result is the last of the pass's transactions. */
+  | { readonly kind: 'landed'; readonly result: CompactionResult }
+  /** The surface already matches the layout the strategy committed. */
+  | { readonly kind: 'settled' }
+  /** The pass could not plan against this session now; `reason` says why. */
+  | { readonly kind: 'refused'; readonly reason: string }
+  /** The pass's signal fired before anything landed. */
+  | { readonly kind: 'cancelled' }
+
+/**
+ * The strategy with ingest sharding off. With adaptive resolution on, the library
+ * splits a long text message into several store rows; a fold replaces whole log
+ * events, so a recollection of one shard could only land by taking the whole
+ * message, and the shards' other recollections could never land at all. One row
+ * per log event is also what seeding writes, so a live runtime and a reopened
+ * one chunk the same history the same way.
+ */
+class UnshardedStrategy extends AutobiographicalStrategy {
+  /** @returns null: every message is stored as the one row it is in the log. */
+  override chunkIngressMessage(): null {
+    return null
+  }
 }
 
 /**
@@ -211,6 +242,8 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     if (this.config.auto) {
       ctx.on('agent/pre-step', async ({ agent, turn, step, signal }, next) => {
         try {
+          // A refusal is already on the console where it arose, and a cancelled
+          // turn has nothing to report, so only a throw is this listener's to say.
           await this.foldPass(agent, { turn, step, signal })
         } catch (error: unknown) {
           this.warn(`folding failed: ${describe(error)}; continuing the turn`)
@@ -222,14 +255,16 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // an agent disposal must not drop it, because agents turn over inside a
     // session while the picker's state — resolutions, receipts, calibration —
     // lives only in the runtime's memory, and a rebuild re-decides it all from
-    // scratch. Dropping the map entry is the whole of disposal either way:
-    // `ContextManager.close()` calls the store's `close` only when the manager
-    // opened the store itself, and this backend always hands its own store in,
-    // so there is nothing to close.
+    // scratch. Dropping a runtime retires it: its in-flight and queued calls are
+    // cancelled and it writes nothing more. `ContextManager.close()` calls the
+    // store's `close` only when the manager opened the store itself, and this
+    // backend always hands its own store in, so there is nothing else to close.
     ctx.on('session/disposed', (session) => {
-      this.runtimes.delete(session.id)
+      this.retire(session.id)
     })
-    ctx.effect(() => () => { this.runtimes.clear() }, 'compaction-autobiographical.disposal')
+    ctx.effect(() => () => {
+      for (const id of [...this.runtimes.keys()]) this.retire(id)
+    }, 'compaction-autobiographical.disposal')
 
     // The session's memory settings ride the log as `compaction/config` events;
     // the projection puts the newest of them where the GUI reads it.
@@ -243,14 +278,18 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     _trigger: CompactionTrigger,
     signal: AbortSignal,
   ): Promise<CompactionResult | null> {
+    let outcome: FoldOutcome
     try {
       // No step is proposed on this entry, so the bracket is owned by whatever
       // turn the log holds open — the shape the invariant accepts — and carries
       // no step of its own.
-      return await this.foldPass(agent, { turn: openTurn(agent.session), step: 0, signal })
+      outcome = await this.foldPass(agent, { turn: openTurn(agent.session), step: 0, signal })
     } catch (error: unknown) {
       throw manualFailure(error)
     }
+    // The automatic seam answers "nothing to compact" with null whatever the
+    // reason; a refusal was reported where it arose.
+    return outcome.kind === 'landed' ? outcome.result : null
   }
 
   override async compactNow(
@@ -258,7 +297,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     signal: AbortSignal,
     _sourceCommandId?: CommandId,
   ): Promise<CompactionResult | null> {
-    let claimed: Promise<CompactionResult | null>
+    let claimed: Promise<FoldOutcome>
     try {
       // The idle reservation is what keeps a manual pass from racing a turn, and
       // a claim the agent refuses is the busy case rather than a fold failure.
@@ -270,15 +309,30 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
         // The maintenance claim ends with the idle reservation and this signal
         // with the request, so a cancellation either way has to reach the calls
         // the pass kicks.
-        signal: AbortSignal.any([maintenance, signal]),
+        signal: AbortSignal.any([signal, maintenance]),
       }))
     } catch (error: unknown) {
       throw new ManualCompactionError('busy', 'manual compaction requires an idle agent', { cause: error })
     }
+    let outcome: FoldOutcome
     try {
-      return await claimed
+      outcome = await claimed
     } catch (error: unknown) {
       throw manualFailure(error)
+    }
+    switch (outcome.kind) {
+      case 'landed': return outcome.result
+      case 'settled': return null
+      // A manual call is the one place a refusal reaches a person, so it arrives
+      // as the expected failure it is rather than as "nothing to compact".
+      case 'refused': throw new ManualCompactionError('summary', outcome.reason)
+      case 'cancelled':
+        // The seam preserves a cancelled request's exact abort reason; the other
+        // way to get here is the agent cancelling the maintenance claim.
+        if (signal.aborted) throw signal.reason
+        throw new ManualCompactionError('cancelled', 'the agent cancelled the manual compaction')
+      /* v8 ignore next -- closed-union exhaustiveness guard */
+      default: return assertNever(outcome)
     }
   }
 
@@ -308,29 +362,37 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * `compile` reads the store, and folding already happened in the form of
    * recollections the last ticks minted.
    */
-  private async foldPass(agent: CompactionAgentContext, pass: Pass): Promise<CompactionResult | null> {
-    // All three refusals are the session's to fix, not the pass's to fail: a
-    // session that has not routed has no route, one whose route advertises no
-    // window has no window, and one whose window is no larger than the reserve has
-    // no room to fold into. Opening a runtime first would turn the same state into
-    // a thrown error, so the guard comes first.
+  private async foldPass(agent: CompactionAgentContext, pass: Pass): Promise<FoldOutcome> {
+    // These refusals are the session's to fix, not the pass's to fail: a session
+    // that has not routed has no route, one whose route advertises no window has
+    // no window, and one whose window is no larger than the reserve has no room to
+    // fold into. Opening a runtime first would turn the same state into a thrown
+    // error, so the guard comes first.
     const routed = agent.session.requestContext()
-    if (routed?.contextWindow === undefined) return null
+    if (routed === undefined) return { kind: 'refused', reason: 'the session has not routed a model request yet' }
+    if (routed.contextWindow === undefined) {
+      return { kind: 'refused', reason: `the routed model ${routed.model} reports no context window` }
+    }
     const settings = sessionConfig(agent.session)
     // A session whose memory the user paused folds nothing and forms nothing:
     // the pass leaves the log and the strategy exactly as it found them, and
     // formation catches up on the first pass after the pause lifts.
-    if (settings.enabled === false) return null
+    if (settings.enabled === false) return { kind: 'refused', reason: 'memory is paused for this session' }
     const budget = this.computeBudget(routed.contextWindow, settings.operatingWindowTokens ?? undefined)
-    if (budget === undefined) return null
+    if (budget === undefined) {
+      return { kind: 'refused', reason: `reserveTokens leaves no room under a ${routed.contextWindow}-token window` }
+    }
     const runtime = await this.runtimeFor(agent, routed)
     const { session } = agent
     this.syncSurface(runtime, session)
     this.syncToolDefinitions(runtime, session)
     this.feedCalibration(runtime, session)
-    this.releaseCancelledQuarantine(runtime, session)
 
-    const reached = await compileFolds(runtime, budget, this.config.reserveTokens, (message) => { this.warn(message) })
+    const compiled = await compileFolds(runtime, budget, {
+      reserveTokens: this.config.reserveTokens,
+      window: routed.contextWindow,
+      warn: (message) => { this.warn(message) },
+    })
 
     // After the compile attempt, never before: the strategy cuts its compression
     // queue inside `select`, so a tick ahead of the first compile of a session
@@ -342,8 +404,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // A signal that is already dead is: a tick kicked under one spends its calls
     // on instant aborts, and the engine counts every one of those as a rejection
     // of the work being retried. The next live pass kicks its own tick.
-    if (pass.signal?.aborted !== true) this.kickTick(runtime, session, pass.signal)
-    if (!reached) return null
+    if (!pass.signal.aborted) this.kickTick(runtime, session, pass.signal)
+    if (compiled !== undefined) return { kind: 'refused', reason: compiled }
+    // Nothing has been written yet, so a pass whose request went away stops here
+    // with the log untouched rather than landing folds nobody is waiting for.
+    if (pass.signal.aborted) return { kind: 'cancelled' }
 
     const { resolutions, summaries } = internals(runtime.strategy)
     // Every op the picker committed lands in this pass, one bracket each: the
@@ -358,14 +423,14 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       // delta it is delta-accounted against is measured with one estimator.
       price: priceSurfaceNode,
     })
-    if (ops.length === 0) return null
+    if (ops.length === 0) return { kind: 'settled' }
     this.ctx.logger.info(
       `autobiographical compaction: folded ${ops.reduce((total, op) => total + op.shadowedSeqs.length, 0)} node(s) `
       + `into ${ops.length} recollection(s)`,
     )
     // The seam reports one result per pass, so it takes the recollection that
     // landed last; the log carries a bracket for every op either way.
-    return applyFolds(session, ops, pass.turn, pass.step, runtime.route).at(-1) as CompactionResult
+    return { kind: 'landed', result: applyFolds(session, ops, pass.turn, pass.step, runtime.route).at(-1) as CompactionResult }
   }
 
   /**
@@ -428,7 +493,7 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
    * a slow compression call delays the next tick rather than overlapping it, and
    * nothing here is ever awaited by a turn.
    */
-  private kickTick(runtime: Runtime, session: Session, signal?: AbortSignal): void {
+  private kickTick(runtime: Runtime, session: Session, signal: AbortSignal): void {
     // The calls this tick makes read the cancellation when they start, which is
     // what carries a turn abort or a cancelled `/compact` into a stream that is
     // already paying for itself.
@@ -440,52 +505,55 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     // and make every later record inherit the error. The write is a no-op unless
     // the count moved, since `appendMemory` returns before writing when no
     // recollection appeared and the attempt is still at the watermark.
-    const settle = (): void => {
-      // The session may have been disposed while the tick ran.
-      if (this.runtimes.has(session.id)) this.appendMemory(runtime, session)
-    }
     // The chain itself never rejects: the next pass chains onto it, and a
     // rejected link would silently drop every later tick.
     runtime.tickChain = runtime.tickChain.then(async () => {
+      // A tick queued behind a call that outlived its turn would start every call
+      // on a signal that already fired. It is skipped instead: the work stays
+      // queued, and the next live pass kicks a tick of its own.
+      if (retired(runtime) || runtime.cancellation.signal.aborted) return
       // Both reads happen inside the chain, which serializes ticks: the snapshot
       // is this tick's own baseline, and a failure one tick saw is never
       // attributed to the quarantine the next one wrote.
       const quarantined = new Set(runtime.strategy.getCompressionQuarantineStatus().keys)
-      runtime.transport.failed = false
+      runtime.transient.failed = false
       let failure: unknown
       try {
-        await runtime.manager.tick()
+        await driveTick(runtime)
       } catch (error: unknown) {
         failure = error
       }
-      settle()
+      // A runtime dropped while the tick ran writes nothing more: the session
+      // may have opened another one under the same id.
+      if (!retired(runtime)) this.appendMemory(runtime, session)
       if (failure !== undefined) this.warn(`memory formation failed: ${describe(failure)}`)
-      await this.releaseTransportQuarantine(runtime, quarantined)
+      await this.releaseRetryableQuarantine(runtime, quarantined)
     })
   }
 
   /**
-   * Lift a chunk quarantine the tick just wrote against a dead transport. The
-   * library's refusal ladder scores a thrown call as a `provider_error` outcome
-   * rather than letting it escape, so a chunk whose canonical call refused — or
-   * ended for any other reason — can still quarantine when every rung after it
-   * died on the connection. The record names no reason the wrapper can read, so
-   * the tell is the tick itself: a quarantine key that appeared during a tick in
-   * which a call failed on transport was written against a connection that could
-   * not answer, and releasing it costs a genuine refusal one extra ladder on the
-   * next pass — the price of keeping a connection failure from retiring a span
-   * for good.
+   * Lift a chunk quarantine the tick just wrote while a call was failing
+   * retryably. The bridge throws a retryable failure, which the library takes as
+   * transient on a chunk's first call; but its refusal ladder scores a thrown
+   * call as a `provider_error` outcome rather than letting it escape, so a chunk
+   * whose first call was refused can still quarantine when every rung after it
+   * hit a rate limit or a dead connection. The record names no reason the wrapper
+   * can read, so the tell is the tick itself: a quarantine key that appeared
+   * during a tick in which a call failed retryably was written against a provider
+   * that could not answer, and releasing it costs a genuine refusal one extra
+   * ladder on the next pass — the price of keeping a transient failure from
+   * retiring a span for good.
    */
-  private async releaseTransportQuarantine(runtime: Runtime, before: ReadonlySet<string>): Promise<void> {
-    if (!runtime.transport.failed) return
+  private async releaseRetryableQuarantine(runtime: Runtime, before: ReadonlySet<string>): Promise<void> {
+    if (!runtime.transient.failed) return
     try {
       for (const key of runtime.strategy.getCompressionQuarantineStatus().keys) {
         if (before.has(key)) continue
         await runtime.strategy.clearCompressionRefusalQuarantine(key)
-        this.warn('released a chunk quarantine written on a transport failure; the span retries on the next pass')
+        this.warn('released a chunk quarantine written during a retryable failure; the span retries on the next pass')
       }
     } catch (error: unknown) {
-      this.warn(`could not release a transport-written quarantine: ${describe(error)}`)
+      this.warn(`could not release a quarantine written during a retryable failure: ${describe(error)}`)
     }
   }
 
@@ -520,7 +588,6 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       this.warn(`refusing to record a call settled at attempt ${String(attempt)}; the counter is not a number`)
       return
     }
-    progress.usage = undefined
     const data = {
       ...runtime.strategy.getStats(),
       attempt,
@@ -539,11 +606,14 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       this.warn(`  data: ${bounded(JSON.stringify(data))}`)
       return
     }
-    // Both markers move only once the record is durable: the count is what a
-    // reopen resumes from, and the coverage is the recollection's only account of
-    // the span it stands for. A recollection marked announced by a refused record
-    // is never announced again, which loses it from the archive for good.
+    // Every marker moves only once the record is durable: the count is what a
+    // reopen resumes from, the coverage is the recollection's only account of the
+    // span it stands for, and the usage is the spend the record bills. A
+    // recollection marked announced by a refused record is never announced again,
+    // and usage cleared for one is never billed, so a refusal leaves all three for
+    // the next record to carry.
     runtime.recorded = attempt
+    progress.usage = undefined
     if (found !== undefined) runtime.known.set(found.mint.id, found.range)
   }
 
@@ -584,30 +654,6 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
   }
 
   /**
-   * Lift the quarantine a cancelled turn caused, once the chat is live again.
-   *
-   * An aborted turn spends a merge's whole attempt budget on calls that were
-   * cancelled before they answered, and the engine then keeps that run out of its
-   * queue until something clears it: the span would stay unfolded for the life of
-   * the runtime. A refusal is the opposite case — the model did answer about that
-   * ground, so retrying buys the same verdict and the record stays where it is.
-   *
-   * The trigger is the newest user message rather than a clock, because that is
-   * the chat resuming; the clear re-enqueues the run, and the tick this pass kicks
-   * is what retries it.
-   */
-  private releaseCancelledQuarantine(runtime: Runtime, session: Session): void {
-    const asked = newestAsk(session)
-    if (asked === runtime.lastAsk) return
-    runtime.lastAsk = asked
-    for (const record of runtime.strategy.getMergeQuarantineStatus().records) {
-      // Both bridge failure routes record the same reason: a stream that ended in
-      // error and one that was aborted are one thing to a turn that went away.
-      if (record.lastStopReason === 'abort') runtime.strategy.clearMergeQuarantine(record.key)
-    }
-  }
-
-  /**
    * The compile budget, or nothing when the session has not routed a model yet.
    * The reserve is the breathing room below the operating window, and the library
    * subtracts it again inside its own arithmetic as the response allowance, so the
@@ -640,13 +686,29 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     return opening
   }
 
+  /**
+   * Drop a session's runtime and retire it, so its calls are cancelled and it
+   * writes nothing more. Retiring happens once the open settles: a runtime still
+   * opening is retired the moment it exists, and a failed open has nothing to
+   * retire.
+   */
+  private retire(id: string): void {
+    const opening = this.runtimes.get(id)
+    if (opening === undefined) return
+    this.runtimes.delete(id)
+    opening.then((runtime) => { runtime.retirement.abort() }, () => {})
+  }
+
   /** Build the in-memory store, replay the log into it, then open the manager. */
   private async openRuntime(agent: CompactionAgentContext, route: RequestContext): Promise<Runtime> {
     const store = createStore()
     const seed = seedFromLog(store, agent.session)
+    // The route's retry policy is read before anything is built: a route whose
+    // provider is no longer registered cannot open, and the next pass retries.
+    const retryPolicy = this.ctx.llm.providerRetryPolicy(route.provider)
     // `autoTickOnNewMessage` stays off because replay itself appends messages:
     // left on, opening a long session would storm ticks before the first fold.
-    const strategy = new AutobiographicalStrategy({
+    const strategy = new UnshardedStrategy({
       ...this.config.strategy,
       compressionModel: route.model,
       summaryParticipant: 'assistant',
@@ -661,8 +723,11 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
     })
     const recorded = attemptFromLog(agent.session)
     const progress: Runtime['progress'] = { attempt: recorded, active: false, buffer: '', usage: undefined }
-    const cancellation: Runtime['cancellation'] = { signal: undefined }
-    const transport: Runtime['transport'] = { failed: false }
+    const retirement = new AbortController()
+    // No call runs before the first tick is kicked, which replaces this.
+    const cancellation: Runtime['cancellation'] = { signal: retirement.signal }
+    const calls: Runtime['calls'] = { started: 0 }
+    const transient: Runtime['transient'] = { failed: false }
     // No estimator is handed over: the manager's own default is density-aware
     // and its calibration reports against the wire, so a fixed-density one here
     // would only overwrite the first of those.
@@ -679,13 +744,18 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       membrane: createBridge({
         llm: this.ctx.llm,
         provider: route.provider,
+        retryPolicy,
         warn: (message) => { this.warn(message) },
         // Read per call rather than captured: the tick that makes the call runs
         // after the pass that kicked it has returned.
-        signal: () => cancellation.signal,
+        signal: () => AbortSignal.any([cancellation.signal, retirement.signal]),
+        onStart: () => { calls.started++ },
         onText: (delta, done, usage, failure) => {
-          if (failure !== undefined && isTransientFailure(failure)) transport.failed = true
-          this.captureText(agent.session, progress, delta, done, usage, failure)
+          if (failure?.retryable === true) transient.failed = true
+          // A retired runtime's call still settles, but its rows belong to a
+          // session that may already be another runtime's to write.
+          if (retirement.signal.aborted) return
+          this.captureText(agent.session, progress, delta, done, usage, failure?.text)
         },
       }),
     })
@@ -699,12 +769,13 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
       known: seed.known,
       progress,
       cancellation,
-      transport,
+      retirement,
+      calls,
+      transient,
       declaredTools: undefined,
       declaredSystem: undefined,
       recorded,
       calibrated: 0,
-      lastAsk: newestAsk(agent.session),
       tickChain: Promise.resolve(),
     }
   }
@@ -762,47 +833,95 @@ export class AutobiographicalCompactionEngine extends CompactionEngine {
 }
 
 /**
- * Compile against the budget, reporting whether the layout reached it. A
- * refusal is retried once at the size the strategy could actually reach.
+ * Whether the engine has dropped this runtime. A function rather than a property
+ * read, because the answer changes across the tick chain's awaits.
  */
-async function compileFolds(
-  runtime: Runtime,
-  budget: TokenBudget,
-  reserveTokens: number,
-  warn: (message: string) => void,
-): Promise<boolean> {
+function retired(runtime: Runtime): boolean {
+  return runtime.retirement.signal.aborted
+}
+
+/**
+ * Run one tick of memory formation, past queue items that call no model.
+ *
+ * The strategy's tick takes one item off its queue. A chunk it has quarantined
+ * returns to the front of that queue on every compile and is consumed without a
+ * call, so a single tick per pass would spend every pass on it and form nothing
+ * again. The library's own drain moves on to the next item; this does the same,
+ * stopping at the first tick that started a call, so a pass still costs at most
+ * one, and at the first tick that left the queues no shorter, which bounds the
+ * walk by their length.
+ */
+async function driveTick(runtime: Runtime): Promise<void> {
+  const queued = (): number => {
+    const { l1QueueLength, mergeQueueLength } = runtime.strategy.getProgressSnapshot()
+    return l1QueueLength + mergeQueueLength
+  }
+  for (;;) {
+    const started = runtime.calls.started
+    const before = queued()
+    await runtime.manager.tick()
+    if (runtime.calls.started !== started || queued() >= before) return
+  }
+}
+
+/** What compiling a pass's layout needs beyond the budget. */
+interface CompileOptions {
+  /** The response allowance, which the library takes out of every budget. */
+  readonly reserveTokens: number
+  /** The routed model's window, which no retry may grow the budget past. */
+  readonly window: number
+  readonly warn: (message: string) => void
+}
+
+/**
+ * Compile against the budget, which commits the picker's resolutions when the
+ * layout fits. A refusal for size is retried once at the size the strategy could
+ * actually reach, as long as that still fits the routed window.
+ *
+ * @returns undefined when a compile succeeded, or why none could.
+ */
+async function compileFolds(runtime: Runtime, budget: TokenBudget, options: CompileOptions): Promise<string | undefined> {
+  const { reserveTokens, window, warn } = options
   try {
     await runtime.manager.compile(budget)
-    return true
+    return undefined
   } catch (error: unknown) {
     if (!(error instanceof OverBudgetError)) throw error
     // The size the strategy could actually reach, converted back into a total
     // budget: `actual` is measured against the usable budget the library derived,
     // which is the total less the response allowance.
     const affordable = error.actual + reserveTokens
+    // Two refusals a bigger budget cannot fix: one whose `actual` is within its
+    // budget was not about size — the library raises its structural refusals
+    // through the same error — and one whose reachable size is past the routed
+    // window would fold to a layout the model cannot take.
+    if (error.actual <= error.budget || affordable > window) return refusal(error, warn)
     try {
       await runtime.manager.compile({ maxTokens: affordable, reserveForResponse: reserveTokens })
-      return true
+      return undefined
     } catch (retry: unknown) {
-      /* v8 ignore next -- every refusal reports an `actual` above the budget it was
-         measured against, so `affordable` is strictly larger than the budget the first
-         call already refused: a retry at that size cannot refuse for size. Anything else
-         it throws belongs to the caller. */
       if (!(retry instanceof OverBudgetError)) throw retry
-      return over(retry, warn)
+      return refusal(retry, warn)
     }
   }
 }
 
 /**
- * Report a refusal the retry could not fit and give up on the pass's folds: the
- * next step compiles again. The refusal's `actual` and `budget` are both measured
- * on the library's usable budget, so the two are comparable and neither is the
- * total the pass asked for.
+ * Report a refusal the pass gives up on: the next step compiles again. The
+ * refusal's `actual` and `budget` are both measured on the library's usable
+ * budget, so the two are comparable and neither is the total the pass asked for.
+ *
+ * @param error - the refusal; one whose `actual` is within its budget is
+ *   structural, and its message names the stage.
+ * @param warn - the console the reason is reported on.
+ * @returns the reason, for a manual pass to surface.
  */
-function over(error: OverBudgetError, warn: (message: string) => void): false {
-  warn(`folding is ${error.actual} tokens over budget ${error.budget}; folding again next step`)
-  return false
+function refusal(error: OverBudgetError, warn: (message: string) => void): string {
+  const reason = error.actual > error.budget
+    ? `folding is ${error.actual} tokens over budget ${error.budget}`
+    : `the strategy refused the layout for a structural reason (${error.message})`
+  warn(`${reason}; folding again next step`)
+  return reason
 }
 
 /**
@@ -861,11 +980,6 @@ function manualFailure(error: unknown): ManualCompactionError {
     : new ManualCompactionError('summary', describe(error), { cause: error })
 }
 
-/** The seq of the newest user message in the log, or zero when the session has none. */
-function newestAsk(session: Session): number {
-  return session.events.findLast(event => event.type === 'user/message')?.seq ?? 0
-}
-
 /** The newest assistant step that reported usage, and the seq it reported at. */
 function newestUsage(session: Session): { seq: number; usage: TokenUsage } | undefined {
   for (let index = session.events.length - 1; index >= 0; index--) {
@@ -877,21 +991,24 @@ function newestUsage(session: Session): { seq: number; usage: TokenUsage } | und
 }
 
 /**
- * The attempt count the log already recorded, read once when a runtime opens. A
+ * The highest attempt the log already names, read once when a runtime opens. A
  * replayed session resumes the counter from the log rather than from zero, so a
  * tick that finishes no call has nothing new to report and writes nothing.
+ *
+ * Live rows count as well as tick records: a call cut off by a restart or a
+ * disposal before its tick record landed has already written rows under its
+ * number, and a call that reused it would merge into that row.
  *
  * Records that do not name a count are skipped rather than read as one, because
  * a count that is not a number poisons the counter it seeds: `Math.max(0, NaN)`
  * is `NaN`, which is what every later record would then report, and a session
  * that opens on one is wedged for good. Sessions written before a record carried
- * a count hold such events, so this reads the newest count instead of folding
- * every event into a maximum.
+ * a count hold such events.
  */
 function attemptFromLog(session: Session): number {
   let attempt = 0
   for (const event of session.events) {
-    if (event.type !== 'autobio/memory') continue
+    if (event.type !== 'autobio/memory' && event.type !== 'autobio/memory-progress') continue
     const recorded = event.data.attempt as unknown
     if (typeof recorded === 'number' && Number.isFinite(recorded)) attempt = Math.max(attempt, recorded)
   }

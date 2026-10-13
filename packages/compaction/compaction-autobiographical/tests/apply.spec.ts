@@ -175,15 +175,11 @@ describe('applyFold', () => {
   it('refuses fold content the session log cannot store', () => {
     const { session, ask, answer } = live()
     const before = session.events.length
-    // The strategy keeps whatever the provider streamed and the fold replays it
-    // verbatim, so a captured carrier is the one part of a fold this package does
-    // not build. The log accepts lossless JSON only, and the refusal has to happen
-    // before the bracket opens for the same reason as the range refusals.
-    const captured = [{
-      type: 'reasoning',
-      text: 'private thinking',
-      signature: { unserializable: true, toJSON: undefined, render: () => 'x' },
-    }] as unknown as ContentBlock[]
+    // The stored response's text is the one part of a fold this package does not
+    // build: the fold lands it verbatim. The log accepts lossless JSON only, and
+    // the refusal has to happen before the bracket opens for the same reason as
+    // the range refusals.
+    const captured = [{ type: 'text', text: undefined }] as unknown as ContentBlock[]
     const held = { ...op({ startSeq: ask, endSeq: answer, shadowedSeqs: [ask, answer] }) }
 
     expect(() => applyFold(session, {

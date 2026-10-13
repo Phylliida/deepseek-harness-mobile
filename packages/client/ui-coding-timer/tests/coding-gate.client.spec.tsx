@@ -68,16 +68,30 @@ function activity(over: Partial<CodingActivitySnapshot> = {}): CodingActivitySna
 // share; stub them as never-called functions.
 const neverHook = (() => { throw new Error('gate must not read global hooks') }) as never
 
+/** A mutable activity source whose `publish` swaps the snapshot and notifies subscribers. */
+function activitySource(initial: CodingActivitySnapshot) {
+  let current = initial
+  const listeners = new Set<() => void>()
+  return {
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    getSnapshot: () => current,
+    publish(next: CodingActivitySnapshot): void {
+      current = next
+      for (const listener of listeners) listener()
+    },
+  }
+}
+
 /** Mount the cover against the given scope and activity snapshots. */
-function mount(gate: GateSnapshot, activitySnapshot: CodingActivitySnapshot) {
+function mount(gate: GateSnapshot, activitySnapshot: CodingActivitySnapshot | ReturnType<typeof activitySource>) {
   const settingsSource = { subscribe: () => () => {}, getSnapshot: () => gate }
-  const activitySource = { subscribe: () => () => {}, getSnapshot: () => activitySnapshot }
+  const source = 'publish' in activitySnapshot ? activitySnapshot : activitySource(activitySnapshot)
   const setGate = vi.fn()
   const setIdleMinutes = vi.fn()
   render(
     <CodingGate
       useSessions={neverHook} useWorkspaces={neverHook}
-      useGate={hookOf(settingsSource)} useActivity={hookOf(activitySource)}
+      useGate={hookOf(settingsSource)} useActivity={hookOf(source)}
       setGate={setGate} setIdleMinutes={setIdleMinutes} t={t}
     />,
   )
@@ -132,6 +146,18 @@ describe('CodingGate', () => {
     mount(snap(), activity({ lastLocalActivity: at(3, 18, 11, 59) }))
     expect(screen.queryByRole('dialog')).toBeNull()
     act(() => { vi.advanceTimersByTime(60_000) })
+    expect(screen.getByRole('dialog', { name: 'Coded today' })).toBeTruthy()
+  })
+
+  it('covers again one idle delay after input lifts a long-standing cover', () => {
+    const source = activitySource(activity())
+    mount(snap(), source)
+    expect(screen.getByRole('dialog', { name: 'Coded today' })).toBeTruthy()
+    // An hour under the cover, then one interaction lifts it.
+    act(() => { vi.advanceTimersByTime(60 * 60_000) })
+    act(() => { source.publish({ ...source.getSnapshot(), lastLocalActivity: Date.now() }) })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    act(() => { vi.advanceTimersByTime(2 * 60_000) })
     expect(screen.getByRole('dialog', { name: 'Coded today' })).toBeTruthy()
   })
 

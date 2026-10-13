@@ -65,6 +65,12 @@ export function CodingTimer({ wide, useGate, useActivity, setGate, setIdleMinute
     return () => { window.clearInterval(timer) }
   }, [display.live])
 
+  // While idle, `now` is the last tick, so every snapshot re-reads the
+  // clock: a new tail ahead of a stale instant could never go live.
+  useEffect(() => {
+    if (!display.live) setNow(Date.now())
+  }, [activity, display.live])
+
   const statusLabel = display.live
     ? t('status.active')
     : t('status.idle')

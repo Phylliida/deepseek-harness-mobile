@@ -28,6 +28,7 @@ import {
   sessionSearchRequestSchema,
   sessionSelectModelRequestSchema,
   sessionSelectSubagentModelRequestSchema,
+  sessionSelectUserModelRequestSchema,
   sessionSetCompactionConfigRequestSchema,
   sessionUpdateQueueRequestSchema,
 } from '../api/sessions.schema.ts'
@@ -98,6 +99,7 @@ const UNARY_ROUTES: UnaryRoutes = {
   'session.models': { schema: sessionModelsRequestSchema, invoke: (api, r) => api.sessions.models(r) },
   'session.selectModel': { schema: sessionSelectModelRequestSchema, invoke: (api, r) => api.sessions.selectModel(r) },
   'session.selectSubagentModel': { schema: sessionSelectSubagentModelRequestSchema, invoke: (api, r) => api.sessions.selectSubagentModel(r) },
+  'session.selectUserModel': { schema: sessionSelectUserModelRequestSchema, invoke: (api, r) => api.sessions.selectUserModel(r) },
   'session.rename': { schema: sessionRenameRequestSchema, invoke: (api, r) => api.sessions.rename(r) },
   'session.setCompactionConfig': { schema: sessionSetCompactionConfigRequestSchema, invoke: (api, r) => api.sessions.setCompactionConfig(r) },
   'session.fork': { schema: sessionForkRequestSchema, invoke: (api, r) => api.sessions.fork(r) },

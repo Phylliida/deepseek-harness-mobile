@@ -11,7 +11,7 @@ import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 import AutobiographicalCompactionEngine from '../src/index.ts'
-import { build, settle } from './harness.ts'
+import { build, fakeLlm, settle, summarizer } from './harness.ts'
 
 /**
  * The transcript messages the log appended to the surface, before any fold.
@@ -52,8 +52,11 @@ describe('AutobiographicalCompactionEngine', () => {
     expect(formed).toBeGreaterThan(0)
 
     // A fresh engine over the same log: no archive, no checkpoint. The pyramid
-    // has to come back from the replay, so the restart spends no model call.
-    const restarted = new AutobiographicalCompactionEngine(new Context(), {
+    // has to come back from the replay, so the restart spends no model call on
+    // the summarizer it shares with the first run.
+    const fresh = new Context()
+    fresh.provide('llm', fakeLlm(summarizer(calls)) as never)
+    const restarted = new AutobiographicalCompactionEngine(fresh, {
       operatingWindowTokens: 700,
       reserveTokens: 128,
       auto: false,

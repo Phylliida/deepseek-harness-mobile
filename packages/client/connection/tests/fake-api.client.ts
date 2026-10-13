@@ -73,6 +73,13 @@ export class FakeApiClient implements IApiClient {
         ? null
         : { provider: payload.provider, model: payload.model },
     }))
+  onSelectUserModel: (payload: { provider?: string; model?: string; prompt?: string; sessionId: SessionId })
+  => Promise<RpcResponse<{ selected: { provider: string; model: string; prompt: string } | null }>> =
+    payload => Promise.resolve(ok({
+      selected: payload.provider === undefined || payload.model === undefined || payload.prompt === undefined
+        ? null
+        : { provider: payload.provider, model: payload.model, prompt: payload.prompt },
+    }))
   onPrompt: (payload: unknown) => Promise<RpcResponse<{ accepted: true }>> = () => Promise.resolve(ok({ accepted: true as const }))
   onAttachment: (payload: unknown) => Promise<RpcResponse<{ attachment: { attachmentId: never; mediaType: 'image/png'; bytes: number; width: number; height: number }; data: string }>> =
     () => Promise.resolve(ok({ attachment: { attachmentId: 'a' as never, mediaType: 'image/png', bytes: 1, width: 1, height: 1 }, data: 'AA==' }))
@@ -125,6 +132,8 @@ export class FakeApiClient implements IApiClient {
       this.record('session.selectModel', payload, this.onSelectModel(payload)),
     selectSubagentModel: (payload: { provider?: string; model?: string; sessionId: SessionId }) =>
       this.record('session.selectSubagentModel', payload, this.onSelectSubagentModel(payload)),
+    selectUserModel: (payload: { provider?: string; model?: string; prompt?: string; sessionId: SessionId }) =>
+      this.record('session.selectUserModel', payload, this.onSelectUserModel(payload)),
     rename: (payload: unknown) => this.record('session.rename', payload, this.onRename(payload)),
     setCompactionConfig: (payload: unknown) => this.record('session.setCompactionConfig', payload, Promise.resolve(ok({ seq: 0 }))),
     fork: (payload: unknown) => this.record('session.fork', payload, this.onFork(payload)),

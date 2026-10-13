@@ -5,7 +5,11 @@
  * load the session's provider-grouped advisory directory (`session.models`)
  * and submit through `session.selectModel` via the same directory instance,
  * so the host-reported current selection is the single fact both surfaces echo
- * — a switch made in either entry is what the other shows next. Failures
+ * — a switch made in either entry is what the other shows next. The seat
+ * renders three triggers over that directory: the session model, the
+ * subagent route (`session.selectSubagentModel`), and the user-model
+ * companion (`session.selectUserModel`), whose armed value rides the
+ * host-folded `userModel` projection rather than directory state. Failures
  * ride each entry's own retry surface (popup shell error/retry; seat menu
  * inline error) without forking the state. Addressed subagent sessions expose
  * neither entry because those Agent-bound RPCs would activate persisted
@@ -19,6 +23,9 @@ import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+// Type-only: pulls the `userModel` SessionProjectionMap merge for useProjection.
+import type {} from '@deepseek-ai/dsh-user-model/client'
+import type { UserModelSelection } from '@deepseek-ai/dsh-user-model/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelDirectoryState } from './directory.ts'
 import { ModelDirectoryResolver } from './service.ts'
@@ -171,6 +178,9 @@ export function apply(ctx: ClientContext): void {
             : Promise.resolve(false),
           selectSubagent: (selection: ModelSelection | null) => available
             ? directory.selectSubagent(selection).then(() => true, () => false)
+            : Promise.resolve(false),
+          selectUserModel: (selection: UserModelSelection | null) => available
+            ? directory.selectUserModel(selection).then(() => true, () => false)
             : Promise.resolve(false),
         }
       },

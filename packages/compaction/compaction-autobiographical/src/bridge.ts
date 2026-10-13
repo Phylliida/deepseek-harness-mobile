@@ -2,36 +2,64 @@
  * The context-manager's compression calls, routed through `ctx.llm.stream()`.
  *
  * A fold is a model call, and it has to ride the harness LLM capability so
- * credentials, routing, retry and usage accounting stay with the harness
- * adapters rather than a second provider client inside the library.
+ * credentials, routing and usage accounting stay with the harness adapters
+ * rather than a second provider client inside the library.
+ *
+ * `ctx.llm.stream()` does not retry; the harness's retry plugin hooks only the
+ * agent's own failed requests. So the bridge reports a failure the way
+ * membrane's `complete()` would, and the library's own policy decides when to
+ * try again: see {@link createBridge}.
  *
  * @module @deepseek-ai/dsh-compaction-autobiographical/bridge
  */
 
+import { MembraneError } from '@animalabs/membrane'
+import type { ContentBlock as MembraneBlock, Membrane, MembraneErrorType, NormalizedRequest, NormalizedResponse } from '@animalabs/membrane'
 import { BlockAssembler, CallId, LlmError, createAssistantMessage, createMessage, createToolResultMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, LlmRuntime, Message, TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock as MembraneBlock, Membrane, NormalizedRequest, NormalizedResponse } from '@animalabs/membrane'
+import type { ContentBlock, LlmRuntime, Message, ResolvedRetryPolicy, TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
+
+/** How one compression call ended, when it did not answer. */
+export interface CallFailure {
+  /** `${code} ${message}`, the text the call's chat row reports. */
+  readonly text: string
+  /**
+   * Whether the failure is worth repeating: a cancellation, or a code the routed
+   * provider's retry policy retries. A retryable failure is thrown to the library,
+   * which keeps the work queued; any other is final.
+   */
+  readonly retryable: boolean
+}
 
 /**
- * Failure codes that mean the answer never left the wire — a dropped connection
- * or a deadline — rather than the model declining the work.
+ * The library's stop reason for each way a harness call completes. Finish kinds
+ * are merge-extensible, so any other kind — a failed call, or one a plugin adds —
+ * reads as `abort`, which the library takes for an answer it cannot use.
  */
-const TRANSIENT_FAILURE_CODES = new Set(['TRANSPORT', 'TIMEOUT'])
+const STOP_REASONS: Readonly<Partial<Record<string, NormalizedResponse['stopReason']>>> = {
+  'stop': 'end_turn',
+  'max-tokens': 'max_tokens',
+  'tool-calls': 'tool_use',
+}
 
-/**
- * Whether the failure text a call ended with names a transport failure. The text
- * is `${code} ${message}` by construction below, so the code is its first word;
- * the engine reads this to tell work a sick connection lost from work the
- * model's own verdict refused.
- */
-export function isTransientFailure(failure: string): boolean {
-  return TRANSIENT_FAILURE_CODES.has(failure.split(' ', 1)[0] as string)
+/** Harness failure codes membrane has a name for; any other code is `unknown`. */
+const MEMBRANE_ERROR_TYPES: Readonly<Record<string, MembraneErrorType>> = {
+  ABORTED: 'abort',
+  RATE_LIMIT: 'rate_limit',
+  SERVER: 'server',
+  TIMEOUT: 'timeout',
+  TRANSPORT: 'network',
 }
 
 /** What the library hands the bridge, plus the harness services the call needs. */
 export interface BridgeOptions {
   readonly llm: LlmRuntime
   readonly provider: string
+  /**
+   * The routed provider's retry policy, read when the runtime opens. It is the
+   * same classification the agent's own requests are retried under, so a code
+   * the deployment treats as transient is transient here too.
+   */
+  readonly retryPolicy: ResolvedRetryPolicy
   /** Generation budget floor; the library clamps its own request; this floors it back up. */
   readonly maxTokens?: number
   /** Participant name that maps to the assistant role (the agent's own voice). */
@@ -44,12 +72,14 @@ export interface BridgeOptions {
    * construction.
    */
   readonly signal?: () => AbortSignal | undefined
+  /** Fires once per call, before the request leaves, whether or not it answers. */
+  readonly onStart?: () => void
   /**
    * Streamed text tap for the chat's live memory-formation rows. Fires per
    * delta and once when the call ends however it ends — with the failure that
    * ended it — which is what bounds an attempt.
    */
-  readonly onText?: (delta: string, done: boolean, usage?: TokenUsage, failure?: string) => void
+  readonly onText?: (delta: string, done: boolean, usage?: TokenUsage, failure?: CallFailure) => void
 }
 
 const DEFAULT_AGENT_PARTICIPANT = 'assistant'
@@ -166,17 +196,32 @@ const PLUGIN = 'compaction-autobiographical'
  * classifier as a foreign agent trace, which is a deterministic refusal of every
  * memory-write, and there is nothing for the ladder to escalate from.
  *
- * @param options - the harness LLM runtime, the routed provider, the token floor
- *   under the library's own request size, the participant that maps to the
- *   assistant role, and the warning and streamed-text taps.
+ * A failed call is reported by whether it is worth repeating:
+ *
+ * - A retryable failure — a cancellation, or a code the provider's retry policy
+ *   retries — is thrown as a retryable `MembraneError`, which is what membrane's
+ *   `complete()` throws. The library keeps the chunk or merge queued without
+ *   counting an attempt, so a cancelled turn or a rate limit costs the work a
+ *   delay rather than a quarantine.
+ * - Any other failure is final, and is answered as an empty `abort` response the
+ *   library rejects as unusable. A thrown non-retryable error would not do: the
+ *   library rethrows a failed first L1 call without accounting, so the same chunk
+ *   would fail at the head of the queue on every pass, while an unusable answer
+ *   goes through its bounded quarantine and the queue moves past it.
+ *
+ * @param options - the harness LLM runtime, the routed provider and its retry
+ *   policy, the token floor under the library's own request size, the
+ *   participant that maps to the assistant role, and the warning, call-start and
+ *   streamed-text taps.
  * @returns a `Membrane` the library can be handed in place of a provider client.
  */
 export function createBridge(options: BridgeOptions): Membrane {
-  const { llm, provider, maxTokens, warn, onText } = options
+  const { llm, provider, retryPolicy, maxTokens, warn, onStart, onText } = options
   const agentParticipant = options.agentParticipant ?? DEFAULT_AGENT_PARTICIPANT
 
   return {
     async complete(request: NormalizedRequest): Promise<NormalizedResponse> {
+      onStart?.()
       const voice: Voice = { provider, model: request.config.model }
       const messages = request.messages.flatMap(message => toHarnessMessage(message, agentParticipant, voice))
       const assembler = new BlockAssembler()
@@ -190,7 +235,7 @@ export function createBridge(options: BridgeOptions): Membrane {
       const capped = request.config.maxTokens > 0
         ? Math.max(request.config.maxTokens, maxTokens ?? 0)
         : maxTokens
-      let failure: string | undefined
+      let ended: Ended | undefined
       try {
         for await (const chunk of llm.stream({
           provider,
@@ -210,34 +255,41 @@ export function createBridge(options: BridgeOptions): Membrane {
           assembler.push(chunk)
         }
       } catch (error: unknown) {
-        // The library classifies a thrown call as abort without the text;
-        // echo it so a quarantine is diagnosable from the console. An LlmError
-        // is echoed with its code, the same shape a finish chunk's failure
-        // takes, so the reader can classify either one.
-        failure = error instanceof LlmError ? `${error.code} ${error.message}`
-          : error instanceof Error ? error.message : String(error)
-        warn?.(`compression call threw: ${failure}`)
-        onText?.('', true, assembler.usage, failure)
-        throw error
+        // A thrown harness failure is read like a failed finish, and so is any
+        // throw once the call's signal has fired. Anything else is not a
+        // provider's answer, so it reaches the library unclassified.
+        if (error instanceof LlmError) {
+          ended = { code: error.code, message: error.message, cancelled: signal?.aborted === true, raw: error }
+        } else if (signal?.aborted === true) {
+          ended = { code: 'ABORTED', message: error instanceof Error ? error.message : String(error), cancelled: true, raw: error }
+        } else {
+          const text = error instanceof Error ? error.message : String(error)
+          warn?.(`compression call threw: ${text}`)
+          onText?.('', true, assembler.usage, { text, retryable: false })
+          throw error
+        }
+        warn?.(`compression call threw: ${ended.code} ${ended.message}`)
       }
 
       const finish = assembler.finish
-      if (finish.kind === 'error' || finish.kind === 'aborted') {
-        failure = `${finish.failure.code} ${finish.failure.message}`
-        warn?.(`compression call ended ${finish.kind}: ${failure}`)
+      if (ended === undefined && (finish.kind === 'error' || finish.kind === 'aborted')) {
+        ended = { code: finish.failure.code, message: finish.failure.message, cancelled: finish.kind === 'aborted', raw: finish.failure }
+        warn?.(`compression call ended ${finish.kind}: ${ended.code} ${ended.message}`)
+      }
+      const failure = ended === undefined ? undefined : {
+        text: `${ended.code} ${ended.message}`,
+        retryable: ended.cancelled || retries(retryPolicy, ended.code),
       }
       // The terminal tap closes the attempt either way: a call that streamed no
       // text and failed has no other record of having been made.
       onText?.('', true, assembler.usage, failure)
-      // A dead transport is not a model verdict. Returned as an `abort` stop
-      // reason it would be scored as one — the refusal ladder would spend its
-      // attempts on a connection that cannot answer, and exhaustion quarantines
-      // the span for the life of the runtime. Throw instead, and the library
-      // takes its transient path: the work stays queued and the next pass
-      // retries it. A genuine abort keeps the stop reason, because the
-      // cancelled-turn release is keyed on it.
-      if (finish.kind === 'error' && TRANSIENT_FAILURE_CODES.has(finish.failure.code)) {
-        throw new LlmError(finish.failure.message, finish.failure.code, finish.failure)
+      if (ended !== undefined && failure?.retryable === true) {
+        throw new MembraneError({
+          type: MEMBRANE_ERROR_TYPES[ended.code] ?? 'unknown',
+          message: failure.text,
+          retryable: true,
+          rawError: ended.raw,
+        })
       }
       const content = toMembraneBlocks(assembler.blocks(), messages)
       const text = content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')
@@ -246,12 +298,11 @@ export function createBridge(options: BridgeOptions): Membrane {
         rawAssistantText: text,
         toolCalls: [],
         toolResults: [],
-        stopReason: finish.kind === 'stop' ? 'end_turn'
-          : finish.kind === 'max-tokens' ? 'max_tokens'
-            : finish.kind === 'tool-calls' ? 'tool_use'
-              : 'abort',
+        stopReason: ended === undefined ? STOP_REASONS[finish.kind] ?? 'abort' : 'abort',
+        // The library reads `inputTokens` as the whole prompt it sent, while the
+        // harness reports cache reads and writes beside the uncached remainder.
         usage: {
-          inputTokens: assembler.usage?.inputTokens ?? 0,
+          inputTokens: promptTokens(assembler.usage),
           outputTokens: assembler.usage?.outputTokens ?? 0,
         },
         details: {},
@@ -259,6 +310,35 @@ export function createBridge(options: BridgeOptions): Membrane {
       } as unknown as NormalizedResponse
     },
   } as unknown as Membrane
+}
+
+/** A failed call's code and message, whether a cancellation ended it, and the failure as raised. */
+interface Ended {
+  readonly code: string
+  readonly message: string
+  readonly cancelled: boolean
+  readonly raw: unknown
+}
+
+/**
+ * Whether the provider's retry policy repeats a failure with this code.
+ * @param policy - the routed provider's resolved retry policy.
+ * @param code - the failure's harness code.
+ * @returns true for every code under an `always` policy, else for the listed codes.
+ */
+function retries(policy: ResolvedRetryPolicy, code: string): boolean {
+  return policy.mode === 'always' || policy.retryableCodes.includes(code)
+}
+
+/**
+ * The whole prompt one call sent: its uncached input plus what it read from and
+ * wrote to the provider's cache.
+ * @param usage - the call's reported usage, if any arrived.
+ * @returns the prompt size in tokens, 0 when the call reported none.
+ */
+function promptTokens(usage: TokenUsage | undefined): number {
+  if (usage === undefined) return 0
+  return usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0)
 }
 
 /**

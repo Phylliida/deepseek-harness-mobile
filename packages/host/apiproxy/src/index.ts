@@ -16,7 +16,7 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type { ApiProxy } from './api/index.ts'
-import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './api-proxy.ts'
+import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES, DEFAULT_USER_MODEL_MAX_TOKENS } from './api-proxy.ts'
 import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   type SessionLogCompressionLevel,
@@ -59,6 +59,12 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * Output-token cap for the auxiliary user-model calls that answer the
+   * agent's questions and approval requests.
+   * @default 4096
+   */
+  userModelMaxTokens?: number
 }
 
 /**
@@ -77,6 +83,7 @@ export class ApiProxyService extends Service implements ApiProxy {
     sessionExportCompressionLevel: z.number().step(1).min(0).max(9)
       .default(DEFAULT_SESSION_LOG_COMPRESSION_LEVEL) as z<SessionLogCompressionLevel>,
     coldBlankProbeMaxBytes: z.natural().default(DEFAULT_COLD_BLANK_PROBE_MAX_BYTES),
+    userModelMaxTokens: z.natural().min(1).default(DEFAULT_USER_MODEL_MAX_TOKENS),
   })
 
   readonly sessions: ApiProxy['sessions']
@@ -107,6 +114,9 @@ export class ApiProxyService extends Service implements ApiProxy {
       ...(config.coldBlankProbeMaxBytes === undefined
         ? {}
         : { coldBlankProbeMaxBytes: config.coldBlankProbeMaxBytes }),
+      ...(config.userModelMaxTokens === undefined
+        ? {}
+        : { userModelMaxTokens: config.userModelMaxTokens }),
     })
     this.sessions = api.sessions
     this.subagents = api.subagents

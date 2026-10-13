@@ -93,6 +93,9 @@
       "path": "../../interaction/user-questions"
     },
     {
+      "path": "../../user-model/user-model"
+    },
+    {
       "path": "../../workspace/workspace"
     },
     {

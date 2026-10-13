@@ -79,11 +79,11 @@ describe('CodingActivityFileLog', () => {
     await writeFile(path, JSON.stringify({
       version: 1,
       revision: 7,
-      spans: [{ start: 0, end: 0 }, { start: 600_000, end: 660_000 }],
+      spans: [{ start: 0, end: 0 }, { start: 1_800_000, end: 1_860_000 }],
     }))
     const view = await ctx.codingActivity.append({ stamps: [60_000] })
-    // The stamp bridges to the {0,0} anchor (60 s < 2 min), extending it.
-    expect(view.spans).toEqual([{ start: 0, end: 60_000 }, { start: 600_000, end: 660_000 }])
+    // The stamp bridges to the {0,0} anchor (60 s < 10 min), extending it.
+    expect(view.spans).toEqual([{ start: 0, end: 60_000 }, { start: 1_800_000, end: 1_860_000 }])
     expect(view.revision).toBe(8)
   })
 

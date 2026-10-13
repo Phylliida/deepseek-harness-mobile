@@ -322,6 +322,22 @@ export interface SessionsApi {
   Promise<RpcResponse<{ selected: ModelSelection | null }>>
 
   /**
+   * Arms or disarms the session's user-model — the second model that plays
+   * the user role toward the human-supplied goal. Provider, model, and
+   * prompt arrive together (catalog membership stays advisory); all three
+   * absent disarms the user-model. Arming appends `user-model/armed`,
+   * disarming appends `user-model/disarmed` with reason `user`.
+   * Session-backed subagents reject with `agent-busy`.
+   */
+  selectUserModel(request: RpcRequest<{
+    sessionId: SessionId
+    provider?: string
+    model?: string
+    prompt?: string
+  }>):
+  Promise<RpcResponse<{ selected: { provider: string; model: string; prompt: string } | null }>>
+
+  /**
    * Renames a session: appends a `session/title` event with the `user`
    * source, which pins the title against automatic regeneration. The
    * normalized accepted title and the title event's seq return so the caller

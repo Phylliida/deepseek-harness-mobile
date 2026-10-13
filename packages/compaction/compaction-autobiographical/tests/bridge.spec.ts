@@ -9,13 +9,14 @@
  * rather than a silent abort.
  */
 
-import { CallId, LlmError } from '@deepseek-ai/dsh-llm'
+import { CallId, LlmError, resolveRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmRuntime, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
 import type { LlmFailure } from '@deepseek-ai/dsh-llm'
+import { MembraneError } from '@animalabs/membrane'
 import type { ContentBlock as MembraneBlock, NormalizedRequest, NormalizedResponse } from '@animalabs/membrane'
 import { describe, expect, it } from 'vitest'
 import { createBridge } from '../src/bridge.ts'
-import type { BridgeOptions } from '../src/bridge.ts'
+import type { BridgeOptions, CallFailure } from '../src/bridge.ts'
 
 /** A runtime whose stream is the given script; `calls` records what it was asked. */
 function runtime(
@@ -60,11 +61,20 @@ function complete(
   const bridge = createBridge({
     llm: runtime(textChunks('recollection')),
     provider: 'test',
+    retryPolicy: resolveRetryPolicy(undefined, 'test'),
     ...options,
   })
   return (bridge as unknown as {
     complete(request: NormalizedRequest): Promise<NormalizedResponse>
   }).complete(req)
+}
+
+/** The value a call rejected with; a call that answered fails the test. */
+function rejection(call: Promise<unknown>): Promise<unknown> {
+  return call.then(
+    () => { throw new Error('expected the call to throw') },
+    (caught: unknown) => caught,
+  )
 }
 
 describe('createBridge', () => {
@@ -293,16 +303,16 @@ describe('createBridge', () => {
     it.each([
       ['max-tokens', 'max_tokens'],
       ['tool-calls', 'tool_use'],
-      ['aborted', 'abort'],
       ['error', 'abort'],
     ] as const)('reports %s as %s', async (kind, expected) => {
+      // A code the provider's retry policy does not list is final.
       const failure: LlmFailure = { code: 'test', message: 'synthetic' }
       const response = await complete(
         {
           llm: runtime([
             { type: 'block-start', index: 0, blockType: 'text' },
             { type: 'text-delta', index: 0, text: 'partial' },
-            { type: 'finish', reason: kind === 'aborted' || kind === 'error' ? { kind, failure } : { kind } },
+            { type: 'finish', reason: kind === 'error' ? { kind, failure } : { kind } },
           ]),
         },
         request(),
@@ -311,9 +321,30 @@ describe('createBridge', () => {
       expect(response.stopReason).toBe(expected)
     })
 
+    it('reports the whole prompt, cached tokens included, as the input the call sent', async () => {
+      const response = await complete({
+        llm: runtime(textChunks('recollection', { inputTokens: 100, outputTokens: 7, cacheReadTokens: 900, cacheWriteTokens: 50 })),
+      }, request())
+
+      expect(response.usage).toEqual({ inputTokens: 1050, outputTokens: 7 })
+    })
+
+    it('marks every call it starts, before the call answers', async () => {
+      const marks: string[] = []
+      await complete({
+        llm: runtime(() => {
+          marks.push('stream')
+          return textChunks('recollection')[Symbol.iterator]() as never
+        }),
+        onStart: () => marks.push('start'),
+      }, request())
+
+      expect(marks).toEqual(['start', 'stream'])
+    })
+
     it('warns when the call ends in failure', async () => {
       const warned: string[] = []
-      const tones: Array<[string, boolean, TokenUsage | undefined, string | undefined]> = []
+      const tones: Array<[string, boolean, TokenUsage | undefined, CallFailure | undefined]> = []
       await complete(
         {
           llm: runtime([
@@ -329,29 +360,97 @@ describe('createBridge', () => {
       // The terminal tone carries the failure beside the empty delta: a call that
       // wrote nothing before it failed is still a request, and this is all the
       // chat has to show for it.
-      expect(tones).toEqual([['', true, undefined, 'rate_limit slow down']])
+      expect(tones).toEqual([['', true, undefined, { text: 'rate_limit slow down', retryable: false }]])
     })
 
-    it.each(['TRANSPORT', 'TIMEOUT'])('throws a %s finish rather than reporting it as an abort', async (code) => {
-      const tones: Array<[string, boolean, string | undefined]> = []
-      const error = await complete(
+    it.each([
+      ['TRANSPORT', 'network'],
+      ['TIMEOUT', 'timeout'],
+      ['RATE_LIMIT', 'rate_limit'],
+      ['SERVER', 'server'],
+      ['EMPTY_RESPONSE', 'unknown'],
+    ] as const)('throws a %s finish as a retryable %s failure', async (code, type) => {
+      const tones: Array<[string, boolean, CallFailure | undefined]> = []
+      const error = await rejection(complete(
         {
-          llm: runtime([{ type: 'finish', reason: { kind: 'error', failure: { code, message: 'the connection dropped' } } }]),
+          llm: runtime([{ type: 'finish', reason: { kind: 'error', failure: { code, message: 'try later' } } }]),
           onText: (delta, done, _usage, failure) => tones.push([delta, done, failure]),
         },
         request(),
-      ).then(
-        () => { throw new Error('expected the call to throw') },
-        (caught: unknown) => caught,
-      )
+      ))
 
-      // A dead connection is thrown, not scored: reported as an abort the
-      // library would read it as a verdict and retire the span; thrown, the
-      // work stays queued and the next pass retries it.
-      expect(error).toBeInstanceOf(LlmError)
-      expect((error as LlmError).code).toBe(code)
+      // Thrown the way membrane throws, so the library keeps the work queued
+      // rather than scoring an empty answer and quarantining the span.
+      expect(error).toBeInstanceOf(MembraneError)
+      expect(error).toMatchObject({ type, retryable: true, message: `${code} try later` })
       // The terminal tone still fired before the throw, so the attempt has its row.
-      expect(tones).toEqual([['', true, `${code} the connection dropped`]])
+      expect(tones).toEqual([['', true, { text: `${code} try later`, retryable: true }]])
+    })
+
+    it('throws a cancelled call as a retryable abort, whatever its code', async () => {
+      const error = await rejection(complete({
+        llm: runtime([{ type: 'finish', reason: { kind: 'aborted', failure: { code: 'STREAM_CLOSED', message: 'the turn went away' } } }]),
+      }, request()))
+
+      expect(error).toMatchObject({ type: 'unknown', retryable: true, message: 'STREAM_CLOSED the turn went away' })
+    })
+
+    it('retries every code under an always policy', async () => {
+      const error = await rejection(complete({
+        llm: runtime([{ type: 'finish', reason: { kind: 'error', failure: { code: 'AUTH', message: 'bad key' } } }]),
+        retryPolicy: resolveRetryPolicy({ mode: 'always' }, 'test'),
+      }, request()))
+
+      expect(error).toMatchObject({ retryable: true })
+    })
+
+    it('reads a thrown harness failure like a failed finish', async () => {
+      const thrower = (code: string) => runtime(() => ({
+        async *[Symbol.asyncIterator](): AsyncIterator<StreamChunk> {
+          throw new LlmError('provider said no', code)
+        },
+      }))
+
+      expect(await rejection(complete({ llm: thrower('RATE_LIMIT') }, request())))
+        .toMatchObject({ type: 'rate_limit', retryable: true })
+      // A final one is answered rather than thrown, so the library's bounded
+      // rejection policy is what retires it.
+      const answered = await complete({ llm: thrower('AUTH') }, request())
+      expect(answered.stopReason).toBe('abort')
+    })
+
+    it('takes any throw after its signal fired for a cancellation', async () => {
+      const call = new AbortController()
+      const error = await rejection(complete({
+        llm: runtime(() => ({
+          async *[Symbol.asyncIterator](): AsyncIterator<StreamChunk> {
+            call.abort()
+            throw new DOMException('The operation was aborted.', 'AbortError')
+          },
+        })),
+        signal: () => call.signal,
+      }, request()))
+
+      expect(error).toMatchObject({ type: 'abort', retryable: true })
+      const bare = await rejection(complete({
+        llm: runtime(() => ({
+          async *[Symbol.asyncIterator](): AsyncIterator<StreamChunk> {
+            call.abort()
+            throw 'cancelled'
+          },
+        })),
+        signal: () => call.signal,
+      }, request()))
+      expect(bare).toMatchObject({ message: 'ABORTED cancelled', retryable: true })
+    })
+
+    it('reads a finish kind it does not know as an answer it cannot use', async () => {
+      // Finish kinds are merge-extensible; one a plugin adds has no stop reason here.
+      const response = await complete({
+        llm: runtime([{ type: 'finish', reason: { kind: 'content-filter' } } as never]),
+      }, request())
+
+      expect(response.stopReason).toBe('abort')
     })
 
     it('hands the stream the cancellation armed for the call', async () => {

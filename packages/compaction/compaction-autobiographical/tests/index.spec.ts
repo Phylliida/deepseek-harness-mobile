@@ -17,9 +17,10 @@ import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AutobiographicalCompactionEngine from '../src/index.ts'
+import { compactionConfigProjectionDefinition } from '../src/projection.ts'
 import type { ManualCompactAgentContext } from '@deepseek-ai/dsh-compaction'
 import { ManualCompactionError } from '@deepseek-ai/dsh-compaction'
-import { build, contextOf, provideTokenMeter, settle, summarizer } from './harness.ts'
+import { build, contextOf, fakeLlm, manualPass, provideTokenMeter, settle, summarizer } from './harness.ts'
 
 /** Let the fire-and-forget tick chain finish. It is never awaited by a pass. */
 async function settled(): Promise<void> {
@@ -101,23 +102,29 @@ describe('the compile budget', () => {
     expect(compile.mock.calls.at(0)?.[0]).toEqual({ maxTokens: 700, reserveForResponse: 100 })
   })
 
-  it('passes on a session whose route advertises no window', async () => {
-    // No `request/context`, so there is no window to compute a budget from. The
-    // compromise is that the route has to come from the options instead.
-    const session = Session.create(SessionId('index-no-window'))
-    const { engine } = build(0, 'index-no-window')
+  it('refuses a manual pass on a session that has not routed a model, before opening anything', async () => {
+    const session = Session.create(SessionId('index-unrouted'))
+    const { engine } = build(0, 'index-unrouted')
     const agent = asAgent(session, { provider: 'test', model: 'test-model' })
     const compile = vi.spyOn(ContextManager.prototype, 'compile')
 
-    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    // A person asked, so the reason reaches them; the automatic seam has no one
+    // to tell and answers "nothing to compact".
+    await expect(engine.compactNow(agent, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'summary', message: 'the session has not routed a model request yet' })
+    expect(await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)).toBeNull()
     expect(compile).not.toHaveBeenCalled()
+    expect(runtimes(engine).size).toBe(0)
   })
 
-  it('passes on a session that has not routed a model', async () => {
-    const session = Session.create(SessionId('index-unrouted'))
-    const { engine } = build(0, 'index-unrouted')
+  it('refuses a manual pass on a route that advertises no window', async () => {
+    const session = Session.create(SessionId('index-no-window'))
+    session.append('request/context', { provider: 'test', model: 'test-model' })
+    const { engine } = build(0, 'index-no-window')
 
-    expect(await engine.compactNow(asAgent(session, {}), new AbortController().signal)).toBeNull()
+    await expect(engine.compactNow(asAgent(session, {}), new AbortController().signal))
+      .rejects.toThrow('the routed model test-model reports no context window')
+    expect(runtimes(engine).size).toBe(0)
   })
 
   it('passes on options that name only half a route', async () => {
@@ -140,7 +147,8 @@ describe('the compile budget', () => {
     const { engine } = build(0, 'index-no-room', { reserveTokens: 64 })
     const compile = vi.spyOn(ContextManager.prototype, 'compile')
 
-    expect(await engine.compactNow(asAgent(session, {}), new AbortController().signal)).toBeNull()
+    await expect(engine.compactNow(asAgent(session, {}), new AbortController().signal))
+      .rejects.toThrow('reserveTokens leaves no room under a 64-token window')
     expect(compile).not.toHaveBeenCalled()
     // No runtime either: a refused pass leaves nothing open behind it.
     expect(runtimes(engine).size).toBe(0)
@@ -174,9 +182,11 @@ describe('the session\'s own memory settings', () => {
     session.append('compaction/config', { enabled: false })
     const compile = vi.spyOn(ContextManager.prototype, 'compile')
 
-    // The pause is the whole pass: no compile, no tick, and the log untouched.
+    // The pause is the whole pass: no compile, no tick, and the log untouched. A
+    // manual pass says why it did nothing.
     const events = session.events.length
-    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    await expect(engine.compactNow(agent, new AbortController().signal))
+      .rejects.toThrow('memory is paused for this session')
     expect(compile).not.toHaveBeenCalled()
     expect(session.events.length).toBe(events)
 
@@ -187,42 +197,81 @@ describe('the session\'s own memory settings', () => {
 })
 
 describe('compiling against a refusal', () => {
+  // The fixture budgets 700 tokens less a 128-token reserve, so a pass asks for
+  // 572 and the library measures against the usable 444.
   it('does not fold when the retry refuses too', async () => {
     const { engine, agent, session } = build(30, 'index-refuse-twice')
     // The real compile refuses on tokens the fixture planned, which would mask
     // the refusal this test is about. A pass only reads the result for truth.
     const compile = vi.spyOn(ContextManager.prototype, 'compile')
-      .mockImplementation(async (_budget) => {
-        throw overBudget(_budget?.maxTokens ?? 0, 600)
+      .mockImplementation(async (asked) => {
+        const usable = (asked?.maxTokens ?? 0) - 128
+        throw overBudget(usable, usable + 28)
       })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    // A manual pass is the one place the refusal reaches a person.
+    await expect(engine.compactNow(agent, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'summary', message: 'folding is 500 tokens over budget 472' })
     // One refusal retries at what the refusal said it needed; the second gives up.
     expect(compile).toHaveBeenCalledTimes(2)
-    expect(compile.mock.calls.at(1)?.[0]).toEqual({ maxTokens: 728, reserveForResponse: 128 })
+    expect(compile.mock.calls.at(1)?.[0]).toEqual({ maxTokens: 600, reserveForResponse: 128 })
     expect(events(session, 'compaction/start')).toEqual([])
   })
 
   it('retries at the floor a refusal reports, and warns in the refusal\'s own units', async () => {
     const { engine, agent } = build(30, 'index-refuse-floor')
     // A refusal reports its floor against the library's usable budget — the total
-    // less the response allowance — so a floor below the total is still a floor
-    // above the budget that refused, and the retry claims exactly that floor.
+    // less the response allowance — so the retry claims that floor plus the
+    // allowance.
     const compile = vi.spyOn(ContextManager.prototype, 'compile')
-      .mockImplementationOnce(async (asked) => {
-        throw overBudget((asked?.maxTokens ?? 0) - 128, 100)
-      })
-      .mockImplementationOnce(async (asked) => {
-        throw overBudget((asked?.maxTokens ?? 0) - 128, (asked?.maxTokens ?? 0) - 98)
-      })
+      .mockImplementationOnce(async () => { throw overBudget(444, 500) })
+      .mockImplementationOnce(async () => { throw overBudget(500, 530) })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
-    expect(compile.mock.calls.at(1)?.[0]).toEqual({ maxTokens: 228, reserveForResponse: 128 })
+    await expect(engine.compactNow(agent, new AbortController().signal)).rejects.toThrow(ManualCompactionError)
+    expect(compile.mock.calls.at(1)?.[0]).toEqual({ maxTokens: 628, reserveForResponse: 128 })
     // Both numbers in the warning are the refusal's own: `actual` is a
     // usable-budget figure, so it is printed against the usable budget it was
     // measured against rather than the total the pass asked for.
-    expect(warn.mock.calls.flat().join('\n')).toContain('folding is 130 tokens over budget 100')
+    expect(warn.mock.calls.flat().join('\n')).toContain('folding is 530 tokens over budget 500')
+  })
+
+  it('reports a retry that fails for another reason as the failure it is', async () => {
+    const { engine, agent } = build(30, 'index-retry-broke')
+    vi.spyOn(ContextManager.prototype, 'compile')
+      .mockImplementationOnce(async () => { throw overBudget(444, 500) })
+      .mockImplementationOnce(async () => { throw new Error('the store went away') })
+
+    await expect(engine.compactNow(agent, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'summary', message: 'the store went away' })
+  })
+
+  it('does not retry a refusal that was not about size', async () => {
+    const { engine, agent } = build(30, 'index-refuse-structural')
+    // The library raises its structural refusals through the same error, with an
+    // `actual` that is within the budget; a bigger budget cannot change them.
+    const compile = vi.spyOn(ContextManager.prototype, 'compile')
+      .mockImplementation(async () => { throw overBudget(444, 40) })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(engine.compactNow(agent, new AbortController().signal))
+      .rejects.toThrow('the strategy refused the layout for a structural reason')
+    expect(compile).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls.flat().join('\n')).not.toContain('over budget 40')
+  })
+
+  it('does not retry past the routed window', async () => {
+    const { engine, agent } = build(30, 'index-refuse-window', {}, undefined, undefined, 1000)
+    // The layout the strategy reached needs 1000 usable tokens plus the response
+    // allowance, which a 1000-token model cannot take.
+    const compile = vi.spyOn(ContextManager.prototype, 'compile')
+      .mockImplementation(async () => { throw overBudget(444, 1000) })
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    await expect(engine.compactNow(agent, new AbortController().signal))
+      .rejects.toThrow('folding is 1000 tokens over budget 444')
+    expect(compile).toHaveBeenCalledTimes(1)
   })
 
   it('reports a compile failure that is not a refusal as an expected one', async () => {
@@ -250,7 +299,8 @@ describe('compiling against a refusal', () => {
       throw overBudget(budget.maxTokens - 128, budget.maxTokens - 118)
     })
 
-    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    // The automatic seam answers "nothing to compact"; the console has the why.
+    expect(await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)).toBeNull()
     expect(warn.mock.calls.some(([line]) => String(line).includes('over budget'))).toBe(true)
   })
 })
@@ -421,6 +471,21 @@ describe('memory formation behind the pass', () => {
     expect(events(session, 'autobio/memory').at(-1)).not.toHaveProperty('data.memory')
   })
 
+  it('numbers its calls past the rows a cut-off call left', async () => {
+    const { engine, agent, session } = build(30, 'index-cut-off-call')
+    // A call that streamed rows under attempt 3 and never settled: the process
+    // ended before its tick record landed.
+    session.append('autobio/memory-progress', { attempt: 3, delta: 'half a memory' })
+
+    await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
+    await settled()
+
+    const attempts = (events(session, 'autobio/memory-progress') as { data: { attempt: number } }[])
+      .map(event => event.data.attempt)
+    expect(attempts[0]).toBe(3)
+    expect(attempts.slice(1).every(attempt => attempt > 3)).toBe(true)
+  })
+
   it('resumes the counter from the newest record that names one', async () => {
     const session = Session.create(SessionId('index-bad-attempt'))
     session.append('request/context', { provider: 'test', model: 'test-model', contextWindow: 100_000 })
@@ -435,7 +500,7 @@ describe('memory formation behind the pass', () => {
     session.append('autobio/memory', { ...stats } as never)
     session.append('autobio/memory', { ...stats, attempt: 4 })
     const ctx = new Context()
-    ctx.provide('llm', summarizer([]) as never)
+    ctx.provide('llm', fakeLlm(summarizer([])) as never)
     provideTokenMeter(ctx)
     const engine = new AutobiographicalCompactionEngine(ctx, {
       operatingWindowTokens: 700,
@@ -539,6 +604,27 @@ describe('memory formation behind the pass', () => {
     expect(data?.endsWith('…')).toBe(true)
     expect(data?.length).toBeLessThan(700)
     expect(events(session, 'autobio/memory')).toHaveLength(written)
+  })
+
+  it('bills the usage a refused record carried on the record that lands', async () => {
+    const { engine, agent, session } = build(30, 'index-refused-usage')
+    await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
+    await settled()
+    const runtime = await runtimes(engine).get(session.id) as unknown as OpenRuntime & {
+      progress: { attempt: number; usage: unknown }
+    }
+    runtime.progress.attempt = runtime.recorded + 1
+    runtime.progress.usage = { inputTokens: 70, outputTokens: 7 }
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const record = (engine as unknown as { appendMemory(r: unknown, s: unknown): void }).appendMemory.bind(engine)
+
+    const refuse = vi.spyOn(session, 'append').mockImplementation(() => { throw new Error('the log closed mid-write') })
+    record(runtime, session)
+    refuse.mockRestore()
+    record(runtime, session)
+
+    const last = events(session, 'autobio/memory').at(-1) as { data: { usage?: unknown } }
+    expect(last.data.usage).toEqual({ inputTokens: 70, outputTokens: 7 })
   })
 
   it('announces a recollection only once its record is durable', async () => {
@@ -766,6 +852,21 @@ describe('the budget a pass folds to', () => {
   })
 })
 
+describe('the session memory settings projection', () => {
+  it('registers where the GUI reads a session\'s memory settings', async () => {
+    const ctx = new Context()
+    const register = vi.fn()
+    ctx.provide('sessionProjections', { register } as never)
+    ctx.provide('llm', fakeLlm(summarizer([])) as never)
+    provideTokenMeter(ctx)
+    new AutobiographicalCompactionEngine(ctx, { auto: false })
+    // The registration waits for the service the way any injection does.
+    await settled()
+
+    expect(register).toHaveBeenCalledWith(compactionConfigProjectionDefinition)
+  })
+})
+
 describe('disposal', () => {
   it('drops the runtime its session owned', async () => {
     const { engine, agent, session } = build(30, 'index-disposed')
@@ -781,6 +882,33 @@ describe('disposal', () => {
     contextOf(engine).emit('session/disposed', session as never)
     await settled()
     expect(runtimes(engine).size).toBe(0)
+  })
+
+  it('cancels what a disposed runtime has in flight, and writes nothing after', async () => {
+    let seen: AbortSignal | undefined
+    const { engine, agent, session } = build(30, 'index-disposed-call', {}, undefined, {
+      async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+        seen = options.signal
+        const text = 'z'.repeat(1200)
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text }
+        await new Promise<void>((resolve) => { options.signal?.addEventListener('abort', () => { resolve() }, { once: true }) })
+        yield { type: 'finish', reason: { kind: 'aborted', failure: { code: 'ABORTED', message: 'disposed' } } }
+      },
+    })
+    await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
+    await settled()
+    // The call streamed enough to write a live row before it was cut off.
+    expect(events(session, 'autobio/memory-progress')).toHaveLength(1)
+    const written = session.events.length
+
+    contextOf(engine).emit('session/disposed', session as never)
+    await settled()
+
+    expect(seen?.aborted).toBe(true)
+    // The terminal flush and the tick record both belong to a runtime that no
+    // longer owns the session, so neither reaches the log.
+    expect(session.events.length).toBe(written)
   })
 
   it('keeps the runtime when an agent is disposed', async () => {
@@ -922,12 +1050,12 @@ describe('the pass and the calls behind it', () => {
       const budget = asked ?? { maxTokens: 0, reserveForResponse: 0 }
       throw overBudget(budget.maxTokens - 128, budget.maxTokens - 100)
     })
-    await engine.compactNow(agent, new AbortController().signal)
+    await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
     await settled()
     const runtime = await runtimes(engine).get(session.id)
     const tick = vi.spyOn(runtime!.strategy, 'tick')
 
-    expect(await engine.compactNow(agent, new AbortController().signal)).toBeNull()
+    expect(await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)).toBeNull()
     await settled()
 
     expect(tick).toHaveBeenCalledTimes(1)
@@ -1154,9 +1282,60 @@ describe('the pass and the calls behind it', () => {
   it('owns a manual fold by no turn at all when the log holds none open', async () => {
     const { engine, agent, session } = build(30, 'index-manual-standalone')
     // The idle agent `/compact` folds on, whose log holds no turn open either.
-    const { folds } = await settle(engine, agent, (_context, signal) => engine.compactNow(agent, signal))
+    const { folds } = await settle(engine, agent, manualPass(engine, agent))
 
     expect(folds.length).toBeGreaterThan(0)
     expect(owners(session)).toEqual(owners(session).map(() => null))
+  })
+})
+
+describe('a pass whose request went away', () => {
+  it('lands nothing and rethrows the request\'s own reason', async () => {
+    const { engine, agent, session } = build(30, 'index-cancelled-manual')
+    const request = new AbortController()
+    const reason = new Error('the user closed the tab')
+    // The request goes away while the layout compiles; what the compile commits
+    // is beside the point, since nothing after it may land.
+    vi.spyOn(ContextManager.prototype, 'compile').mockImplementation(async () => {
+      request.abort(reason)
+      return undefined as never
+    })
+
+    await expect(engine.compactNow(agent, request.signal)).rejects.toBe(reason)
+    expect(events(session, 'compaction/start')).toEqual([])
+  })
+
+  it('reports an agent cancelling the maintenance claim as a cancelled compaction', async () => {
+    const { engine, agent } = build(30, 'index-cancelled-claim')
+    const claim = new AbortController()
+    vi.spyOn(ContextManager.prototype, 'compile').mockImplementation(async () => {
+      claim.abort()
+      return undefined as never
+    })
+    const claimed = { ...agent, runMaintenance: <T>(task: (signal: AbortSignal) => Promise<T>): Promise<T> => task(claim.signal) }
+
+    await expect(engine.compactNow(claimed, new AbortController().signal))
+      .rejects.toMatchObject({ code: 'cancelled' })
+  })
+})
+
+describe('a long message', () => {
+  it('stays the one store row it is in the log', async () => {
+    // With adaptive resolution the library would shard a message this long into
+    // several rows; a fold replaces whole log events, so the runtime keeps one.
+    const { engine, agent, session } = build(30, 'index-long-message', { strategy: { recentWindowTokens: 0, targetChunkTokens: 50 } })
+    await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
+    const long = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'w'.repeat(5_000) }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' }).seq
+    await engine.compactIfNeeded(agent, 'pressure', new AbortController().signal)
+
+    const runtime = await runtimes(engine).get(session.id) as unknown as OpenRuntime & {
+      store: { getStateJson(id: string): { id: string; metadata?: { dshSeq?: number } }[] }
+    }
+    const rows = runtime.store.getStateJson('messages').filter(row => row.metadata?.dshSeq === long)
+    expect(rows).toHaveLength(1)
+    expect(runtime.seqOf.get(rows[0]?.id as string)).toBe(long)
   })
 })

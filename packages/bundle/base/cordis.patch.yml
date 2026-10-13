@@ -268,6 +268,15 @@
     - id: command-goal
       name: '@deepseek-ai/dsh-command-goal'
 
+    # The model-user companion: the domain registers the `userModel`
+    # projection; the driver replies for the armed model whenever the agent
+    # stalls, and disarms durably on failure, cap, or <task-complete/>.
+    - id: user-model
+      name: '@deepseek-ai/dsh-user-model'
+
+    - id: user-model-driver
+      name: '@deepseek-ai/dsh-user-model-driver'
+
     - id: plan-mode
       name: '@deepseek-ai/dsh-plan-mode'
       config:

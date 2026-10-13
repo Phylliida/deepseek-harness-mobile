@@ -979,6 +979,41 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 
 来源：[`packages/core/session/src/types.ts:264`](../packages/core/session/src/types.ts)
 
+### `user-model/*`
+
+<a id="user-modelarmed--log-only"></a>
+
+#### `user-model/armed` — log-only
+
+```ts persistence-catalog
+/** Log-only record of arming the user-model with a route and goal prompt. */
+'user-model/armed': UserModelArmedEventData
+```
+
+来源：[`packages/user-model/user-model/src/types.ts:107`](../packages/user-model/user-model/src/types.ts)
+
+<a id="user-modeldisarmed--log-only"></a>
+
+#### `user-model/disarmed` — log-only
+
+```ts persistence-catalog
+/** Log-only record of disarming the user-model. */
+'user-model/disarmed': UserModelDisarmedEventData
+```
+
+来源：[`packages/user-model/user-model/src/types.ts:109`](../packages/user-model/user-model/src/types.ts)
+
+<a id="user-modelrequest--log-only"></a>
+
+#### `user-model/request` — log-only
+
+```ts persistence-catalog
+/** Log-only pre-dispatch record of one auxiliary user-model request. */
+'user-model/request': UserModelRequestEventData
+```
+
+来源：[`packages/user-model/user-model/src/types.ts:111`](../packages/user-model/user-model/src/types.ts)
+
 ### `web/*`
 
 <a id="webdeepseek-search-llm-request--log-only"></a>

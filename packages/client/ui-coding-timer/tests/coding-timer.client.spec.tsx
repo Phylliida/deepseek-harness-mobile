@@ -66,17 +66,35 @@ function activitySnap(over: Partial<CodingActivitySnapshot> = {}): CodingActivit
   }
 }
 
+/** A mutable activity source whose `publish` swaps the snapshot and notifies subscribers. */
+function activitySource(initial: CodingActivitySnapshot) {
+  let current = initial
+  const listeners = new Set<() => void>()
+  return {
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } },
+    getSnapshot: () => current,
+    publish(next: CodingActivitySnapshot): void {
+      current = next
+      for (const listener of listeners) listener()
+    },
+  }
+}
+
 /** Mount the row against the given snapshots. */
-function mount(wide: boolean, gate = gateSnap(), activity = activitySnap()) {
+function mount(
+  wide: boolean,
+  gate = gateSnap(),
+  activity: CodingActivitySnapshot | ReturnType<typeof activitySource> = activitySnap(),
+) {
   const settingsSource = { subscribe: () => () => {}, getSnapshot: () => gate }
-  const activitySource = { subscribe: () => () => {}, getSnapshot: () => activity }
+  const source = 'publish' in activity ? activity : activitySource(activity)
   const setGate = vi.fn()
   const setIdleMinutes = vi.fn()
   const utils = render(
     <CodingTimer
       wide={wide}
       useSessions={neverHook} useWorkspaces={neverHook}
-      useGate={hookOf(settingsSource)} useActivity={hookOf(activitySource)}
+      useGate={hookOf(settingsSource)} useActivity={hookOf(source)}
       setGate={setGate} setIdleMinutes={setIdleMinutes} t={t}
     />,
   )
@@ -124,6 +142,27 @@ describe('CodingTimer wide row', () => {
     }))
     expect(screen.getByText('Active')).toBeTruthy()
     expect(screen.getByText('45m')).toBeTruthy()
+  })
+
+  it('goes Active again when input resumes after an idle stretch', () => {
+    const source = activitySource(activitySnap({
+      spans: [{ start: at(3, 18, 11, 55), end: at(3, 18, 11, 59, 30) }],
+      lastLocalActivity: at(3, 18, 11, 59, 30),
+    }))
+    mount(true, gateSnap(), source)
+    expect(screen.getByText('Active')).toBeTruthy()
+    act(() => { vi.advanceTimersByTime(30 * 60_000) })
+    expect(screen.getByText('Idle')).toBeTruthy()
+    // Input resumes at 12:30, an idle hour past the last clock tick.
+    act(() => { vi.advanceTimersByTime(60 * 60_000) })
+    const resumed = Date.now()
+    act(() => {
+      source.publish({ ...source.getSnapshot(), pendingStamps: [resumed], lastLocalActivity: resumed })
+    })
+    expect(screen.getByText('Active')).toBeTruthy()
+    expect(screen.getByText('0:00:00')).toBeTruthy()
+    act(() => { vi.advanceTimersByTime(5_000) })
+    expect(screen.getByText('0:00:05')).toBeTruthy()
   })
 
   it('opens the totals calendar from the info button and closes it', () => {

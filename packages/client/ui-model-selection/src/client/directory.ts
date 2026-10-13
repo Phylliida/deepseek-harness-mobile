@@ -8,6 +8,7 @@
 import type {
   IApiClient, ModelCatalogFailure, ModelProviderGroup, ModelSelection, SessionId, SessionModels,
 } from '@deepseek-ai/dsh-api-remotes/client'
+import type { UserModelSelection } from '@deepseek-ai/dsh-user-model/client'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
@@ -56,7 +57,7 @@ export class ModelDirectory {
    * @param available - whether this session may use Agent-bound model RPCs.
    */
   constructor(
-    private readonly sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel' | 'selectSubagentModel'>,
+    private readonly sessions: Pick<IApiClient['sessions'], 'models' | 'selectModel' | 'selectSubagentModel' | 'selectUserModel'>,
     private readonly sessionId: SessionId,
     private readonly available: () => boolean,
   ) {}
@@ -152,6 +153,38 @@ export class ModelDirectory {
     }
     this.store.update((s) => {
       s.subagentCurrent = result.value.selected
+      s.status = 'ready'
+      s.error = null
+    })
+  }
+
+  /**
+   * Arm or disarm the session's user-model companion (null disarms). The
+   * armed value is NOT stored here: the `userModel` projection is the live
+   * fact the user-model seat reads, so a success leaves the directory
+   * snapshot untouched apart from the status echo. Failure surfaces on the
+   * store and throws so the entry's own retry surface engages.
+   * @param selection - route plus the human's goal prompt, or null to disarm.
+   */
+  async selectUserModel(selection: UserModelSelection | null): Promise<void> {
+    this.assertAvailable()
+    const generation = ++this.generation
+    this.store.update((s) => { s.status = 'selecting'; s.error = null })
+    const { result } = await this.sessions.selectUserModel({
+      sessionId: this.sessionId,
+      ...selection === null
+        ? {}
+        : { provider: selection.provider, model: selection.model, prompt: selection.prompt },
+    })
+    if (this.disposed || generation !== this.generation) {
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+      return
+    }
+    if (!result.ok) {
+      this.store.update((s) => { s.status = 'error'; s.error = `${result.error.code}: ${result.error.message}` })
+      throw new Error(`session.selectUserModel failed: ${result.error.code}: ${result.error.message}`)
+    }
+    this.store.update((s) => {
       s.status = 'ready'
       s.error = null
     })

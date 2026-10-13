@@ -33,6 +33,16 @@ export const zh = {
   'subagent.menu.aria': '子代理模型',
   'subagent.inherit': '跟随会话模型',
   'subagent.inherit.description': '委派的子代理使用会话当前模型',
+  'usermodel.trigger.label': '用户模型',
+  'usermodel.trigger.selectAria': '选择用户模型',
+  'usermodel.trigger.aria': '选择用户模型，当前 {model}',
+  'usermodel.menu.aria': '用户模型',
+  'usermodel.goal.aria': '用户模型目标',
+  'usermodel.goal.placeholder': '描述希望智能体完成的目标…',
+  'usermodel.goal.hint': '先描述目标，再选择模型',
+  'usermodel.armed': '已启用：{model}',
+  'usermodel.disarm': '停用用户模型',
+  'usermodel.disarm.description': '停止自动回复，恢复人工操作',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -63,4 +73,14 @@ export const en = {
   'subagent.menu.aria': 'Subagent model',
   'subagent.inherit': 'Inherit session model',
   'subagent.inherit.description': 'Delegated subagents use the session’s current model',
+  'usermodel.trigger.label': 'User model',
+  'usermodel.trigger.selectAria': 'Select user model',
+  'usermodel.trigger.aria': 'Select user model, current {model}',
+  'usermodel.menu.aria': 'User model',
+  'usermodel.goal.aria': 'User model goal',
+  'usermodel.goal.placeholder': 'Describe what the agent should accomplish…',
+  'usermodel.goal.hint': 'Describe the goal, then pick a model',
+  'usermodel.armed': 'Armed: {model}',
+  'usermodel.disarm': 'Disarm user model',
+  'usermodel.disarm.description': 'Stop automated replies; the human takes over',
 } satisfies Record<ModelKey, string>
