@@ -45,9 +45,12 @@ export function CodingTimer({ wide, useGate, useActivity, setGate, setIdleMinute
   const idleMinutes = useGate(idleMinutesOf)
   const writable = useGate(s => s.writable)
   const activity = useActivity(s => s)
-  const [now, setNow] = useState(() => Date.now())
+  const [tick, setTick] = useState(() => Date.now())
   const [statsOpen, setStatsOpen] = useState(false)
 
+  // The render instant is the last clock tick, never behind this tab's newest
+  // input, so input returning from idle reads the current day at once.
+  const now = Math.max(tick, activity.lastLocalActivity)
   const display = displaySpans(activity, now)
   const todayStart = dayStart(now)
   const todayTotal = sumRangeMs(display.spans, todayStart, addDays(todayStart, 1))
@@ -61,14 +64,15 @@ export function CodingTimer({ wide, useGate, useActivity, setGate, setIdleMinute
   // mover (a new interaction or another device's write), so no timer runs.
   useEffect(() => {
     if (!display.live) return
-    const timer = window.setInterval(() => { setNow(Date.now()) }, 1000)
+    const timer = window.setInterval(() => { setTick(Date.now()) }, 1000)
     return () => { window.clearInterval(timer) }
   }, [display.live])
 
-  // While idle, `now` is the last tick, so every snapshot re-reads the
-  // clock: a new tail ahead of a stale instant could never go live.
+  // While idle, the tick holds the instant the run went idle, so every
+  // snapshot re-reads the clock: another device's write counts against the
+  // current day, not the day of that tick.
   useEffect(() => {
-    if (!display.live) setNow(Date.now())
+    if (!display.live) setTick(Date.now())
   }, [activity, display.live])
 
   const statusLabel = display.live

@@ -1,8 +1,9 @@
 /**
  * displaySpans projection spec: pending stamps fold through the canonical
  * bridge merge, a render instant inside the tail's bridge window extends the
- * live tail, one past it does not, and a clock-skewed instant before the tail
- * leaves the span alone.
+ * live tail, one past it does not, and an instant before the tail (a stamp
+ * newer than the last clock tick, or a device clock running ahead) reads live
+ * without moving the tail's end.
  */
 import { describe, expect, it } from 'vitest'
 import { displaySpans } from '../src/client/bridging.ts'
@@ -38,9 +39,9 @@ describe('displaySpans', () => {
     expect(d).toEqual({ spans: [], live: false })
   })
 
-  it('leaves the tail alone when now precedes it (clock skew)', () => {
+  it('reads a tail ahead of the render instant as live and keeps its end', () => {
     const d = displaySpans({ spans: [{ start: 0, end: M }], pendingStamps: [] }, M - 1)
-    expect(d.live).toBe(false)
+    expect(d.live).toBe(true)
     expect(d.spans).toEqual([{ start: 0, end: M }])
   })
 })

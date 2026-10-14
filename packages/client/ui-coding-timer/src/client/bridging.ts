@@ -15,11 +15,12 @@ export interface DisplayActivity {
   /**
    * Spans for totals: the canonical server spans, pending stamps folded in,
    * and a live tail extended to now while the render instant sits inside the
-   * bridge window of the last interaction (any device). A broken clock skew —
-   * now behind the tail — leaves the span alone.
+   * bridge window of the last interaction (any device). A tail ending after
+   * the render instant (a stamp newer than the last clock tick, or a device
+   * clock running ahead) keeps its own end.
    */
   spans: CodingSpanView[]
-  /** Whether the user is interacting within the bridge window right now. */
+  /** Whether the last interaction (any device) is less than one bridge width before the render instant, or after it. */
   live: boolean
 }
 
@@ -35,9 +36,9 @@ export function displaySpans(snapshot: Pick<CodingActivitySnapshot, 'spans' | 'p
     ...snapshot.pendingStamps.map(stamp => ({ start: stamp, end: stamp })),
   ])
   const tail = merged[merged.length - 1]
-  const live = tail !== undefined && now >= tail.end && now - tail.end < CODING_ACTIVITY_BRIDGE_MS
+  const live = tail !== undefined && now - tail.end < CODING_ACTIVITY_BRIDGE_MS
   if (!live || tail === undefined) return { spans: merged, live: false }
   const extended = merged.slice()
-  extended[extended.length - 1] = { start: tail.start, end: now }
+  extended[extended.length - 1] = { start: tail.start, end: Math.max(tail.end, now) }
   return { spans: extended, live: true }
 }

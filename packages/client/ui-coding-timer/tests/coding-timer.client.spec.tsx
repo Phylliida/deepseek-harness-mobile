@@ -165,6 +165,44 @@ describe('CodingTimer wide row', () => {
     expect(screen.getByText('0:00:05')).toBeTruthy()
   })
 
+  it('stays Active without an Idle frame while input lands between clock ticks', () => {
+    const source = activitySource(activitySnap({
+      spans: [{ start: at(3, 18, 11, 55), end: at(3, 18, 11, 59, 30) }],
+      lastLocalActivity: at(3, 18, 11, 59, 30),
+    }))
+    const { container } = mount(true, gateSnap(), source)
+    const observer = new MutationObserver(() => {})
+    observer.observe(container, { subtree: true, characterData: true, characterDataOldValue: true })
+    // Half a second past the last tick, so the stamp is newer than the tick.
+    act(() => { vi.advanceTimersByTime(500) })
+    const stamped = Date.now()
+    act(() => {
+      source.publish({ ...source.getSnapshot(), pendingStamps: [stamped], lastLocalActivity: stamped })
+    })
+    const replaced = observer.takeRecords().map(record => record.oldValue)
+    observer.disconnect()
+    expect(replaced).not.toContain('Idle')
+    expect(screen.getByText('Active')).toBeTruthy()
+  })
+
+  it('counts input resumed the next morning against the new day', () => {
+    const source = activitySource(activitySnap({
+      spans: [{ start: at(3, 18, 11, 15), end: at(3, 18, 11, 59, 30) }],
+      lastLocalActivity: at(3, 18, 11, 59, 30),
+    }))
+    mount(true, gateSnap(), source)
+    act(() => { vi.advanceTimersByTime(30 * 60_000) })
+    expect(screen.getByText('Idle')).toBeTruthy()
+    expect(screen.getByText('44m')).toBeTruthy()
+    vi.setSystemTime(at(3, 19, 8))
+    const resumed = Date.now()
+    act(() => {
+      source.publish({ ...source.getSnapshot(), pendingStamps: [resumed], lastLocalActivity: resumed })
+    })
+    expect(screen.getByText('Active')).toBeTruthy()
+    expect(screen.getByText('0m')).toBeTruthy()
+  })
+
   it('opens the totals calendar from the info button and closes it', () => {
     mount(true)
     fireEvent.click(screen.getByRole('button', { name: 'Coding time stats' }))
